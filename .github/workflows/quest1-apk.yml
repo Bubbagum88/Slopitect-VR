@@ -40,7 +40,9 @@ jobs:
         if: steps.cache.outputs.cache-hit != 'true'
         run: |
           set -euo pipefail
-          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;${WHISPER_NDK}" > /dev/null
+          # yes is cut off (SIGPIPE) once sdkmanager is done; that isn't a failure.
+          (yes || true) | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;${WHISPER_NDK}" > /dev/null
+          test -d "$ANDROID_HOME/ndk/${WHISPER_NDK}" || { echo "::error::NDK ${WHISPER_NDK} did not install"; exit 1; }
           pip install scons
           cd godot-whisper
           scons platform=android arch=arm64 target=template_release -j"$(nproc)"
