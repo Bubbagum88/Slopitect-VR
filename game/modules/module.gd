@@ -6,6 +6,7 @@ extends Node3D
 #   world   the World node, where the things you build live
 #   camera  the headset camera
 #   left, right  the controllers
+#   modules the loader, whose module(name) finds another loaded module
 # then calls setup(). setup() returns "" when the module is ready, or what
 # went wrong; a module that fails is logged and skipped, never half-loaded.
 

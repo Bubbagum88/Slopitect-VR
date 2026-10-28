@@ -23,6 +23,11 @@ var _clients: Array[StreamPeerTCP] = []
 var _buffers := {}  # StreamPeerTCP -> PackedByteArray of a partly received line
 var _commands := {}  # cmd -> {"module": String, "call": Callable, "summary": String}
 
+# While the agent's tool calls run, every command (including ones a tool runs
+# in turn, like a menu button's action) must pass the agent's guard.
+var agent_guard: Callable
+var _agent_depth := 0
+
 
 func _ready() -> void:
 	var err := _server.listen(PORT, BIND_ADDRESS)
@@ -70,18 +75,33 @@ func _process(_delta: float) -> void:
 
 
 func _reply(peer: StreamPeerTCP, reply: Dictionary) -> void:
+	# A command that waits for the person (a Yes in the headset) answers when
+	# they do; the connection stays open until then.
+	if reply.get("wait") is SlopitectPending:
+		var pending: SlopitectPending = reply["wait"]
+		if not pending.finished:
+			await pending.done
+		if peer.get_status() != StreamPeerTCP.STATUS_CONNECTED:
+			return
+		reply = pending.result
 	peer.put_data((JSON.stringify(reply) + "\n").to_utf8_buffer())
 
 
 # Parses one line, runs it and returns the reply. Public so tests can call it
 # without a socket.
 func handle_line(line: String) -> Dictionary:
+	# A line that isn't valid JSON is logged as it came, so hide anything that
+	# looks like a key in it first.
+	var key_pattern := RegEx.create_from_string("(\\w*_key\\W*)[^,}\\s]*")
+	var raw := line
+	line = key_pattern.sub(line, "$1(hidden)", true)
 	var json := JSON.new()
-	if json.parse(line) != OK:
+	if json.parse(raw) != OK:
 		return _log_result(line, {"ok": false, "error": "not valid JSON: %s" % json.get_error_message()})
 	if typeof(json.data) != TYPE_DICTIONARY:
 		return _log_result(line, {"ok": false, "error": "expected a JSON object like {\"cmd\": \"list\"}"})
 	var request: Dictionary = json.data
+	line = JSON.stringify(_redacted(request))
 	var reply := run(request)
 	if request.has("id"):
 		var id = request["id"]
@@ -89,7 +109,29 @@ func handle_line(line: String) -> Dictionary:
 		if typeof(id) == TYPE_FLOAT and id == floorf(id) and absf(id) < 1e15:
 			id = int(id)
 		reply["id"] = id
+	if reply.get("wait") is SlopitectPending:
+		print("Slopitect cmd: ", line, " -> waiting (for the person in the headset, or for a long job)")
+		var has_id := request.has("id")
+		var id = reply.get("id")
+		reply["wait"] = (reply["wait"] as SlopitectPending).then(func(final: Dictionary):
+			if has_id:
+				final["id"] = id
+			return _log_result(line, final))
+		return reply
 	return _log_result(line, reply)
+
+
+# A copy with every key ("api_key", "stt_key", any "..._key") hidden, so
+# keys never reach the log.
+func _redacted(value: Variant) -> Variant:
+	if typeof(value) == TYPE_DICTIONARY:
+		var copy := {}
+		for key in value:
+			copy[key] = "(hidden)" if String(key).ends_with("_key") else _redacted(value[key])
+		return copy
+	if typeof(value) == TYPE_ARRAY:
+		return value.map(_redacted)
+	return value
 
 
 func _log_result(line: String, reply: Dictionary) -> Dictionary:
@@ -101,6 +143,14 @@ func _log_result(line: String, reply: Dictionary) -> Dictionary:
 
 
 # --- The command registry ---------------------------------------------------
+
+# Runs a command for the agent: it and everything it runs must pass the guard.
+func run_for_agent(request: Dictionary) -> Dictionary:
+	_agent_depth += 1
+	var reply := run(request)
+	_agent_depth -= 1
+	return reply
+
 
 func register(module: String, cmd: String, call: Callable, summary: String) -> String:
 	if cmd in ["ping", "help", "modules"]:
@@ -115,6 +165,19 @@ func unregister_module(module: String) -> void:
 	for cmd in _commands.keys():
 		if _commands[cmd]["module"] == module:
 			_commands.erase(cmd)
+
+
+# Every registered command: {cmd: {"module": String, "summary": String}}.
+func describe_commands() -> Dictionary:
+	var described := {}
+	for name in _commands:
+		described[name] = {"module": _commands[name]["module"], "summary": _commands[name]["summary"]}
+	return described
+
+
+# The module a command belongs to, or "" for a built-in or unknown one.
+func module_of(cmd: String) -> String:
+	return _commands[cmd]["module"] if _commands.has(cmd) else ""
 
 
 func commands() -> PackedStringArray:
@@ -139,6 +202,8 @@ func run(request: Dictionary) -> Dictionary:
 			return {"ok": true, "modules": get_node("../Modules").describe()}
 	if not _commands.has(cmd):
 		return {"ok": false, "error": "unknown cmd \"%s\" (one of: %s)" % [cmd, ", ".join(commands())]}
+	if _agent_depth > 0 and (not agent_guard.is_valid() or not agent_guard.call(cmd)):
+		return {"ok": false, "error": "the agent is not allowed to use \"%s\"" % cmd}
 	var reply = _commands[cmd]["call"].call(request)
 	if typeof(reply) != TYPE_DICTIONARY or not reply.has("ok"):
 		return {"ok": false, "error": "module \"%s\" gave no proper reply to \"%s\"" % [_commands[cmd]["module"], cmd]}

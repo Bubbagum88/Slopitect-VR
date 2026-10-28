@@ -80,11 +80,16 @@ jobs:
           aapt2="$tools/aapt2"
           "$aapt2" dump xmltree --file AndroidManifest.xml "$apk" > manifest.txt
           echo "--- manifest lines that matter on a Quest 1 ---"
-          grep -n -A2 -E "supportedDevices|minSdkVersion|targetSdkVersion|horizonos|debuggable" manifest.txt || true
+          grep -n -A2 -E "supportedDevices|minSdkVersion|targetSdkVersion|horizonos|debuggable|requestLegacyExternalStorage" manifest.txt || true
           fail=0
           devices=$(grep -A1 'com.oculus.supportedDevices' manifest.txt | grep -o '"[^"]*"' | tail -1 | tr -d '"')
           echo "supportedDevices = $devices"
           [ "$devices" = "quest|quest2" ] || { echo "::error::supportedDevices is '$devices', expected 'quest|quest2' (anything else aborts on the Quest 1)"; fail=1; }
+          # Permissions declared now so later features don't need a new APK;
+          # each is only asked for when a feature first needs it.
+          for perm in INTERNET RECORD_AUDIO READ_EXTERNAL_STORAGE WRITE_EXTERNAL_STORAGE MANAGE_EXTERNAL_STORAGE; do
+            grep -q "android.permission.$perm\"" manifest.txt && echo "has permission $perm" || { echo "::error::missing permission $perm"; fail=1; }
+          done
           for lib in lib/arm64-v8a/libgodot_android.so lib/arm64-v8a/libgodotopenxrvendors.so; do
             unzip -l "$apk" "$lib" > /dev/null && echo "has $lib" || { echo "::error::missing $lib"; fail=1; }
           done
