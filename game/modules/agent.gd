@@ -37,7 +37,7 @@ const DEFAULTS := {
 	# The agent's firewall: the only commands it may use. A name ending in *
 	# allows every command starting with it. A new module's commands are off
 	# for the agent until they're added here.
-	"allowed_tools": ["list", "spawn", "move", "color", "delete", "menu_*", "modules"],
+	"allowed_tools": ["list", "spawn", "move", "color", "delete", "menu_*", "modules", "avatar_*"],
 }
 
 const SYSTEM_PROMPT := """You are the AI agent inside Slopitect, a VR sandbox running on an Oculus Quest 1. The person you work with is standing in the world wearing the headset, and you build it with them, live.

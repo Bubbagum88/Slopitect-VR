@@ -28,6 +28,12 @@ Working now:
   press Y to open a terminal-style window that shows each step the agent
   takes and a summary of its thinking, with a keyboard, Send and STOP.
 
+- **The agent's avatar** *(built, waiting on a headset test)*: a little red
+  cube with a face and floating sphere hands. It bobs, blinks, faces you,
+  thinks while the agent works and shows replies in a speech bubble. It has
+  outfits (top hat, party hat, crown, headphones, bow tie), and new ones can
+  be made from simple shapes while the app runs.
+
 What you can change live, what needs a new APK, and how the agent is kept
 safe: [docs/LIVE-CHANGES-AND-SAFETY.md](docs/LIVE-CHANGES-AND-SAFETY.md).
 
@@ -141,6 +147,12 @@ connects your PC's port 7777 to the app (again after each reconnect).
 | `agent_config` | any of `provider`, `model`, `base_url`, `api_key`, `effort`, `max_tokens`, `max_tokens_field`, `max_tool_rounds`, `fallbacks`, `show_thinking`, `allowed_tools` | `{"cmd":"agent_config"}` shows them |
 | `agent_skills` | | `{"cmd":"agent_skills"}` |
 | `chat_show` | `visible` | `{"cmd":"chat_show","visible":true}` |
+| `avatar_move` | `position` | `{"cmd":"avatar_move","position":[0,1.4,-1]}` |
+| `avatar_say` | `text` | `{"cmd":"avatar_say","text":"Hi!"}` |
+| `avatar_state` | `state` (idle, thinking, talking, happy, wave) | `{"cmd":"avatar_state","state":"wave"}` |
+| `avatar_outfit` | `name` | `{"cmd":"avatar_outfit","name":"top_hat"}` |
+| `avatar_outfits` | | `{"cmd":"avatar_outfits"}` |
+| `avatar_outfit_add` | `name`, `parts` (up to 12 of `shape`, `size`, `position`, optional `rotation`, `color`) | `{"cmd":"avatar_outfit_add","name":"wizard","parts":[{"shape":"cone","size":[0.18,0.25,0.18],"position":[0,0.23,0],"color":"purple"}]}` |
 
 In the headset, press the left controller's menu button (≡) to show or hide
 the bar, point with the right controller and pull the trigger to press a
@@ -209,6 +221,7 @@ registering the plugin first.)
 | `game/modules/menu.gd` | The universal menu (bar and wrist panel) |
 | `game/modules/agent.gd` | The AI agent: settings, firewall, tool loop |
 | `game/modules/chat.gd` | The chat window and keyboard in the headset |
+| `game/modules/avatar.gd` | The agent's avatar, its animations and outfits |
 | `game/agent/providers/` | One file per kind of AI service (`anthropic.gd`, `openai.gd`) |
 | `game/skills/` | The agent's shipped skills, one `SKILL.md` per folder |
 | `docs/LIVE-CHANGES-AND-SAFETY.md` | What changes live, what needs a new APK, and the safety rules |
