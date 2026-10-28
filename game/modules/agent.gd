@@ -421,6 +421,8 @@ func _check_setting(key: String, value: Variant) -> Array:
 				return ["\"%s\" can't be empty" % key, null]
 			if key == "base_url" and not (value.begins_with("https://") or value.begins_with("http://")):
 				return ["\"base_url\" must start with https:// or http://", null]
+			if key == "api_key" and not value.is_empty() and value.strip_edges().is_empty():
+				return ["\"api_key\" is only blank or invisible characters (a paste that didn't work?); nothing was changed", null]
 			if key == "effort" and not value in ["", "low", "medium", "high", "xhigh", "max"]:
 				return ["\"effort\" must be low, medium, high, xhigh, max, or \"\" to not send it", null]
 			return ["", value.strip_edges()]

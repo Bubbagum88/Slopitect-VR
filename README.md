@@ -198,7 +198,7 @@ Files, questions, voice and live code:
 | `confirm_status` | | the questions waiting for your answer in the headset |
 | `voice_say` | `text`, optional `voice` | `{"cmd":"voice_say","text":"Hello!"}` |
 | `voice_stop`, `voice_voices`, `voice_status` | | |
-| `voice_config` | any of `speak_replies`, `voice`, `rate`, `pitch`, `volume`, `stt_url`, `stt_key`, `stt_model`, `stt_language`, `send_to_agent` | PC only, see below |
+| `voice_config` | any of `speak_replies`, `voice`, `rate`, `pitch`, `volume`, `stt_engine`, `stt_local_model`, `stt_url`, `stt_key`, `stt_model`, `stt_language`, `send_to_agent` | PC only, see below |
 | `code_list` | | the live modules and their state |
 | `code_load` | `name` | loads `modules/NAME.gd` from the Slopitect folder after your Yes |
 | `code_unload`, `code_forget` | `name` | take one out; withdraw its Yes |
@@ -235,9 +235,31 @@ and no button can run them.
 ### Voice
 
 The agent's replies are read aloud by the headset's speech engine, if it
-has one (`voice_status` shows how many voices it found). Hold-to-talk needs
-a speech-to-text service; until you set one, nothing you say leaves the
-headset. For OpenAI's (paid), with its key in a text file:
+has one (`voice_status` shows how many voices it found). If it has none,
+a speech engine app has to be installed on the headset (for example
+[SherpaTTS](https://f-droid.org/en/packages/org.woheller69.ttsengine/),
+not yet tried on a Quest 1).
+
+Hold-to-talk turns what you say into text in one of two ways.
+
+**On the headset** (nothing you say leaves it): whisper.cpp, through
+[godot-whisper](https://github.com/appsinacup/godot-whisper), built into
+the APK. It needs a model file in the Slopitect folder. Download
+[ggml-tiny.en.bin](https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin)
+(about 78 MB, English) on the PC, then:
+
+```
+.\adb shell mkdir -p /sdcard/Slopitect/models
+.\adb push "C:\path\to\ggml-tiny.en.bin" /sdcard/Slopitect/models/
+.\slopi.ps1 '{"cmd":"voice_config","stt_engine":"local"}'
+```
+
+A bigger model (`ggml-base.en.bin`, about 148 MB) hears better and takes
+longer; set `stt_local_model` to its name. How fast it is on the Quest 1
+isn't measured yet: each try logs how long it took.
+
+**Through a service** (`stt_engine` `"web"`, the default; off until you set
+one). For OpenAI's (paid), with its key in a text file:
 
 ```
 .\slopi.ps1 (@{cmd="voice_config"; stt_url="https://api.openai.com/v1/audio/transcriptions"; stt_key=(Get-Content "C:\path\to\openai key.txt" -Raw).Trim()} | ConvertTo-Json -Compress)
@@ -322,6 +344,7 @@ registering the plugin first.)
 
 - [Godot Engine](https://godotengine.org), MIT licence
 - [Godot OpenXR Vendors](https://github.com/GodotVR/godot_openxr_vendors), MIT licence
+- [godot-whisper](https://github.com/appsinacup/godot-whisper) and [whisper.cpp](https://github.com/ggml-org/whisper.cpp), MIT licence (on-headset speech to text)
 - Made by Bubbagum88 with Claude
 
 ## Licence

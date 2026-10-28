@@ -1,0 +1,16 @@
+; godot-whisper (MIT, https://github.com/appsinacup/godot-whisper): whisper.cpp
+; speech to text, for voice.gd's on-headset engine. The libraries are built by
+; CI from a pinned commit (see .github/workflows/quest1-apk.yml), not kept in
+; the repo. Only the Quest (Android arm64) and a Linux PC for testing.
+
+[configuration]
+
+entry_symbol = "godot_whisper_library_init"
+compatibility_minimum = 4.2
+
+[libraries]
+
+android.debug.arm64 = "bin/libgodot_whisper.android.template_release.arm64.so"
+android.release.arm64 = "bin/libgodot_whisper.android.template_release.arm64.so"
+linux.debug.x86_64 = "bin/libgodot_whisper.linux.template_release.x86_64.so"
+linux.release.x86_64 = "bin/libgodot_whisper.linux.template_release.x86_64.so"

@@ -13,9 +13,48 @@ env:
   TEMPLATES_SHA512: ca4d71c4d7b81dfc15d1a98baa07534aa95b03fdda78a0075b06672e1648d2e5f40980c9adc28d23e1b92e732ee7bf3461997aa804af74ec2fcd7a93ccb84079
   VENDORS_VERSION: 5.1.0-stable
   VENDORS_SHA512: 2e60b98306c6bf6e8dd1bef28bf6393f00dd5c2d1c6ad764c3572d235b1bef3de7d0efda2452fe238a0988657b2a346e39fdf59f4f8d4d3b5206b8cd95090945
+  # godot-whisper (MIT): on-headset speech to text. Built from this commit
+  # (whisper.cpp v1.8.4 as its submodule), with the NDK its godot-cpp asks for.
+  WHISPER_COMMIT: e490cbbb74b0f79abc787b34970f18dc15b258f3
+  WHISPER_NDK: 23.2.8568313
 
 jobs:
+  whisper:
+    runs-on: ubuntu-24.04
+    steps:
+      - id: cache
+        uses: actions/cache@v4
+        with:
+          path: whisper-out
+          key: godot-whisper-${{ env.WHISPER_COMMIT }}-android-arm64-ndk${{ env.WHISPER_NDK }}
+
+      - if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: appsinacup/godot-whisper
+          ref: ${{ env.WHISPER_COMMIT }}
+          path: godot-whisper
+          submodules: true
+
+      - name: Build godot-whisper for the Quest (Android arm64)
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;${WHISPER_NDK}" > /dev/null
+          pip install scons
+          cd godot-whisper
+          scons platform=android arch=arm64 target=template_release -j"$(nproc)"
+          mkdir -p ../whisper-out/bin
+          cp bin/addons/godot_whisper/bin/libgodot_whisper.android.template_release.arm64.so ../whisper-out/bin/
+          cp LICENSE THIRDPARTY.txt ../whisper-out/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: godot-whisper-android-arm64
+          path: whisper-out
+
   build:
+    needs: whisper
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -46,6 +85,11 @@ jobs:
           mkdir -p game/addons
           mv asset/addons/godotopenxrvendors game/addons/
 
+      - uses: actions/download-artifact@v4
+        with:
+          name: godot-whisper-android-arm64
+          path: game/addons/godot_whisper
+
       - name: Import the project
         run: |
           set -euo pipefail
@@ -55,7 +99,8 @@ jobs:
           # 5.1.0). Listed up front, it loads at start-up as it does on every
           # later open of the project, and the import exits cleanly.
           mkdir -p game/.godot
-          echo "res://addons/godotopenxrvendors/plugin.gdextension" > game/.godot/extension_list.cfg
+          printf '%s\n' res://addons/godotopenxrvendors/plugin.gdextension \
+            res://addons/godot_whisper/godot_whisper.gdextension > game/.godot/extension_list.cfg
           ./godot --headless --path game --import
 
       - name: Export the APK
@@ -90,7 +135,7 @@ jobs:
           for perm in INTERNET RECORD_AUDIO READ_EXTERNAL_STORAGE WRITE_EXTERNAL_STORAGE MANAGE_EXTERNAL_STORAGE; do
             grep -q "android.permission.$perm\"" manifest.txt && echo "has permission $perm" || { echo "::error::missing permission $perm"; fail=1; }
           done
-          for lib in lib/arm64-v8a/libgodot_android.so lib/arm64-v8a/libgodotopenxrvendors.so; do
+          for lib in lib/arm64-v8a/libgodot_android.so lib/arm64-v8a/libgodotopenxrvendors.so lib/arm64-v8a/libgodot_whisper.android.template_release.arm64.so; do
             unzip -l "$apk" "$lib" > /dev/null && echo "has $lib" || { echo "::error::missing $lib"; fail=1; }
           done
           # Signed with ci/debug.keystore, so it installs over earlier builds.
