@@ -78,6 +78,15 @@ var _waiting_on: SlopitectPending  # a tool waiting for the person's answer
 var _context_tokens := 0  # the size of the last prompt sent: the conversation so far
 var _ask_tokens := {"input": 0, "output": 0, "cached": 0}  # the current (or last) question
 var _total_tokens := {"input": 0, "output": 0, "cached": 0}  # since the app started
+# A conversation keeps the tools and instructions it started with: Claude
+# refuses a conversation whose tool list changed partway (its earlier
+# thinking is tied to that list). New tools, like a live module's, are used
+# from a new conversation, which the agent can start with new_conversation.
+var _conv_tools: Array = []
+var _conv_system := ""
+var _announced := {}  # new tools the agent has been told about, this conversation
+var _restart_note = null  # new_conversation's note, until the next round starts it
+var _last_prompt := ""  # the person's last message, carried into a new conversation
 
 signal _reply_ready(result: Array)
 
@@ -123,14 +132,15 @@ func _ask(request: Dictionary) -> Dictionary:
 	# (the world itself stays; the agent can look at it again with list).
 	if _context_tokens > int(settings["max_context_tokens"]) and not _history.is_empty():
 		_note("started a new conversation: the last one had grown to %d tokens (max_context_tokens %d)" % [_context_tokens, settings["max_context_tokens"]])
-		_history.clear()
-		_context_tokens = 0
+		_clear_conversation()
+	_last_prompt = prompt
+	var sent: String = prompt + _new_tools_note()
 	# After a run that stopped mid-way, the conversation ends with tool
 	# results; the new message goes in the same turn, after them.
 	if not _history.is_empty() and _history[-1]["role"] == "tool_results":
-		_history[-1]["text"] = prompt
+		_history[-1]["text"] = sent
 	else:
-		_history.append({"role": "user", "text": prompt})
+		_history.append({"role": "user", "text": sent})
 	_note("you: " + prompt)
 	_run_conversation()  # runs on, in the background; not awaited on purpose
 	return {"ok": true, "started": true}
@@ -212,8 +222,7 @@ func _stop(_request: Dictionary) -> Dictionary:
 func _reset(_request: Dictionary) -> Dictionary:
 	if _busy:
 		return {"ok": false, "error": "the agent is still working; wait for it to finish"}
-	_history.clear()
-	_context_tokens = 0
+	_clear_conversation()
 	_last_reply = ""
 	_last_error = ""
 	_note("conversation reset")
@@ -237,10 +246,14 @@ func _run_conversation() -> void:
 	_round = 0
 	_ask_tokens = {"input": 0, "output": 0, "cached": 0}
 	_load_skills()
-	var tools := _tools()
-	var system := _system_prompt()
 	while true:
 		_round += 1
+		# Only the first message of a conversation picks up the current tools.
+		if _history.size() == 1:
+			_conv_tools = _tools()
+			_conv_system = _system_prompt()
+		var tools := _conv_tools
+		var system := _conv_system
 		if _round > int(settings["max_tool_rounds"]):
 			_fail("stopped after %d rounds (max_tool_rounds); ask again to carry on" % settings["max_tool_rounds"])
 			break
@@ -280,10 +293,17 @@ func _run_conversation() -> void:
 			_last_reply = reply["text"]
 			_note("agent: " + reply["text"])
 		if reply["stop"] == "tool_use" and not reply["tool_calls"].is_empty():
-			_history.append({"role": "tool_results", "results": await _run_tools(reply["tool_calls"])})
+			var results := await _run_tools(reply["tool_calls"])
+			results[-1]["content"] += _new_tools_note()
+			_history.append({"role": "tool_results", "results": results})
 			if _stop_requested:
 				_note("stopped")
 				break
+			if _restart_note != null:
+				var note: String = _restart_note
+				_clear_conversation()
+				_history.append({"role": "user", "text": "(You started this new conversation with new_conversation, so your tools are up to date. The person's last message was: \"%s\". Your note to yourself: %s)" % [_last_prompt, note]})
+				_note("the agent started a new conversation to use its new tools")
 			if spent >= int(settings["max_tokens_per_ask"]):
 				_fail("stopped: this question used %d tokens (max_tokens_per_ask %d); ask again to carry on" % [spent, settings["max_tokens_per_ask"]])
 				break
@@ -324,6 +344,14 @@ func _run_tools(calls: Array) -> Array:
 			var read := _read_skill(input.get("name"))
 			content = read[1]
 			is_error = not read[0]
+		elif call["name"] == "new_conversation":
+			var note = input.get("note")
+			if typeof(note) != TYPE_STRING or note.strip_edges().is_empty():
+				content = "new_conversation needs \"note\": what you were doing and what's left, since the new conversation won't have this one"
+				is_error = true
+			else:
+				_restart_note = note.strip_edges()
+				content = "ok: after this round a new conversation starts with your current tools; it gets your note and the person's last message, nothing else"
 		elif not _allowed_tool(call["name"]):
 			content = "\"%s\" is not one of your tools" % call["name"]
 			is_error = true
@@ -377,10 +405,36 @@ func _tools() -> Array:
 	if _allowed_tool("modules"):
 		tools.append({"name": "modules", "description": "list the app's loaded modules, and why any failed to load",
 			"schema": {"type": "object", "additionalProperties": true}})
+	tools.append({"name": "new_conversation", "description": "start a new conversation, to use tools that were added after this one began (like a live module's); it forgets this one, so pass a note of what you were doing and what's left",
+		"schema": {"type": "object", "properties": {"note": {"type": "string", "description": "what you were doing and what's left"}}, "required": ["note"]}})
 	if not _skills.is_empty():
 		tools.append({"name": "read_skill", "description": "read one of your skills in full before doing what it covers",
 			"schema": {"type": "object", "properties": {"name": {"type": "string", "description": "the skill's name"}}, "required": ["name"]}})
 	return tools
+
+
+# Tells the agent which tools it now has that this conversation can't use yet,
+# once for each tool.
+func _new_tools_note() -> String:
+	var known := {}
+	for tool in _conv_tools:
+		known[tool["name"]] = true
+	var added := PackedStringArray()
+	for tool in _tools():
+		if not known.has(tool["name"]) and not _announced.has(tool["name"]) and not _history.is_empty():
+			added.append(tool["name"])
+			_announced[tool["name"]] = true
+	if added.is_empty():
+		return ""
+	return "\n[New tools are ready: %s. This conversation can't use them; call new_conversation with a note of what's left to use them.]" % ", ".join(added)
+
+
+func _clear_conversation() -> void:
+	_history.clear()
+	_context_tokens = 0
+	_conv_tools = []
+	_announced = {}
+	_restart_note = null
 
 
 func _system_prompt() -> String:
