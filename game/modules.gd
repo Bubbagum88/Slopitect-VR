@@ -15,12 +15,13 @@ const MODULE_DIR := "res://modules/"
 @export var left_hand_path: NodePath
 @export var right_hand_path: NodePath
 
+var ctx := {}  # what every module gets; see module.gd
 var _loaded: Array[SlopitectModule] = []
 var _failed := {}  # module name -> why it failed
 
 
 func _ready() -> void:
-	var ctx := {
+	ctx = {
 		"server": get_node(command_server_path),
 		"world": get_node(world_path),
 		"camera": get_node(camera_path),
@@ -29,7 +30,7 @@ func _ready() -> void:
 		"modules": self,
 	}
 	for module_name in _read_list():
-		var problem := _load_module(module_name, ctx)
+		var problem := _load_module(module_name)
 		if problem.is_empty():
 			print("Slopitect modules: loaded \"%s\"" % module_name)
 		else:
@@ -59,7 +60,7 @@ func _read_list() -> PackedStringArray:
 	return names
 
 
-func _load_module(module_name: String, ctx: Dictionary) -> String:
+func _load_module(module_name: String) -> String:
 	var path := MODULE_DIR + module_name + ".gd"
 	if not ResourceLoader.exists(path):
 		return "no file %s" % path
@@ -84,6 +85,46 @@ func _load_module(module_name: String, ctx: Dictionary) -> String:
 		module.queue_free()
 		return problem
 	_loaded.append(module)
+	return ""
+
+
+# Loads a module from code made while the app runs (the code module checks
+# it, and asks you, first). Returns "" or what went wrong.
+func load_live(module_name: String, script: GDScript) -> String:
+	if module(module_name) != null:
+		return "a module called \"%s\" is already loaded" % module_name
+	var instance = script.new()
+	if not instance is SlopitectModule:
+		if instance is Node:
+			instance.free()
+		return "it doesn't extend SlopitectModule"
+	var live: SlopitectModule = instance
+	live.name = module_name
+	live.ctx = ctx
+	add_child(live)
+	var problem := live.setup()
+	if problem.is_empty() and not live.registration_problems().is_empty():
+		problem = "; ".join(live.registration_problems())
+	if not problem.is_empty():
+		ctx["server"].unregister_module(module_name)
+		remove_child(live)
+		live.queue_free()
+		return problem
+	_loaded.append(live)
+	_failed.erase(module_name)
+	return ""
+
+
+# Takes a module out: its commands go, and so does everything it made under
+# its own node (anything it hung elsewhere is its _exit_tree's job).
+func unload(module_name: String) -> String:
+	var found := module(module_name)
+	if found == null:
+		return "no loaded module \"%s\"" % module_name
+	get_node(command_server_path).unregister_module(module_name)
+	_loaded.erase(found)
+	remove_child(found)
+	found.queue_free()
 	return ""
 
 

@@ -5,10 +5,10 @@ you're standing in it. You ask for something, Claude builds it into the
 running world: objects, behaviour, things pulled in from the internet. No
 rebuild, no restart. You and the AI build the world together.
 
-> **Status: step 3 of 9.** Step 2, an empty VR room (a floor, a sky, one
-> cube and your two controllers), runs on a Quest 1 at 72 Hz. Step 3 adds a
-> command server you can talk to from your PC; it's tested on a PC with
-> Godot but not yet on the headset. Nothing after step 3 exists yet.
+> **Status:** the empty room (step 2), the command server (step 3) and the
+> agent inside the app run on a Quest 1; the agent builds with Claude there.
+> The newer parts (every window as data, files, voice and live code) are
+> built and tested on a PC with Godot, but not yet on the headset.
 
 ## Features
 
@@ -17,16 +17,27 @@ Working now:
 - **Modular:** every feature is a module in `game/modules/`, listed in
   `game/modules.json`. Modules can be added, removed and swapped, and one
   that fails to load is logged and skipped without stopping the rest.
-- **A universal menu** *(built, waiting on a headset test)*: a bar that pops
-  up in front of you and a panel on your wrist, both built from one list of
-  buttons that you or Claude can change while the app runs.
-- **An AI agent inside the app** *(built, waiting on a headset test)*: works
+- **An AI agent inside the app** *(tested on a Quest 1 with Claude)*: works
   with Claude, or any OpenAI-style service, or a model on your own PC
   (Ollama, LM Studio, llama.cpp). Its tools are the app's commands, its
   skills are plain `SKILL.md` files, and a firewall decides what it may do.
-- **A chat window in the headset** *(built, waiting on a headset test)*:
-  press Y to open a terminal-style window that shows each step the agent
-  takes and a summary of its thinking, with a keyboard, Send and STOP.
+- **Every window is data** *(built, waiting on a headset test)*: the menu
+  bar, the wrist panel and the chat window are panels of text, buttons and
+  input boxes that you or the agent can change, add, move and remove while
+  the app runs. Grab a panel with the grip to move it.
+- **A chat window in the headset**: press Y to open a terminal-style window
+  that shows each step the agent takes and a summary of its thinking, with
+  a keyboard, Send and STOP. X on the left controller always stops the agent.
+- **Files** *(built, waiting on a headset test)*: the agent can read and
+  write its own Slopitect folder on the headset freely; anything else in
+  the headset's storage needs your Yes in the headset each time, and
+  personal folders (photos, videos, downloads, documents) stay blocked.
+- **Voice** *(built, waiting on a headset test)*: the agent's replies are
+  read aloud if the headset has a speech engine; hold the left trigger to
+  talk, through a speech-to-text service you choose (off until you set one).
+- **New code while you play** *(built, waiting on a headset test)*: the
+  agent can write new modules that load into the running app, each only
+  after you've seen the code and said Yes in the headset.
 
 - **The agent's avatar** *(built, waiting on a headset test)*: a little red
   cube with a face and floating sphere hands. It bobs, blinks, faces you,
@@ -43,8 +54,7 @@ Planned:
   Oculus, so you can use game assets that are already on your own hardware
   in your own world. Those assets stay on your headset and PC; they are
   never uploaded to this repo or the GitHub backups.
-- An avatar for the AI agent, saves and backups, free online assets, Claude
-  inside the headset, and upgrades while you play (see the roadmap).
+- Saves and backups, free online assets, a safe web reader (see the roadmap).
 
 ## Why the Quest 1
 
@@ -77,13 +87,13 @@ Each step is small and gets tested on the headset before the next one.
 
 - [x] 1. Pick an engine (Godot 4, OpenGL ES)
 - [x] 2. Empty VR room that starts on the Quest 1 *(tested on a Quest 1: 72 Hz, 34 MB)*
-- [ ] 3. Command server: spawn, move, colour, delete and list objects from the PC *(built, waiting on a headset test)*
+- [x] 3. Command server: spawn, move, colour, delete and list objects from the PC *(tested on a Quest 1)*
 - [ ] 4. Claude on the PC drives it through those commands (an MCP server)
 - [ ] 5. Saves and backups: the world is saved as JSON before every change, with undo; backups go to a GitHub repo, so every version has a history
-- [ ] 6. Claude can send scripts, so objects can have behaviour (behind an on/off switch)
+- [ ] 6. Claude can send scripts, so objects can have behaviour *(built as live modules, each behind your Yes; waiting on a headset test)*
 - [ ] 7. Assets: Poly Haven (CC0, through its API) first; Kenney, Quaternius, Poly Pizza and Sketchfab (CC0 and CC-BY models only) as backups. Each asset's source and licence is recorded, and any that need credit are credited. Assets taken from games on your own headset are kept local and never backed up to GitHub
-- [ ] 8. Talk to Claude from inside the headset
-- [ ] 9. Upgrade while you play: new menus, tools and features loaded into the running app (scripts and Godot resource packs), with a new APK only for engine or permission changes
+- [ ] 8. Talk to Claude from inside the headset *(typing tested on a Quest 1; voice built, waiting on a headset test)*
+- [ ] 9. Upgrade while you play: new menus, tools and features loaded into the running app (scripts and Godot resource packs), with a new APK only for engine or permission changes *(menus and scripts built; resource packs not yet)*
 
 ## Install on a Quest 1
 
@@ -133,20 +143,12 @@ connects your PC's port 7777 to the app (again after each reconnect).
 | `color` | `name`, `color` | `{"cmd":"color","name":"table","color":"blue"}` |
 | `delete` | `name` | `{"cmd":"delete","name":"table"}` |
 | `modules` | | `{"cmd":"modules"}` lists the loaded modules and why any failed |
-| `menu_list` | | `{"cmd":"menu_list"}` |
-| `menu_add` | `id_button`, `label`, `action` (any command), optional `places` (`bar`, `wrist`) and `index` | `{"cmd":"menu_add","id_button":"red","label":"Make red","action":{"cmd":"color","name":"table","color":"red"}}` |
-| `menu_update` | `id_button`, and any of `label`, `action`, `places` | `{"cmd":"menu_update","id_button":"red","label":"Red!"}` |
-| `menu_remove` | `id_button` | `{"cmd":"menu_remove","id_button":"red"}` |
-| `menu_press` | `id_button` | `{"cmd":"menu_press","id_button":"spawn_box"}` |
-| `menu_reset` | | `{"cmd":"menu_reset"}` puts the default buttons back |
-
 | `agent_ask` | `prompt` | `{"cmd":"agent_ask","prompt":"build a small table in front of me"}` |
 | `agent_status` | | `{"cmd":"agent_status"}`: what it's doing, its reply, recent steps |
 | `agent_stop` | | `{"cmd":"agent_stop"}` |
 | `agent_reset` | | `{"cmd":"agent_reset"}` starts a new conversation |
 | `agent_config` | any of `provider`, `model`, `base_url`, `api_key`, `effort`, `max_tokens`, `max_tokens_field`, `max_tool_rounds`, `fallbacks`, `show_thinking`, `allowed_tools` | `{"cmd":"agent_config"}` shows them |
 | `agent_skills` | | `{"cmd":"agent_skills"}` |
-| `chat_show` | `visible` | `{"cmd":"chat_show","visible":true}` |
 | `avatar_move` | `position` | `{"cmd":"avatar_move","position":[0,1.4,-1]}` |
 | `avatar_say` | `text` | `{"cmd":"avatar_say","text":"Hi!"}` |
 | `avatar_state` | `state` (idle, thinking, talking, happy, wave) | `{"cmd":"avatar_state","state":"wave"}` |
@@ -154,10 +156,57 @@ connects your PC's port 7777 to the app (again after each reconnect).
 | `avatar_outfits` | | `{"cmd":"avatar_outfits"}` |
 | `avatar_outfit_add` | `name`, `parts` (up to 12 of `shape`, `size`, `position`, optional `rotation`, `color`) | `{"cmd":"avatar_outfit_add","name":"wizard","parts":[{"shape":"cone","size":[0.18,0.25,0.18],"position":[0,0.23,0],"color":"purple"}]}` |
 
-In the headset, press the left controller's menu button (≡) to show or hide
-the bar, point with the right controller and pull the trigger to press a
-button. A button's action can use `"position":"in_front"` to mean 1 m in
-front of you. The menu is saved on the headset and loaded at the next start.
+Windows (panels):
+
+| Command | Fields | Example |
+| --- | --- | --- |
+| `ui_list` | | `{"cmd":"ui_list"}` |
+| `ui_get` | `id_panel` | `{"cmd":"ui_get","id_panel":"bar"}` shows every element |
+| `ui_add` | `id_panel`, and any of `title`, `place` (front, wrist, world), `distance`, `height`, `position`, `rotation`, `size`, `color`, `visible`, `toggle`, `layout` (free, grid), `columns`, `cell`, `elements` | `{"cmd":"ui_add","id_panel":"tools","place":"world","position":[0,1.4,-1],"size":[0.4,0.3],"visible":true,"elements":[{"type":"text","id":"t","at":[0,0.12],"width":0.36,"text":"Tools"}]}` |
+| `ui_update` | `id_panel`, then any panel fields | `{"cmd":"ui_update","id_panel":"tools","color":"#203040"}` |
+| `ui_remove` | `id_panel` | `{"cmd":"ui_remove","id_panel":"tools"}` |
+| `ui_show` | `id_panel`, `visible` | `{"cmd":"ui_show","id_panel":"chat","visible":true}` |
+| `ui_element_add` | `id_panel`, `element`, optional `index` | `{"cmd":"ui_element_add","id_panel":"bar","element":{"type":"button","id":"red","label":"Make red","action":{"cmd":"color","name":"table","color":"red"}}}` |
+| `ui_element_update` | `id_panel`, `id_element`, then fields | `{"cmd":"ui_element_update","id_panel":"bar","id_element":"red","label":"Red!"}` |
+| `ui_element_remove` | `id_panel`, `id_element` | `{"cmd":"ui_element_remove","id_panel":"bar","id_element":"red"}` |
+| `ui_press` | `id_panel`, `id_element` | `{"cmd":"ui_press","id_panel":"bar","id_element":"spawn_box"}` |
+| `ui_type`, `ui_key` | `text`; `key` (shift, backspace, clear) | types into the selected input box |
+| `ui_reset` | optional `id_panel` | `{"cmd":"ui_reset"}` puts the default panels back |
+
+Elements are `text` (optionally a live `source`: a read-only command's
+reply), `button` (its `action` is any command), `input` and `box`; the
+agent's [UI skill](game/skills/slopitect-ui/SKILL.md) lists their fields.
+In the headset, press the left controller's menu button (≡) for the bar
+and Y for the chat. Point with the right controller and pull the trigger to
+press a button; hold the right grip to move a panel. A button's action can
+use `"position":"in_front"` for 1 m in front of you and `"{input:ID}"` for
+what's typed in a box. Panels are saved on the headset; menu buttons from
+the earlier menu are moved onto them the first time.
+
+Files, questions, voice and live code:
+
+| Command | Fields | Example |
+| --- | --- | --- |
+| `files_status` | | `{"cmd":"files_status"}`: the folder, the storage permission, blocked folders |
+| `files_list` | optional `path` | `{"cmd":"files_list","path":"/sdcard/Android/obb"}` |
+| `files_info` | `path` | |
+| `files_read` | `path`, optional `offset`, `max_bytes` | `{"cmd":"files_read","path":"notes/todo.txt"}` |
+| `files_write` | `path`, `text` or `base64`, optional `append` | `{"cmd":"files_write","path":"notes/todo.txt","text":"paint the table"}` |
+| `files_mkdir`, `files_delete` | `path` | |
+| `files_move`, `files_copy` | `from`, `to` | `{"cmd":"files_copy","from":"/sdcard/Android/obb/some.obb","to":"extract/some.obb"}` |
+| `files_config` | `unblock` or `block` (a personal folder) | PC only: `{"cmd":"files_config","unblock":"/sdcard/Download/models"}` |
+| `confirm_status` | | the questions waiting for your answer in the headset |
+| `voice_say` | `text`, optional `voice` | `{"cmd":"voice_say","text":"Hello!"}` |
+| `voice_stop`, `voice_voices`, `voice_status` | | |
+| `voice_config` | any of `speak_replies`, `voice`, `rate`, `pitch`, `volume`, `stt_url`, `stt_key`, `stt_model`, `stt_language`, `send_to_agent` | PC only, see below |
+| `code_list` | | the live modules and their state |
+| `code_load` | `name` | loads `modules/NAME.gd` from the Slopitect folder after your Yes |
+| `code_unload`, `code_forget` | `name` | take one out; withdraw its Yes |
+
+A path without a leading `/` is in the Slopitect folder
+(`/sdcard/Slopitect` on the headset). Commands that wait for your Yes in
+the headset (or a long copy) answer once it's given; the PC script waits up
+to 2 minutes.
 
 Positions are in metres from the middle of your play area (y is up, -z is
 forward); rotations are in degrees; colours are `#rrggbb` or names like
@@ -178,6 +227,32 @@ in `"error"`, without changing anything. Every command is also logged
    Paste the key when asked. It isn't shown or saved in PowerShell's
    history, it's hidden in the app's logs, and it stays on the headset.
 3. In the headset, press Y, type with the laser, press Send.
+
+Settings that end in `_config` (`agent_config`, `files_config`,
+`voice_config`) can only be changed from the PC: the agent can't use them
+and no button can run them.
+
+### Voice
+
+The agent's replies are read aloud by the headset's speech engine, if it
+has one (`voice_status` shows how many voices it found). Hold-to-talk needs
+a speech-to-text service; until you set one, nothing you say leaves the
+headset. For OpenAI's (paid), with its key in a text file:
+
+```
+.\slopi.ps1 (@{cmd="voice_config"; stt_url="https://api.openai.com/v1/audio/transcriptions"; stt_key=(Get-Content "C:\path\to\openai key.txt" -Raw).Trim()} | ConvertTo-Json -Compress)
+```
+
+Or a free one on your own PC with [whisper.cpp](https://github.com/ggml-org/whisper.cpp)'s
+server (`whisper-server --host 0.0.0.0 --port 8080 -m <model>`), no key:
+
+```
+.\slopi.ps1 '{"cmd":"voice_config","stt_url":"http://192.168.1.50:8080/inference"}'
+```
+
+Then hold the left trigger, talk, and let go: the words go into the chat's
+input box for you to check and Send (`"send_to_agent":true` sends them
+straight away). Android asks once for the microphone.
 
 The default is Claude Opus 5.5 (`claude-opus-5-5`), effort `medium`. If
 Claude declines a request, the API runs it again on the model Anthropic
@@ -218,9 +293,13 @@ registering the plugin first.)
 | `game/modules.gd` | Loads the modules listed in `game/modules.json` |
 | `game/modules/module.gd` | The base every module extends |
 | `game/modules/objects.gd` | Spawn, move, colour, delete and list objects |
-| `game/modules/menu.gd` | The universal menu (bar and wrist panel) |
+| `game/modules/ui.gd` | Every window: panels, the pointer, typing; the default bar, wrist panel and chat |
+| `game/modules/confirm.gd` | The Yes/No questions only you can answer, in the headset |
+| `game/modules/files.gd` | Files: the Slopitect folder, everything else behind your Yes |
 | `game/modules/agent.gd` | The AI agent: settings, firewall, tool loop |
-| `game/modules/chat.gd` | The chat window and keyboard in the headset |
+| `game/modules/voice.gd` | Speech out and hold-to-talk |
+| `game/modules/code.gd` | Live modules: new code loaded after your Yes |
+| `game/pending.gd` | A command's answer that comes later (after your Yes) |
 | `game/modules/avatar.gd` | The agent's avatar, its animations and outfits |
 | `game/agent/providers/` | One file per kind of AI service (`anthropic.gd`, `openai.gd`) |
 | `game/skills/` | The agent's shipped skills, one `SKILL.md` per folder |

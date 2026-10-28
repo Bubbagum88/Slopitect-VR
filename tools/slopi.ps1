@@ -36,7 +36,9 @@ try {
 
 try {
     $stream = $client.GetStream()
-    $stream.ReadTimeout = 5000
+    # Most replies come at once; one that needs your Yes in the headset
+    # waits for it (up to a minute), or for a long copy to finish.
+    $stream.ReadTimeout = 120000
     $writer = [System.IO.StreamWriter]::new($stream, [System.Text.UTF8Encoding]::new($false))
     $writer.NewLine = "`n"
     $writer.AutoFlush = $true
@@ -45,7 +47,7 @@ try {
     $writer.WriteLine($Command)
     $reply = $reader.ReadLine()
 } catch {
-    Write-Error "No reply within 5 seconds: $($_.Exception.Message)"
+    Write-Error "No reply within 2 minutes: $($_.Exception.Message)"
     exit 1
 } finally {
     $client.Close()

@@ -11,6 +11,14 @@ config/name="Slopitect"
 run/main_scene="res://main.tscn"
 config/features=PackedStringArray("4.7", "GL Compatibility")
 
+[audio]
+
+; The microphone, for hold-to-talk (voice.gd). Android still asks you before
+; the app can use it.
+driver/enable_input=true
+; Speech out through the headset's text-to-speech engine (voice.gd).
+general/text_to_speech=true
+
 [debug]
 
 settings/stdout/verbose_stdout=true

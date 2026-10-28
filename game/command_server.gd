@@ -75,6 +75,15 @@ func _process(_delta: float) -> void:
 
 
 func _reply(peer: StreamPeerTCP, reply: Dictionary) -> void:
+	# A command that waits for the person (a Yes in the headset) answers when
+	# they do; the connection stays open until then.
+	if reply.get("wait") is SlopitectPending:
+		var pending: SlopitectPending = reply["wait"]
+		if not pending.finished:
+			await pending.done
+		if peer.get_status() != StreamPeerTCP.STATUS_CONNECTED:
+			return
+		reply = pending.result
 	peer.put_data((JSON.stringify(reply) + "\n").to_utf8_buffer())
 
 
@@ -83,7 +92,7 @@ func _reply(peer: StreamPeerTCP, reply: Dictionary) -> void:
 func handle_line(line: String) -> Dictionary:
 	# A line that isn't valid JSON is logged as it came, so hide anything that
 	# looks like a key in it first.
-	var key_pattern := RegEx.create_from_string("(api_key\\W*)[^,}\\s]*")
+	var key_pattern := RegEx.create_from_string("(\\w*_key\\W*)[^,}\\s]*")
 	var raw := line
 	line = key_pattern.sub(line, "$1(hidden)", true)
 	var json := JSON.new()
@@ -100,15 +109,25 @@ func handle_line(line: String) -> Dictionary:
 		if typeof(id) == TYPE_FLOAT and id == floorf(id) and absf(id) < 1e15:
 			id = int(id)
 		reply["id"] = id
+	if reply.get("wait") is SlopitectPending:
+		print("Slopitect cmd: ", line, " -> waiting (for the person in the headset, or for a long job)")
+		var has_id := request.has("id")
+		var id = reply.get("id")
+		reply["wait"] = (reply["wait"] as SlopitectPending).then(func(final: Dictionary):
+			if has_id:
+				final["id"] = id
+			return _log_result(line, final))
+		return reply
 	return _log_result(line, reply)
 
 
-# A copy with every "api_key" value hidden, so keys never reach the log.
+# A copy with every key ("api_key", "stt_key", any "..._key") hidden, so
+# keys never reach the log.
 func _redacted(value: Variant) -> Variant:
 	if typeof(value) == TYPE_DICTIONARY:
 		var copy := {}
 		for key in value:
-			copy[key] = "(hidden)" if key == "api_key" else _redacted(value[key])
+			copy[key] = "(hidden)" if String(key).ends_with("_key") else _redacted(value[key])
 		return copy
 	if typeof(value) == TYPE_ARRAY:
 		return value.map(_redacted)
@@ -154,6 +173,11 @@ func describe_commands() -> Dictionary:
 	for name in _commands:
 		described[name] = {"module": _commands[name]["module"], "summary": _commands[name]["summary"]}
 	return described
+
+
+# The module a command belongs to, or "" for a built-in or unknown one.
+func module_of(cmd: String) -> String:
+	return _commands[cmd]["module"] if _commands.has(cmd) else ""
 
 
 func commands() -> PackedStringArray:
