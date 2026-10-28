@@ -1,0 +1,8 @@
+# Godot's import cache and the Android build template it installs
+game/.godot/
+game/android/
+# Downloaded by CI (pinned version and checksum in the workflow)
+game/addons/godotopenxrvendors/
+# Build output
+*.apk
+*.aab
