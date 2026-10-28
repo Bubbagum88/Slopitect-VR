@@ -29,6 +29,11 @@
     These can't be changed from inside the app on purpose, so nothing
     running in the app can switch the safety off.
 
+The APK already declares the internet, microphone and file (storage)
+permissions, so voice and file features won't need a new APK for that.
+Declaring a permission doesn't grant it: Android asks you the first time a
+feature needs it, and nothing uses the microphone or files yet.
+
 A new APK installs over the old one (same signing key) and keeps the
 settings, menu and skills.
 
