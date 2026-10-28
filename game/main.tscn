@@ -1,7 +1,8 @@
-[gd_scene load_steps=12 format=3]
+[gd_scene load_steps=13 format=3]
 
 [ext_resource type="Script" path="res://main.gd" id="1_main"]
 [ext_resource type="Script" path="res://command_server.gd" id="2_cmd"]
+[ext_resource type="Script" path="res://modules.gd" id="3_modules"]
 
 [sub_resource type="ProceduralSkyMaterial" id="sky_material"]
 
@@ -74,4 +75,11 @@ surface_material_override/0 = SubResource("right_material")
 
 [node name="CommandServer" type="Node" parent="."]
 script = ExtResource("2_cmd")
+
+[node name="Modules" type="Node" parent="."]
+script = ExtResource("3_modules")
+command_server_path = NodePath("../CommandServer")
 world_path = NodePath("../World")
+camera_path = NodePath("../XROrigin3D/XRCamera3D")
+left_hand_path = NodePath("../XROrigin3D/LeftHand")
+right_hand_path = NodePath("../XROrigin3D/RightHand")

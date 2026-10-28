@@ -10,6 +10,26 @@ rebuild, no restart. You and the AI build the world together.
 > command server you can talk to from your PC; it's tested on a PC with
 > Godot but not yet on the headset. Nothing after step 3 exists yet.
 
+## Features
+
+Working now:
+
+- **Modular:** every feature is a module in `game/modules/`, listed in
+  `game/modules.json`. Modules can be added, removed and swapped, and one
+  that fails to load is logged and skipped without stopping the rest.
+- **A universal menu** *(built, waiting on a headset test)*: a bar that pops
+  up in front of you and a panel on your wrist, both built from one list of
+  buttons that you or Claude can change while the app runs.
+
+Planned:
+
+- **Repurpose and rebuild:** the agent has access to the files on the
+  Oculus, so you can use game assets that are already on your own hardware
+  in your own world. Those assets stay on your headset and PC; they are
+  never uploaded to this repo or the GitHub backups.
+- An avatar for the AI agent, saves and backups, free online assets, Claude
+  inside the headset, and upgrades while you play (see the roadmap).
+
 ## Why the Quest 1
 
 The Quest 1 (Snapdragon 835, Adreno 540, Android 10) is old and Meta no
@@ -45,7 +65,7 @@ Each step is small and gets tested on the headset before the next one.
 - [ ] 4. Claude on the PC drives it through those commands (an MCP server)
 - [ ] 5. Saves and backups: the world is saved as JSON before every change, with undo; backups go to a GitHub repo, so every version has a history
 - [ ] 6. Claude can send scripts, so objects can have behaviour (behind an on/off switch)
-- [ ] 7. Free assets: Poly Haven (CC0, through its API) first; Kenney, Quaternius and Poly Pizza as backups. Each asset's source and licence is recorded, and any that need credit are credited
+- [ ] 7. Assets: Poly Haven (CC0, through its API) first; Kenney, Quaternius, Poly Pizza and Sketchfab (CC0 and CC-BY models only) as backups. Each asset's source and licence is recorded, and any that need credit are credited. Assets taken from games on your own headset are kept local and never backed up to GitHub
 - [ ] 8. Talk to Claude from inside the headset
 - [ ] 9. Upgrade while you play: new menus, tools and features loaded into the running app (scripts and Godot resource packs), with a new APK only for engine or permission changes
 
@@ -96,6 +116,18 @@ connects your PC's port 7777 to the app (again after each reconnect).
 | `move` | `name`, and any of `position`, `rotation`, `scale` | `{"cmd":"move","name":"table","rotation":[0,45,0]}` |
 | `color` | `name`, `color` | `{"cmd":"color","name":"table","color":"blue"}` |
 | `delete` | `name` | `{"cmd":"delete","name":"table"}` |
+| `modules` | | `{"cmd":"modules"}` lists the loaded modules and why any failed |
+| `menu_list` | | `{"cmd":"menu_list"}` |
+| `menu_add` | `id_button`, `label`, `action` (any command), optional `places` (`bar`, `wrist`) and `index` | `{"cmd":"menu_add","id_button":"red","label":"Make red","action":{"cmd":"color","name":"table","color":"red"}}` |
+| `menu_update` | `id_button`, and any of `label`, `action`, `places` | `{"cmd":"menu_update","id_button":"red","label":"Red!"}` |
+| `menu_remove` | `id_button` | `{"cmd":"menu_remove","id_button":"red"}` |
+| `menu_press` | `id_button` | `{"cmd":"menu_press","id_button":"spawn_box"}` |
+| `menu_reset` | | `{"cmd":"menu_reset"}` puts the default buttons back |
+
+In the headset, press the left controller's menu button (≡) to show or hide
+the bar, point with the right controller and pull the trigger to press a
+button. A button's action can use `"position":"in_front"` to mean 1 m in
+front of you. The menu is saved on the headset and loaded at the next start.
 
 Positions are in metres from the middle of your play area (y is up, -z is
 forward); rotations are in degrees; colours are `#rrggbb` or names like
@@ -126,7 +158,11 @@ registering the plugin first.)
 | `game/project.godot` | Project settings: OpenGL ES renderer, OpenXR on |
 | `game/main.tscn` | The room: floor, sky, sun, cube, player and controllers |
 | `game/main.gd` | Starts OpenXR and logs everything about the start-up |
-| `game/command_server.gd` | The command server (port 7777, JSON lines) |
+| `game/command_server.gd` | The command server (port 7777, JSON lines): a registry that modules add their commands to |
+| `game/modules.gd` | Loads the modules listed in `game/modules.json` |
+| `game/modules/module.gd` | The base every module extends |
+| `game/modules/objects.gd` | Spawn, move, colour, delete and list objects |
+| `game/modules/menu.gd` | The universal menu (bar and wrist panel) |
 | `tools/slopi.ps1` | Sends one command from your PC and prints the reply |
 | `ci/debug.keystore` | Debug signing key, so each build installs over the last |
 | `game/export_presets.cfg` | The "Quest 1" Android export (Quest 1 and 2 only) |
