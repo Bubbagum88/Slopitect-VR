@@ -1,0 +1,89 @@
+name: Quest 1 APK
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+env:
+  GODOT_VERSION: 4.7.2
+  # From Godot's SHA512-SUMS.txt for 4.7.2-stable
+  GODOT_SHA512: 9aa00f7a605200940bce3027a567b782f49bd8e940dd06ae9e987bd65aee1b1467edd56ed84fcdcbdd44354bf613bdbb4e5d2913e925850368e150c59ed54c65
+  TEMPLATES_SHA512: ca4d71c4d7b81dfc15d1a98baa07534aa95b03fdda78a0075b06672e1648d2e5f40980c9adc28d23e1b92e732ee7bf3461997aa804af74ec2fcd7a93ccb84079
+  VENDORS_VERSION: 5.1.0-stable
+  VENDORS_SHA512: 2e60b98306c6bf6e8dd1bef28bf6393f00dd5c2d1c6ad764c3572d235b1bef3de7d0efda2452fe238a0988657b2a346e39fdf59f4f8d4d3b5206b8cd95090945
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Download Godot, export templates and the OpenXR vendors plugin
+        run: |
+          set -euo pipefail
+          base=https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable
+          curl -fsSL -o godot.zip "$base/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
+          curl -fsSL -o templates.tpz "$base/Godot_v${GODOT_VERSION}-stable_export_templates.tpz"
+          curl -fsSL -o vendors.zip "https://github.com/GodotVR/godot_openxr_vendors/releases/download/${VENDORS_VERSION}/godotopenxrvendorsaddon.zip"
+          echo "$GODOT_SHA512  godot.zip" | sha512sum -c
+          echo "$TEMPLATES_SHA512  templates.tpz" | sha512sum -c
+          echo "$VENDORS_SHA512  vendors.zip" | sha512sum -c
+
+          unzip -q godot.zip
+          mv "Godot_v${GODOT_VERSION}-stable_linux.x86_64" godot
+          tdir="$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable"
+          mkdir -p "$tdir"
+          unzip -q templates.tpz
+          mv templates/* "$tdir/"
+          unzip -q vendors.zip
+          mkdir -p game/addons
+          mv asset/addons/godotopenxrvendors game/addons/
+
+      - name: Make a debug signing key
+        run: |
+          keytool -genkeypair -keystore "$RUNNER_TEMP/debug.keystore" -storepass android \
+            -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 \
+            -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+
+      - name: Import the project
+        run: ./godot --headless --path game --import
+
+      - name: Export the APK
+        env:
+          GODOT_ANDROID_KEYSTORE_DEBUG_PATH: ${{ runner.temp }}/debug.keystore
+          GODOT_ANDROID_KEYSTORE_DEBUG_USER: androiddebugkey
+          GODOT_ANDROID_KEYSTORE_DEBUG_PASSWORD: android
+        run: |
+          set -euo pipefail
+          mkdir -p build
+          ./godot --headless --path game --install-android-build-template \
+            --export-debug "Quest 1" ../build/slopitect-quest1-debug.apk
+          test -s build/slopitect-quest1-debug.apk || { echo "::error::Godot did not write the APK"; exit 1; }
+
+      - name: Check the APK for the Quest 1
+        run: |
+          set -euo pipefail
+          apk=build/slopitect-quest1-debug.apk
+          aapt2="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)/aapt2"
+          "$aapt2" dump xmltree --file AndroidManifest.xml "$apk" > manifest.txt
+          echo "--- manifest lines that matter on a Quest 1 ---"
+          grep -n -A2 -E "supportedDevices|minSdkVersion|targetSdkVersion|horizonos|debuggable" manifest.txt || true
+          fail=0
+          devices=$(grep -A1 'com.oculus.supportedDevices' manifest.txt | grep -o '"[^"]*"' | tail -1 | tr -d '"')
+          echo "supportedDevices = $devices"
+          [ "$devices" = "quest|quest2" ] || { echo "::error::supportedDevices is '$devices', expected 'quest|quest2' (anything else aborts on the Quest 1)"; fail=1; }
+          for lib in lib/arm64-v8a/libgodot_android.so lib/arm64-v8a/libgodotopenxrvendors.so; do
+            unzip -l "$apk" "$lib" > /dev/null && echo "has $lib" || { echo "::error::missing $lib"; fail=1; }
+          done
+          exit $fail
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: slopitect-quest1-debug
+          path: build/slopitect-quest1-debug.apk
