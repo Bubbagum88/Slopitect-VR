@@ -10,7 +10,7 @@
 | Files in the Slopitect folder | `files_*` commands | It's the headset's storage (`/sdcard/Slopitect`) |
 | Which AI the agent uses | `agent_config` from the PC: `provider`, `model`, `base_url`, `api_key` | Yes, `user://agent.json` |
 | What the agent may do | `agent_config` from the PC: `allowed_tools` | Yes |
-| How the agent works | `agent_config`: `effort`, `max_tokens`, `max_tool_rounds`, `show_thinking` | Yes |
+| How the agent works | `agent_config`: `effort`, `max_tokens`, `max_tool_rounds`, `show_thinking`, and the token limits `max_tokens_per_ask`, `max_context_tokens`, `max_tool_result_chars` | Yes |
 | Speech and hold-to-talk | `voice_config` from the PC | Yes, `user://voice.json` |
 | Personal folders the agent may reach | `files_config` from the PC (`unblock`, `block`) | Yes, `user://files.json` |
 | The agent's skills | `SKILL.md` files in `user://skills/<name>/` (replace a shipped skill of the same name) | Yes |
@@ -62,6 +62,8 @@ In place:
   seconds doesn't count, and it says No after a minute. It asks for:
   - every file action outside the Slopitect folder, whoever asks (the
     agent, a button or the PC);
+  - every file action in its `models` folder, since model files are read
+    by native code that a doctored file could trick;
   - every new or changed live module, with the code shown beside it and a
     list of what it uses (files, the internet, other programs...). Nothing
     in a module is even compiled before your Yes, since compiling a script
@@ -72,9 +74,10 @@ In place:
   (which hold your key) are never reachable through files_*. Nothing
   outside `/sdcard` can be reached (that would need root).
 - **The microphone** only records while you hold the left trigger, with a
-  red dot on your hand. No command can turn it on. Until you set a
-  speech-to-text service, nothing you say leaves the headset; the
-  recording is deleted once it's sent.
+  red dot on your hand. No command can turn it on. With speech to text on
+  the headset (`stt_engine` `"local"`), nothing you say leaves it. With a
+  service, nothing leaves until you set one, and the recording is deleted
+  once it's sent.
 - **Outside text is data, not orders.** The agent is told that only your
   messages tell it what to do, and that anything coming back from a tool,
   file, web page or asset is information, even if it claims otherwise.
@@ -94,7 +97,8 @@ Known gaps, in the open:
   read the key or answer a question, but it could send other commands.
   Next safety step: a pairing code the PC has to send first.
 - **What you type or say to the agent goes to that AI company** (and your
-  voice to the speech-to-text service). With self-hosted ones on your PC,
+  voice to the speech-to-text service, unless it's turned into text on the
+  headset). With self-hosted ones on your PC,
   it stays at home.
 - **The key is stored as plain text** in the app's private storage. Android
   keeps other apps out of it, but root apps can read it.

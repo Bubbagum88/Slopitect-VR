@@ -18,12 +18,18 @@ param(
 if ($SetKey) {
     # Typed in hidden, so it isn't on screen or saved in the command history.
     $secure = Read-Host "Paste the API key (it won't show)" -AsSecureString
-    $key = [System.Net.NetworkCredential]::new("", $secure).Password
+    $key = [System.Net.NetworkCredential]::new("", $secure).Password.Trim()
     if ([string]::IsNullOrWhiteSpace($key)) {
         Write-Error "No key given; nothing was sent."
         exit 1
     }
-    $Command = @{ cmd = "agent_config"; api_key = $key.Trim() } | ConvertTo-Json -Compress
+    # Ctrl+V may not paste into this hidden prompt (in one test it typed a
+    # single invisible character instead); right-click pastes.
+    if ($key -match '[\x00-\x1F\x7F]' -or $key.Length -lt 20) {
+        Write-Error "That isn't a whole key ($($key.Length) characters; Ctrl+V doesn't paste here, right-click does). Nothing was sent."
+        exit 1
+    }
+    $Command = @{ cmd = "agent_config"; api_key = $key } | ConvertTo-Json -Compress
 }
 
 $client = [System.Net.Sockets.TcpClient]::new()

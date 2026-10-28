@@ -79,6 +79,10 @@ func _resolve(value, field := "path") -> Dictionary:
 	for alias in ["/storage/emulated/0", "/storage/self/primary", "/mnt/sdcard"]:
 		if _inside(full, alias):
 			full = SHARED + full.substr(alias.length())
+	# Model files (like the speech-to-text one) are read by native code, which
+	# a doctored file could trick, so its folder needs the Yes like outside.
+	if _inside(full, _home + "/models"):
+		return {"path": full, "access": "ask"}
 	if _inside(full, _home):
 		return {"path": full, "access": "free"}
 	# The app's own data folder holds its settings, including your API key.
@@ -167,7 +171,7 @@ func _status(_request: Dictionary) -> Dictionary:
 		"shared_readable": DirAccess.dir_exists_absolute(SHARED) and DirAccess.open(SHARED) != null,
 		"blocked": PRIVATE.filter(func(folder): return not _unblocked.any(func(open): return _inside(folder, open))),
 		"unblocked": _unblocked.duplicate(),
-		"rules": "inside home: free; elsewhere in %s: the person's Yes in the headset each time; blocked folders: never" % SHARED,
+		"rules": "inside home: free (but home/models: the person's Yes); elsewhere in %s: the person's Yes in the headset each time; blocked folders: never" % SHARED,
 	}
 
 

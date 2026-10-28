@@ -147,7 +147,7 @@ connects your PC's port 7777 to the app (again after each reconnect).
 | `agent_status` | | `{"cmd":"agent_status"}`: what it's doing, its reply, recent steps |
 | `agent_stop` | | `{"cmd":"agent_stop"}` |
 | `agent_reset` | | `{"cmd":"agent_reset"}` starts a new conversation |
-| `agent_config` | any of `provider`, `model`, `base_url`, `api_key`, `effort`, `max_tokens`, `max_tokens_field`, `max_tool_rounds`, `fallbacks`, `show_thinking`, `allowed_tools` | `{"cmd":"agent_config"}` shows them |
+| `agent_config` | any of `provider`, `model`, `base_url`, `api_key`, `effort`, `max_tokens`, `max_tokens_field`, `max_tool_rounds`, `max_tokens_per_ask`, `max_context_tokens`, `max_tool_result_chars`, `fallbacks`, `show_thinking`, `allowed_tools` | `{"cmd":"agent_config"}` shows them |
 | `agent_skills` | | `{"cmd":"agent_skills"}` |
 | `avatar_move` | `position` | `{"cmd":"avatar_move","position":[0,1.4,-1]}` |
 | `avatar_say` | `text` | `{"cmd":"avatar_say","text":"Hi!"}` |
@@ -198,7 +198,7 @@ Files, questions, voice and live code:
 | `confirm_status` | | the questions waiting for your answer in the headset |
 | `voice_say` | `text`, optional `voice` | `{"cmd":"voice_say","text":"Hello!"}` |
 | `voice_stop`, `voice_voices`, `voice_status` | | |
-| `voice_config` | any of `speak_replies`, `voice`, `rate`, `pitch`, `volume`, `stt_url`, `stt_key`, `stt_model`, `stt_language`, `send_to_agent` | PC only, see below |
+| `voice_config` | any of `speak_replies`, `voice`, `rate`, `pitch`, `volume`, `stt_engine`, `stt_local_model`, `stt_url`, `stt_key`, `stt_model`, `stt_language`, `send_to_agent` | PC only, see below |
 | `code_list` | | the live modules and their state |
 | `code_load` | `name` | loads `modules/NAME.gd` from the Slopitect folder after your Yes |
 | `code_unload`, `code_forget` | `name` | take one out; withdraw its Yes |
@@ -235,9 +235,31 @@ and no button can run them.
 ### Voice
 
 The agent's replies are read aloud by the headset's speech engine, if it
-has one (`voice_status` shows how many voices it found). Hold-to-talk needs
-a speech-to-text service; until you set one, nothing you say leaves the
-headset. For OpenAI's (paid), with its key in a text file:
+has one (`voice_status` shows how many voices it found). If it has none,
+a speech engine app has to be installed on the headset (for example
+[SherpaTTS](https://f-droid.org/en/packages/org.woheller69.ttsengine/),
+not yet tried on a Quest 1).
+
+Hold-to-talk turns what you say into text in one of two ways.
+
+**On the headset** (nothing you say leaves it): whisper.cpp, through
+[godot-whisper](https://github.com/appsinacup/godot-whisper), built into
+the APK. It needs a model file in the Slopitect folder. Download
+[ggml-tiny.en.bin](https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin)
+(about 78 MB, English) on the PC, then:
+
+```
+.\adb shell mkdir -p /sdcard/Slopitect/models
+.\adb push "C:\path\to\ggml-tiny.en.bin" /sdcard/Slopitect/models/
+.\slopi.ps1 '{"cmd":"voice_config","stt_engine":"local"}'
+```
+
+A bigger model (`ggml-base.en.bin`, about 148 MB) hears better and takes
+longer; set `stt_local_model` to its name. How fast it is on the Quest 1
+isn't measured yet: each try logs how long it took.
+
+**Through a service** (`stt_engine` `"web"`, the default; off until you set
+one). For OpenAI's (paid), with its key in a text file:
 
 ```
 .\slopi.ps1 (@{cmd="voice_config"; stt_url="https://api.openai.com/v1/audio/transcriptions"; stt_key=(Get-Content "C:\path\to\openai key.txt" -Raw).Trim()} | ConvertTo-Json -Compress)
@@ -254,7 +276,22 @@ Then hold the left trigger, talk, and let go: the words go into the chat's
 input box for you to check and Send (`"send_to_agent":true` sends them
 straight away). Android asks once for the microphone.
 
-The default is Claude Opus 5.5 (`claude-opus-5-5`), effort `medium`. If
+The default is Claude Opus 5.5 (`claude-opus-5-5`), effort `medium`.
+
+**Tokens** (what the AI company bills): `agent_status` shows them under
+`tokens` (the conversation's size, this question, and since the app
+started), and each round logs them. To keep them down:
+- With Claude, everything already sent is cached, so each later round reads
+  it back at a twentieth of the price instead of paying for it again.
+- Replies are kept short (the `caveman` skill, which is always on).
+- A tool reply over `max_tool_result_chars` (8000) is cut, and the agent is
+  told to ask for less.
+- One question stops after `max_tokens_per_ask` (300000) tokens; ask again
+  to carry on.
+- A conversation over `max_context_tokens` (80000) starts over at the next
+  question (the world stays; the agent looks again with `list`).
+- Lower `effort` (`low`) thinks less; a cheaper model (like
+  `claude-haiku-5-5`) costs far less per token, but is less capable. If
 Claude declines a request, the API runs it again on the model Anthropic
 recommends (`fallbacks`; Claude API only).
 
@@ -322,6 +359,7 @@ registering the plugin first.)
 
 - [Godot Engine](https://godotengine.org), MIT licence
 - [Godot OpenXR Vendors](https://github.com/GodotVR/godot_openxr_vendors), MIT licence
+- [godot-whisper](https://github.com/appsinacup/godot-whisper) and [whisper.cpp](https://github.com/ggml-org/whisper.cpp), MIT licence (on-headset speech to text)
 - Made by Bubbagum88 with Claude
 
 ## Licence

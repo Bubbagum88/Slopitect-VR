@@ -3,6 +3,9 @@ game/.godot/
 game/android/
 # Downloaded by CI (pinned version and checksum in the workflow)
 game/addons/godotopenxrvendors/
+game/addons/godot_whisper/bin/
+game/addons/godot_whisper/LICENSE
+game/addons/godot_whisper/THIRDPARTY.txt
 # Build output
 *.apk
 *.aab
