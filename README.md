@@ -20,6 +20,16 @@ Working now:
 - **A universal menu** *(built, waiting on a headset test)*: a bar that pops
   up in front of you and a panel on your wrist, both built from one list of
   buttons that you or Claude can change while the app runs.
+- **An AI agent inside the app** *(built, waiting on a headset test)*: works
+  with Claude, or any OpenAI-style service, or a model on your own PC
+  (Ollama, LM Studio, llama.cpp). Its tools are the app's commands, its
+  skills are plain `SKILL.md` files, and a firewall decides what it may do.
+- **A chat window in the headset** *(built, waiting on a headset test)*:
+  press Y to open a terminal-style window that shows each step the agent
+  takes and a summary of its thinking, with a keyboard, Send and STOP.
+
+What you can change live, what needs a new APK, and how the agent is kept
+safe: [docs/LIVE-CHANGES-AND-SAFETY.md](docs/LIVE-CHANGES-AND-SAFETY.md).
 
 Planned:
 
@@ -124,6 +134,14 @@ connects your PC's port 7777 to the app (again after each reconnect).
 | `menu_press` | `id_button` | `{"cmd":"menu_press","id_button":"spawn_box"}` |
 | `menu_reset` | | `{"cmd":"menu_reset"}` puts the default buttons back |
 
+| `agent_ask` | `prompt` | `{"cmd":"agent_ask","prompt":"build a small table in front of me"}` |
+| `agent_status` | | `{"cmd":"agent_status"}`: what it's doing, its reply, recent steps |
+| `agent_stop` | | `{"cmd":"agent_stop"}` |
+| `agent_reset` | | `{"cmd":"agent_reset"}` starts a new conversation |
+| `agent_config` | any of `provider`, `model`, `base_url`, `api_key`, `effort`, `max_tokens`, `max_tokens_field`, `max_tool_rounds`, `fallbacks`, `show_thinking`, `allowed_tools` | `{"cmd":"agent_config"}` shows them |
+| `agent_skills` | | `{"cmd":"agent_skills"}` |
+| `chat_show` | `visible` | `{"cmd":"chat_show","visible":true}` |
+
 In the headset, press the left controller's menu button (≡) to show or hide
 the bar, point with the right controller and pull the trigger to press a
 button. A button's action can use `"position":"in_front"` to mean 1 m in
@@ -134,6 +152,32 @@ forward); rotations are in degrees; colours are `#rrggbb` or names like
 `red`. Every reply has `"ok"`, and a failed one says exactly what was wrong
 in `"error"`, without changing anything. Every command is also logged
 (`Slopitect cmd:` in `.\adb logcat -s godot`).
+
+## Setting up the agent
+
+1. Get an API key at [console.anthropic.com](https://console.anthropic.com)
+   (this is separate from a claude.ai plan; it's prepaid).
+2. With Slopitect open on the headset, in PowerShell in platform-tools:
+   ```
+   Set-ExecutionPolicy -Scope Process Bypass
+   .\adb forward tcp:7777 tcp:7777
+   .\slopi.ps1 -SetKey
+   ```
+   Paste the key when asked. It isn't shown or saved in PowerShell's
+   history, it's hidden in the app's logs, and it stays on the headset.
+3. In the headset, press Y, type with the laser, press Send.
+
+The default is Claude Opus 5.5 (`claude-opus-5-5`), effort `medium`. If
+Claude declines a request, the API runs it again on the model Anthropic
+recommends (`fallbacks`; Claude API only).
+
+To use another AI, set `provider` to `openai` and `base_url` to its address
+up to `/v1`, for example a model on your PC with Ollama:
+```
+.\slopi.ps1 '{"cmd":"agent_config","provider":"openai","base_url":"http://192.168.1.50:11434/v1","model":"qwen2.5:7b"}'
+```
+then `-SetKey` again if that service needs a key. Changing the address or
+provider clears the old key, so it is never sent anywhere else.
 
 ## Building
 
@@ -163,6 +207,11 @@ registering the plugin first.)
 | `game/modules/module.gd` | The base every module extends |
 | `game/modules/objects.gd` | Spawn, move, colour, delete and list objects |
 | `game/modules/menu.gd` | The universal menu (bar and wrist panel) |
+| `game/modules/agent.gd` | The AI agent: settings, firewall, tool loop |
+| `game/modules/chat.gd` | The chat window and keyboard in the headset |
+| `game/agent/providers/` | One file per kind of AI service (`anthropic.gd`, `openai.gd`) |
+| `game/skills/` | The agent's shipped skills, one `SKILL.md` per folder |
+| `docs/LIVE-CHANGES-AND-SAFETY.md` | What changes live, what needs a new APK, and the safety rules |
 | `tools/slopi.ps1` | Sends one command from your PC and prints the reply |
 | `ci/debug.keystore` | Debug signing key, so each build installs over the last |
 | `game/export_presets.cfg` | The "Quest 1" Android export (Quest 1 and 2 only) |

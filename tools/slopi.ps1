@@ -7,10 +7,24 @@
 # Then, for example:
 #   .\slopi.ps1 '{"cmd":"spawn","shape":"sphere","position":[0,1.5,-1],"color":"red"}'
 #   .\slopi.ps1 '{"cmd":"list"}'
+# To give the agent your API key without it landing in PowerShell's history:
+#   .\slopi.ps1 -SetKey
 param(
-    [Parameter(Mandatory = $true)][string]$Command,
+    [Parameter(Mandatory = $true, ParameterSetName = "Command", Position = 0)][string]$Command,
+    [Parameter(Mandatory = $true, ParameterSetName = "SetKey")][switch]$SetKey,
     [int]$Port = 7777
 )
+
+if ($SetKey) {
+    # Typed in hidden, so it isn't on screen or saved in the command history.
+    $secure = Read-Host "Paste the API key (it won't show)" -AsSecureString
+    $key = [System.Net.NetworkCredential]::new("", $secure).Password
+    if ([string]::IsNullOrWhiteSpace($key)) {
+        Write-Error "No key given; nothing was sent."
+        exit 1
+    }
+    $Command = @{ cmd = "agent_config"; api_key = $key.Trim() } | ConvertTo-Json -Compress
+}
 
 $client = [System.Net.Sockets.TcpClient]::new()
 try {

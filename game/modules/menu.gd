@@ -23,6 +23,7 @@ const BUTTON_COLOR := Color(0.12, 0.13, 0.16)
 const HOVER_COLOR := Color(0.25, 0.45, 0.9)
 
 var buttons: Array = []  # [{id, label, action, places}], in display order
+var laser_wanted := false  # another module's panel is open and wants the laser
 
 var _server: Node
 var _camera: XRCamera3D
@@ -102,7 +103,7 @@ func _physics_process(_delta: float) -> void:
 	if _hovered:
 		length = _right.global_position.distance_to(_ray.get_collision_point())
 	# Only show the laser while it can hit something.
-	_laser.visible = _bar.visible or _hovered != null
+	_laser.visible = _bar.visible or _hovered != null or laser_wanted
 	_laser.scale = Vector3(1, 1, length)
 	_laser.position = Vector3(0, 0, -length / 2.0)
 
@@ -118,7 +119,13 @@ func _on_left_pressed(button: String) -> void:
 
 
 func _on_right_pressed(button: String) -> void:
-	if button == "trigger_click" and _hovered:
+	if button != "trigger_click" or not _hovered:
+		return
+	# Other modules' panels (like the chat keyboard) use the same laser: their
+	# buttons carry the function to call when pressed.
+	if _hovered.has_meta("on_press"):
+		(_hovered.get_meta("on_press") as Callable).call()
+	else:
 		press(_hovered.get_meta("id"))
 
 
@@ -228,6 +235,8 @@ func _check_button(data: Dictionary, is_new: bool) -> Dictionary:
 		return {"error": "\"action\" uses unknown cmd \"%s\"" % action["cmd"]}
 	if action["cmd"] == "menu_press":
 		return {"error": "a button can't press another button"}
+	if action["cmd"] == "agent_config":
+		return {"error": "the agent's settings can only be changed from the PC, not by a button"}
 	var places = data.get("places", ["bar", "wrist"])
 	if typeof(places) != TYPE_ARRAY or places.is_empty():
 		return {"error": "\"places\" must be a list from %s" % [PLACES]}
@@ -272,15 +281,18 @@ func _lay_out(holder: Node3D, place: String, size: Vector2, per_row: int) -> voi
 		var col := i % per_row
 		var x := (col - (in_row - 1) / 2.0) * (size.x + gap)
 		var y := -row * (size.y + gap)
-		holder.add_child(_make_button(shown[i], size, Vector3(x, y, 0)))
+		var button := make_button(shown[i]["label"], size, Vector3(x, y, 0))
+		button.set_meta("id", shown[i]["id_button"])
+		holder.add_child(button)
 
 
-func _make_button(data: Dictionary, size: Vector2, at: Vector3) -> StaticBody3D:
+# A pressable button: point the laser at it and pull the trigger. Public so
+# other modules can build panels that work with the same laser.
+func make_button(label: String, size: Vector2, at: Vector3) -> StaticBody3D:
 	var body := StaticBody3D.new()
 	body.position = at
 	body.collision_layer = MENU_LAYER
 	body.collision_mask = 0
-	body.set_meta("id", data["id_button"])
 
 	var shape := CollisionShape3D.new()
 	var box := BoxShape3D.new()
@@ -300,7 +312,7 @@ func _make_button(data: Dictionary, size: Vector2, at: Vector3) -> StaticBody3D:
 	body.add_child(face)
 
 	var text := Label3D.new()
-	text.text = data["label"]
+	text.text = label
 	text.pixel_size = size.y / 140.0
 	text.font_size = 48
 	text.outline_size = 0

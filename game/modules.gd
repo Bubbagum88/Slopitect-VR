@@ -26,6 +26,7 @@ func _ready() -> void:
 		"camera": get_node(camera_path),
 		"left": get_node(left_hand_path),
 		"right": get_node(right_hand_path),
+		"modules": self,
 	}
 	for module_name in _read_list():
 		var problem := _load_module(module_name, ctx)
@@ -84,6 +85,14 @@ func _load_module(module_name: String, ctx: Dictionary) -> String:
 		return problem
 	_loaded.append(module)
 	return ""
+
+
+# A loaded module by name, or null; for modules that build on another one.
+func module(module_name: String) -> SlopitectModule:
+	for loaded in _loaded:
+		if String(loaded.name) == module_name:
+			return loaded
+	return null
 
 
 func describe() -> Dictionary:
