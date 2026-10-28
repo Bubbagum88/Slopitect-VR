@@ -5,10 +5,30 @@ you're standing in it. You ask for something, Claude builds it into the
 running world: objects, behaviour, things pulled in from the internet. No
 rebuild, no restart. You and the AI build the world together.
 
-> **Status: step 2 of 8, untested.** Right now it's an empty VR room (a floor,
-> a sky, one cube and your two controllers). It has been checked on a PC
-> (the project loads and the scripts run), but it has **not been run on a
-> Quest yet**. Nothing below "Step 2" exists yet.
+> **Status: step 3 of 9.** Step 2, an empty VR room (a floor, a sky, one
+> cube and your two controllers), runs on a Quest 1 at 72 Hz. Step 3 adds a
+> command server you can talk to from your PC; it's tested on a PC with
+> Godot but not yet on the headset. Nothing after step 3 exists yet.
+
+## Features
+
+Working now:
+
+- **Modular:** every feature is a module in `game/modules/`, listed in
+  `game/modules.json`. Modules can be added, removed and swapped, and one
+  that fails to load is logged and skipped without stopping the rest.
+- **A universal menu** *(built, waiting on a headset test)*: a bar that pops
+  up in front of you and a panel on your wrist, both built from one list of
+  buttons that you or Claude can change while the app runs.
+
+Planned:
+
+- **Repurpose and rebuild:** the agent has access to the files on the
+  Oculus, so you can use game assets that are already on your own hardware
+  in your own world. Those assets stay on your headset and PC; they are
+  never uploaded to this repo or the GitHub backups.
+- An avatar for the AI agent, saves and backups, free online assets, Claude
+  inside the headset, and upgrades while you play (see the roadmap).
 
 ## Why the Quest 1
 
@@ -40,13 +60,14 @@ You (talking)  ->  Claude on your PC  ->  adb / Wi-Fi  ->  Slopitect on the Ques
 Each step is small and gets tested on the headset before the next one.
 
 - [x] 1. Pick an engine (Godot 4, OpenGL ES)
-- [ ] 2. Empty VR room that starts on the Quest 1 *(built, waiting on a headset test)*
-- [ ] 3. Command server: spawn, move, colour, delete and list objects from the PC
+- [x] 2. Empty VR room that starts on the Quest 1 *(tested on a Quest 1: 72 Hz, 34 MB)*
+- [ ] 3. Command server: spawn, move, colour, delete and list objects from the PC *(built, waiting on a headset test)*
 - [ ] 4. Claude on the PC drives it through those commands (an MCP server)
-- [ ] 5. Save the world before every change, and undo
+- [ ] 5. Saves and backups: the world is saved as JSON before every change, with undo; backups go to a GitHub repo, so every version has a history
 - [ ] 6. Claude can send scripts, so objects can have behaviour (behind an on/off switch)
-- [ ] 7. Load 3D models and images from the internet
+- [ ] 7. Assets: Poly Haven (CC0, through its API) first; Kenney, Quaternius, Poly Pizza and Sketchfab (CC0 and CC-BY models only) as backups. Each asset's source and licence is recorded, and any that need credit are credited. Assets taken from games on your own headset are kept local and never backed up to GitHub
 - [ ] 8. Talk to Claude from inside the headset
+- [ ] 9. Upgrade while you play: new menus, tools and features loaded into the running app (scripts and Godot resource packs), with a new APK only for engine or permission changes
 
 ## Install on a Quest 1
 
@@ -69,6 +90,50 @@ frame rate, memory and controller tracking every 5 seconds.
 ```
 .\adb logcat -s godot
 ```
+
+## Talking to the app from your PC
+
+The app listens on port 7777 on the headset itself (not on your Wi-Fi), so
+you reach it through adb. Copy [`tools/slopi.ps1`](tools/slopi.ps1) into
+your platform-tools folder, start Slopitect on the headset, then in
+PowerShell in that folder:
+
+```
+Set-ExecutionPolicy -Scope Process Bypass
+.\adb forward tcp:7777 tcp:7777
+.\slopi.ps1 '{"cmd":"spawn","shape":"sphere","position":[0,1.5,-1],"color":"red"}'
+```
+
+The first line lets this PowerShell window run the script; the second
+connects your PC's port 7777 to the app (again after each reconnect).
+
+| Command | Fields | Example |
+| --- | --- | --- |
+| `ping` | | `{"cmd":"ping"}` |
+| `help` | | `{"cmd":"help"}` |
+| `list` | | `{"cmd":"list"}` |
+| `spawn` | `shape` (box, sphere, cylinder, capsule), optional `name`, `position`, `rotation`, `scale`, `color` | `{"cmd":"spawn","shape":"box","name":"table","position":[1,0.4,-1.5],"scale":[1.2,0.8,0.6],"color":"#8b5a2b"}` |
+| `move` | `name`, and any of `position`, `rotation`, `scale` | `{"cmd":"move","name":"table","rotation":[0,45,0]}` |
+| `color` | `name`, `color` | `{"cmd":"color","name":"table","color":"blue"}` |
+| `delete` | `name` | `{"cmd":"delete","name":"table"}` |
+| `modules` | | `{"cmd":"modules"}` lists the loaded modules and why any failed |
+| `menu_list` | | `{"cmd":"menu_list"}` |
+| `menu_add` | `id_button`, `label`, `action` (any command), optional `places` (`bar`, `wrist`) and `index` | `{"cmd":"menu_add","id_button":"red","label":"Make red","action":{"cmd":"color","name":"table","color":"red"}}` |
+| `menu_update` | `id_button`, and any of `label`, `action`, `places` | `{"cmd":"menu_update","id_button":"red","label":"Red!"}` |
+| `menu_remove` | `id_button` | `{"cmd":"menu_remove","id_button":"red"}` |
+| `menu_press` | `id_button` | `{"cmd":"menu_press","id_button":"spawn_box"}` |
+| `menu_reset` | | `{"cmd":"menu_reset"}` puts the default buttons back |
+
+In the headset, press the left controller's menu button (≡) to show or hide
+the bar, point with the right controller and pull the trigger to press a
+button. A button's action can use `"position":"in_front"` to mean 1 m in
+front of you. The menu is saved on the headset and loaded at the next start.
+
+Positions are in metres from the middle of your play area (y is up, -z is
+forward); rotations are in degrees; colours are `#rrggbb` or names like
+`red`. Every reply has `"ok"`, and a failed one says exactly what was wrong
+in `"error"`, without changing anything. Every command is also logged
+(`Slopitect cmd:` in `.\adb logcat -s godot`).
 
 ## Building
 
@@ -93,16 +158,24 @@ registering the plugin first.)
 | `game/project.godot` | Project settings: OpenGL ES renderer, OpenXR on |
 | `game/main.tscn` | The room: floor, sky, sun, cube, player and controllers |
 | `game/main.gd` | Starts OpenXR and logs everything about the start-up |
+| `game/command_server.gd` | The command server (port 7777, JSON lines): a registry that modules add their commands to |
+| `game/modules.gd` | Loads the modules listed in `game/modules.json` |
+| `game/modules/module.gd` | The base every module extends |
+| `game/modules/objects.gd` | Spawn, move, colour, delete and list objects |
+| `game/modules/menu.gd` | The universal menu (bar and wrist panel) |
+| `tools/slopi.ps1` | Sends one command from your PC and prints the reply |
+| `ci/debug.keystore` | Debug signing key, so each build installs over the last |
 | `game/export_presets.cfg` | The "Quest 1" Android export (Quest 1 and 2 only) |
 | `.github/workflows/quest1-apk.yml` | Builds and checks the APK |
 
-## Known unknowns
+## Notes
 
-- The OpenXR plugin's manifest asks for Horizon OS SDK 69, newer than the
-  Quest 1's last firmware. Android ignores tags it doesn't know, so this
-  probably doesn't matter outside the Meta store, but that's a guess until
-  the first headset test.
-- Godot 4's Compatibility renderer hasn't been run on this Quest 1 before.
+- APKs from before step 3 were signed with a throwaway key: uninstall that
+  one first (`.\adb uninstall io.github.bubbagum88.slopitect`). Later
+  builds all use `ci/debug.keystore` and install over each other. It's a
+  debug key, so anyone with this repo can sign an APK with it.
+- The command server has no password. It only listens on the headset's
+  loopback address, so only adb (or an app on the headset) can reach it.
 
 ## Credits
 
