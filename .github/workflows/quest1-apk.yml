@@ -2,6 +2,7 @@ name: Quest 1 APK
 
 on:
   push:
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
@@ -52,7 +53,16 @@ jobs:
             -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
 
       - name: Import the project
-        run: ./godot --headless --path game --import
+        run: |
+          set -euo pipefail
+          # Register the plugin before Godot first opens the project. Without
+          # this, Godot finds and loads the plugin partway through the import,
+          # then crashes on exit (SIGSEGV, exit 134; Godot 4.7.2 with plugin
+          # 5.1.0). Listed up front, it loads at start-up as it does on every
+          # later open of the project, and the import exits cleanly.
+          mkdir -p game/.godot
+          echo "res://addons/godotopenxrvendors/plugin.gdextension" > game/.godot/extension_list.cfg
+          ./godot --headless --path game --import
 
       - name: Export the APK
         env:

@@ -79,9 +79,12 @@ plugin, checks each file's SHA-512, exports a debug APK, and then checks the
 APK itself: the build fails unless `com.oculus.supportedDevices` is exactly
 `quest|quest2` (naming a newer headset makes the Quest 1 abort at start).
 
-To build on your own PC instead: open `game/` in Godot 4.7.2, install the
-Godot OpenXR Vendors plugin 5.1.0 into `game/addons/`, install the Android
-build template, and export the "Quest 1" preset.
+To build on your own PC instead: install the Godot OpenXR Vendors plugin
+5.1.0 into `game/addons/`, open `game/` in Godot 4.7.2, install the Android
+build template, and export the "Quest 1" preset. (Godot 4.7.2 crashes on
+exit the first time it imports a project whose plugin was just added; the
+import itself is fine, and the next start is clean. CI avoids it by
+registering the plugin first.)
 
 ## Repository layout
 
@@ -106,3 +109,7 @@ build template, and export the "Quest 1" preset.
 - [Godot Engine](https://godotengine.org), MIT licence
 - [Godot OpenXR Vendors](https://github.com/GodotVR/godot_openxr_vendors), MIT licence
 - Made by Bubbagum88 with Claude
+
+## Licence
+
+MIT, see [LICENSE](LICENSE).
