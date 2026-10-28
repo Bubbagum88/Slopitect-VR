@@ -1,6 +1,7 @@
-[gd_scene load_steps=11 format=3]
+[gd_scene load_steps=12 format=3]
 
 [ext_resource type="Script" path="res://main.gd" id="1_main"]
+[ext_resource type="Script" path="res://command_server.gd" id="2_cmd"]
 
 [sub_resource type="ProceduralSkyMaterial" id="sky_material"]
 
@@ -68,3 +69,9 @@ tracker = &"right_hand"
 [node name="Mesh" type="MeshInstance3D" parent="XROrigin3D/RightHand"]
 mesh = SubResource("hand_mesh")
 surface_material_override/0 = SubResource("right_material")
+
+[node name="World" type="Node3D" parent="."]
+
+[node name="CommandServer" type="Node" parent="."]
+script = ExtResource("2_cmd")
+world_path = NodePath("../World")
