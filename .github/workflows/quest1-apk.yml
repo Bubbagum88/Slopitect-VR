@@ -26,7 +26,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: whisper-out
-          key: godot-whisper-${{ env.WHISPER_COMMIT }}-android-arm64-ndk${{ env.WHISPER_NDK }}
+          key: godot-whisper-${{ env.WHISPER_COMMIT }}-android-arm64-linux-x86_64-ndk${{ env.WHISPER_NDK }}
 
       - if: steps.cache.outputs.cache-hit != 'true'
         uses: actions/checkout@v4
@@ -36,7 +36,10 @@ jobs:
           path: godot-whisper
           submodules: true
 
-      - name: Build godot-whisper for the Quest (Android arm64)
+      # The Quest's library goes in the APK. The Linux one is for the editor
+      # that imports and exports the project here: Godot 4.7.2 aborts on exit
+      # (exit 134) when a listed extension has no library for its own system.
+      - name: Build godot-whisper for the Quest (Android arm64) and for Linux
         if: steps.cache.outputs.cache-hit != 'true'
         run: |
           set -euo pipefail
@@ -46,13 +49,15 @@ jobs:
           pip install scons
           cd godot-whisper
           scons platform=android arch=arm64 target=template_release -j"$(nproc)"
+          scons platform=linux arch=x86_64 target=template_release -j"$(nproc)"
           mkdir -p ../whisper-out/bin
-          cp bin/addons/godot_whisper/bin/libgodot_whisper.android.template_release.arm64.so ../whisper-out/bin/
+          cp bin/addons/godot_whisper/bin/libgodot_whisper.android.template_release.arm64.so \
+            bin/addons/godot_whisper/bin/libgodot_whisper.linux.template_release.x86_64.so ../whisper-out/bin/
           cp LICENSE THIRDPARTY.txt ../whisper-out/
 
       - uses: actions/upload-artifact@v4
         with:
-          name: godot-whisper-android-arm64
+          name: godot-whisper
           path: whisper-out
 
   build:
@@ -89,7 +94,7 @@ jobs:
 
       - uses: actions/download-artifact@v4
         with:
-          name: godot-whisper-android-arm64
+          name: godot-whisper
           path: game/addons/godot_whisper
 
       - name: Import the project
