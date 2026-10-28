@@ -10,7 +10,7 @@
 | Files in the Slopitect folder | `files_*` commands | It's the headset's storage (`/sdcard/Slopitect`) |
 | Which AI the agent uses | `agent_config` from the PC: `provider`, `model`, `base_url`, `api_key` | Yes, `user://agent.json` |
 | What the agent may do | `agent_config` from the PC: `allowed_tools` | Yes |
-| How the agent works | `agent_config`: `effort`, `max_tokens`, `max_tool_rounds`, `show_thinking` | Yes |
+| How the agent works | `agent_config`: `effort`, `max_tokens`, `max_tool_rounds`, `show_thinking`, and the token limits `max_tokens_per_ask`, `max_context_tokens`, `max_tool_result_chars` | Yes |
 | Speech and hold-to-talk | `voice_config` from the PC | Yes, `user://voice.json` |
 | Personal folders the agent may reach | `files_config` from the PC (`unblock`, `block`) | Yes, `user://files.json` |
 | The agent's skills | `SKILL.md` files in `user://skills/<name>/` (replace a shipped skill of the same name) | Yes |

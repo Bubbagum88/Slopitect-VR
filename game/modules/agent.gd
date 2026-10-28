@@ -6,7 +6,9 @@ extends SlopitectModule
 # self-hosted models). Its tools are every command the other modules
 # register, so a new module is a new thing the agent can do. Its skills are
 # SKILL.md files in res://skills/ (shipped) and user://skills/ (added on the
-# headset; a skill there replaces a shipped one of the same name).
+# headset; a skill there replaces a shipped one of the same name). A skill
+# with "always: true" in its header is followed in every reply: its text is
+# part of the agent's instructions (like caveman, which keeps replies short).
 #
 # Settings are saved in user://agent.json. The API key is never logged and
 # never sent back by any command, and it only ever goes to the address it was
@@ -31,6 +33,12 @@ const DEFAULTS := {
 	"effort": "medium",
 	"fallbacks": true,
 	"max_tool_rounds": 25,
+	# Token limits, so one request can't run away with them. Tokens are what
+	# the AI company bills: the prompt (everything sent, every round) and the
+	# reply (with its thinking).
+	"max_tokens_per_ask": 300000,  # one question, all its rounds together; it stops there
+	"max_context_tokens": 80000,  # a conversation this big starts over at the next question
+	"max_tool_result_chars": 8000,  # a longer tool reply is cut, and the agent is told
 	# Ask the AI for a short summary of its thinking, shown in the chat window
 	# (providers that can't show thinking ignore it).
 	"show_thinking": true,
@@ -64,9 +72,12 @@ var _round := 0
 var _last_reply := ""
 var _last_error := ""
 var _log: Array = []
-var _skills := {}  # name -> {"description": String, "path": String}
+var _skills := {}  # name -> {"description": String, "path": String, "always": bool}
 var _stop_requested := false
 var _waiting_on: SlopitectPending  # a tool waiting for the person's answer
+var _context_tokens := 0  # the size of the last prompt sent: the conversation so far
+var _ask_tokens := {"input": 0, "output": 0, "cached": 0}  # the current (or last) question
+var _total_tokens := {"input": 0, "output": 0, "cached": 0}  # since the app started
 
 signal _reply_ready(result: Array)
 
@@ -107,6 +118,13 @@ func _ask(request: Dictionary) -> Dictionary:
 		return {"ok": false, "error": "the agent is still working on the last request (agent_status shows it)"}
 	if _provider == null:
 		return {"ok": false, "error": "no working provider; set one with agent_config"}
+	# Every round sends the whole conversation again, so a long one costs
+	# more with each question. Past the limit, this question starts a new one
+	# (the world itself stays; the agent can look at it again with list).
+	if _context_tokens > int(settings["max_context_tokens"]) and not _history.is_empty():
+		_note("started a new conversation: the last one had grown to %d tokens (max_context_tokens %d)" % [_context_tokens, settings["max_context_tokens"]])
+		_history.clear()
+		_context_tokens = 0
 	# After a run that stopped mid-way, the conversation ends with tool
 	# results; the new message goes in the same turn, after them.
 	if not _history.is_empty() and _history[-1]["role"] == "tool_results":
@@ -129,6 +147,7 @@ func _status(_request: Dictionary) -> Dictionary:
 		"last_reply": _last_reply,
 		"last_error": _last_error,
 		"turns": _history.size(),
+		"tokens": {"conversation": _context_tokens, "this_question": _ask_tokens.duplicate(), "since_start": _total_tokens.duplicate()},
 		"events": _log.duplicate(),
 		"status_line": _status_line(),
 	}
@@ -194,6 +213,7 @@ func _reset(_request: Dictionary) -> Dictionary:
 	if _busy:
 		return {"ok": false, "error": "the agent is still working; wait for it to finish"}
 	_history.clear()
+	_context_tokens = 0
 	_last_reply = ""
 	_last_error = ""
 	_note("conversation reset")
@@ -215,6 +235,7 @@ func _run_conversation() -> void:
 	_stop_requested = false
 	_last_error = ""
 	_round = 0
+	_ask_tokens = {"input": 0, "output": 0, "cached": 0}
 	_load_skills()
 	var tools := _tools()
 	var system := _system_prompt()
@@ -243,7 +264,14 @@ func _run_conversation() -> void:
 		if reply.has("error"):
 			_fail(reply["error"])
 			break
-		print("Slopitect agent: reply stop=%s, %d tool calls, usage %s" % [reply["stop"], reply["tool_calls"].size(), JSON.stringify(reply["usage"])])
+		var tokens: Dictionary = reply.get("tokens", {"input": 0, "output": 0, "cached": 0})
+		for key in _ask_tokens:
+			_ask_tokens[key] += int(tokens.get(key, 0))
+			_total_tokens[key] += int(tokens.get(key, 0))
+		_context_tokens = int(tokens.get("input", 0)) + int(tokens.get("output", 0))
+		var spent: int = _ask_tokens["input"] + _ask_tokens["output"]
+		print("Slopitect agent: reply stop=%s, %d tool calls, tokens in %d (cached %d) out %d; this question %d, conversation %d; usage %s" % [
+			reply["stop"], reply["tool_calls"].size(), tokens.get("input", 0), tokens.get("cached", 0), tokens.get("output", 0), spent, _context_tokens, JSON.stringify(reply["usage"])])
 		_history.append({"role": "assistant", "provider": settings["provider"], "raw": reply["raw"],
 			"text": reply["text"], "tool_calls": reply["tool_calls"]})
 		if not String(reply.get("thinking", "")).is_empty():
@@ -255,6 +283,9 @@ func _run_conversation() -> void:
 			_history.append({"role": "tool_results", "results": await _run_tools(reply["tool_calls"])})
 			if _stop_requested:
 				_note("stopped")
+				break
+			if spent >= int(settings["max_tokens_per_ask"]):
+				_fail("stopped: this question used %d tokens (max_tokens_per_ask %d); ask again to carry on" % [spent, settings["max_tokens_per_ask"]])
 				break
 			continue
 		match reply["stop"]:
@@ -311,6 +342,11 @@ func _run_tools(calls: Array) -> Array:
 				_waiting_on = null
 			content = JSON.stringify(outcome)
 			is_error = not outcome.get("ok", false)
+			# Each tool reply is sent again on every later round, so a huge one
+			# (a big file, a long list) would cost over and over.
+			var cap := int(settings["max_tool_result_chars"])
+			if content.length() > cap:
+				content = content.left(cap) + "\n[cut: %d more characters. Ask for less, like files_read with offset and max_bytes.]" % (content.length() - cap)
 		_note("tool %s %s -> %s" % [call["name"], JSON.stringify(input).left(200), "FAILED: " + content.left(200) if is_error else "ok"])
 		results.append({"id": call["id"], "name": call["name"], "content": content, "is_error": is_error})
 	return results
@@ -348,12 +384,16 @@ func _tools() -> Array:
 
 
 func _system_prompt() -> String:
-	if _skills.is_empty():
-		return SYSTEM_PROMPT
+	var prompt := SYSTEM_PROMPT
 	var lines := PackedStringArray()
 	for name in _skills:
-		lines.append("- %s: %s" % [name, _skills[name]["description"]])
-	return SYSTEM_PROMPT + "\nYou have these skills. Before doing something one of them covers, read it with read_skill.\n" + "\n".join(lines) + "\n"
+		if _skills[name]["always"]:
+			prompt += "\nAlways follow this skill (%s):\n%s\n" % [name, _skill_body(FileAccess.get_file_as_string(_skills[name]["path"]))]
+		else:
+			lines.append("- %s: %s" % [name, _skills[name]["description"]])
+	if not lines.is_empty():
+		prompt += "\nYou have these skills. Before doing something one of them covers, read it with read_skill.\n" + "\n".join(lines) + "\n"
+	return prompt
 
 
 func _fail(problem: String) -> void:
@@ -433,6 +473,10 @@ func _check_setting(key: String, value: Variant) -> Array:
 				if typeof(item) != TYPE_STRING or item.is_empty() or item == "*" or item.begins_with("agent_"):
 					return ["\"allowed_tools\" entries must be command names (a trailing * is allowed, a lone * and agent_ commands are not): %s" % JSON.stringify(item), null]
 			return ["", value.duplicate()]
+		"max_tokens_per_ask", "max_context_tokens", "max_tool_result_chars":
+			if typeof(value) not in [TYPE_INT, TYPE_FLOAT] or value != floorf(value) or value < 1000 or value > 10000000:
+				return ["\"%s\" must be a whole number from 1000 to 10000000" % key, null]
+			return ["", int(value)]
 		"max_tokens", "max_tool_rounds":
 			if typeof(value) not in [TYPE_INT, TYPE_FLOAT] or value != floorf(value) or value < 1 or value > 128000:
 				return ["\"%s\" must be a whole number from 1 to 128000" % key, null]
@@ -508,7 +552,7 @@ func _load_skills() -> void:
 			if header.has("error"):
 				push_error("Slopitect agent: skipped skill %s: %s" % [path, header["error"]])
 				continue
-			_skills[header["name"]] = {"description": header["description"], "path": path}
+			_skills[header["name"]] = {"description": header["description"], "path": path, "always": header.get("always", "") == "true"}
 
 
 # A skill starts with a header between --- lines with name: and description:.
@@ -529,6 +573,12 @@ func _skill_header(text: String) -> Dictionary:
 		if colon > 0:
 			header[line.left(colon).strip_edges()] = line.substr(colon + 1).strip_edges()
 	return {"error": "its header never ends (no closing ---)"}
+
+
+# A skill's text without its header.
+func _skill_body(text: String) -> String:
+	var end := text.find("\n---", 3)
+	return text.substr(text.find("\n", end + 1) + 1).strip_edges() if end != -1 else text
 
 
 func _read_skill(skill_name: Variant) -> Array:

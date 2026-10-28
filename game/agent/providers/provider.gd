@@ -27,7 +27,9 @@ func build_request(_settings: Dictionary, _system: String, _history: Array, _too
 
 
 # Returns {"text": String, "tool_calls": Array, "stop": String, "raw": Variant,
-# "usage": Dictionary, and optionally "thinking": String}, or {"error": String}. "stop" is one of "tool_use",
+# "usage": Dictionary (the provider's own), "tokens": {"input", "output",
+# "cached"} (input counts all of the prompt; cached is the part read from the
+# provider's cache), and optionally "thinking": String}, or {"error": String}. "stop" is one of "tool_use",
 # "end", "max_tokens", "refusal", or the provider's own word for anything else.
 func parse_response(_code: int, _body: String) -> Dictionary:
 	return {"error": "this provider does not parse replies"}

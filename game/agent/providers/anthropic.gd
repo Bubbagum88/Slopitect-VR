@@ -32,12 +32,18 @@ func build_request(settings: Dictionary, system: String, history: Array, tools: 
 	var tool_list := []
 	for tool in tools:
 		tool_list.append({"name": tool["name"], "description": tool["description"], "input_schema": tool["schema"]})
+	# Prompt caching: everything up to the end of the last request (tools,
+	# system, the conversation so far) is read back at a twentieth of the
+	# price instead of being paid in full on every round. One marker on the
+	# system prompt, which never changes in a conversation, and the API's
+	# automatic one on the newest message.
 	var body := {
 		"model": settings["model"],
 		"max_tokens": int(settings["max_tokens"]),
-		"system": system,
+		"system": [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
 		"messages": messages,
 		"tools": tool_list,
+		"cache_control": {"type": "ephemeral"},
 	}
 	# Thinking is always on for Claude Opus 5.5; "summarized" also sends back a
 	# readable summary of it instead of an empty block.
@@ -100,5 +106,17 @@ func parse_response(code: int, body: String) -> Dictionary:
 		"stop": stop,
 		"raw": {"role": "assistant", "content": data.get("content", [])},
 		"usage": data.get("usage", {}),
+		"tokens": _tokens(data.get("usage", {})),
 		"detail": data.get("stop_details", null),
+	}
+
+
+# input_tokens is only the part that was neither read from nor written to
+# the cache; the whole prompt is the three together.
+func _tokens(usage: Dictionary) -> Dictionary:
+	var cached := int(usage.get("cache_read_input_tokens", 0))
+	return {
+		"input": int(usage.get("input_tokens", 0)) + int(usage.get("cache_creation_input_tokens", 0)) + cached,
+		"output": int(usage.get("output_tokens", 0)),
+		"cached": cached,
 	}

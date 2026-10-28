@@ -147,7 +147,7 @@ connects your PC's port 7777 to the app (again after each reconnect).
 | `agent_status` | | `{"cmd":"agent_status"}`: what it's doing, its reply, recent steps |
 | `agent_stop` | | `{"cmd":"agent_stop"}` |
 | `agent_reset` | | `{"cmd":"agent_reset"}` starts a new conversation |
-| `agent_config` | any of `provider`, `model`, `base_url`, `api_key`, `effort`, `max_tokens`, `max_tokens_field`, `max_tool_rounds`, `fallbacks`, `show_thinking`, `allowed_tools` | `{"cmd":"agent_config"}` shows them |
+| `agent_config` | any of `provider`, `model`, `base_url`, `api_key`, `effort`, `max_tokens`, `max_tokens_field`, `max_tool_rounds`, `max_tokens_per_ask`, `max_context_tokens`, `max_tool_result_chars`, `fallbacks`, `show_thinking`, `allowed_tools` | `{"cmd":"agent_config"}` shows them |
 | `agent_skills` | | `{"cmd":"agent_skills"}` |
 | `avatar_move` | `position` | `{"cmd":"avatar_move","position":[0,1.4,-1]}` |
 | `avatar_say` | `text` | `{"cmd":"avatar_say","text":"Hi!"}` |
@@ -276,7 +276,22 @@ Then hold the left trigger, talk, and let go: the words go into the chat's
 input box for you to check and Send (`"send_to_agent":true` sends them
 straight away). Android asks once for the microphone.
 
-The default is Claude Opus 5.5 (`claude-opus-5-5`), effort `medium`. If
+The default is Claude Opus 5.5 (`claude-opus-5-5`), effort `medium`.
+
+**Tokens** (what the AI company bills): `agent_status` shows them under
+`tokens` (the conversation's size, this question, and since the app
+started), and each round logs them. To keep them down:
+- With Claude, everything already sent is cached, so each later round reads
+  it back at a twentieth of the price instead of paying for it again.
+- Replies are kept short (the `caveman` skill, which is always on).
+- A tool reply over `max_tool_result_chars` (8000) is cut, and the agent is
+  told to ask for less.
+- One question stops after `max_tokens_per_ask` (300000) tokens; ask again
+  to carry on.
+- A conversation over `max_context_tokens` (80000) starts over at the next
+  question (the world stays; the agent looks again with `list`).
+- Lower `effort` (`low`) thinks less; a cheaper model (like
+  `claude-haiku-5-5`) costs far less per token, but is less capable. If
 Claude declines a request, the API runs it again on the model Anthropic
 recommends (`fallbacks`; Claude API only).
 

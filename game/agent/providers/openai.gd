@@ -88,4 +88,17 @@ func parse_response(code: int, body: String) -> Dictionary:
 		"stop": stop,
 		"raw": message,
 		"usage": data.get("usage", {}),
+		"tokens": _tokens(data.get("usage", {})),
+	}
+
+
+# Services that cache prompts on their own report it in prompt_tokens_details.
+func _tokens(usage) -> Dictionary:
+	if typeof(usage) != TYPE_DICTIONARY:
+		return {"input": 0, "output": 0, "cached": 0}
+	var details = usage.get("prompt_tokens_details", {})
+	return {
+		"input": int(usage.get("prompt_tokens", 0)),
+		"output": int(usage.get("completion_tokens", 0)),
+		"cached": int(details.get("cached_tokens", 0)) if typeof(details) == TYPE_DICTIONARY else 0,
 	}
