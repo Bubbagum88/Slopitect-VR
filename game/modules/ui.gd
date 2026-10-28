@@ -237,6 +237,7 @@ func _set_visible(panel: Dictionary, on: bool) -> void:
 		_place_in_front(panel)
 	panel["visible"] = on
 	_holders[panel["id_panel"]].visible = on
+	_set_pointable(_holders[panel["id_panel"]], on)
 	if on:
 		_since_poll = POLL_SECONDS
 		if _focus.is_empty() or not _element_visible(_focus):
@@ -863,8 +864,16 @@ func _build(id_panel: String) -> void:
 	var notice := _make_label(Vector3(0, _bottom_of(panel) - 0.03, 0.002), 0.6, 26, Color(1.0, 0.45, 0.4), false, "center")
 	notice.name = "Notice"
 	holder.add_child(notice)
+	_set_pointable(holder, panel["visible"])
 	if panel["visible"]:
 		_since_poll = POLL_SECONDS
+
+
+# A hidden panel's buttons are still in the physics world; without this the
+# pointer would find (and press) them where the panel was.
+func _set_pointable(holder: Node3D, on: bool) -> void:
+	for body in holder.find_children("*", "StaticBody3D", true, false):
+		body.collision_layer = UI_LAYER if on else 0
 
 
 func _make_element(id_panel: String, element: Dictionary, at: Vector3, size: Vector2) -> Node3D:
