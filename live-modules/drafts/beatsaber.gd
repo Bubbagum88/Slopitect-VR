@@ -34,7 +34,7 @@ const FULL_ANGLE := 5.0     # degrees off the arrow that still score full angle 
 const ZERO_ANGLE := 25.0    # degrees off the arrow at which the angle points run out
 const CENTRE_RANGE := 0.2   # metres from the block's centre where centre points run out
 const FIT_PATH := "user://beatsaber.json"
-const FIT_DEFAULTS := {"angle": 45.0, "grip": [0.0, -1.8, 1.8], "hold": 5.0}  # Touch: Chromium's WebXR grip is the aim turned up 45 degrees, 2.5 cm down
+const FIT_DEFAULTS := {"angle": 45.0, "grip": [0.0, -1.8, 1.8], "hold": 10.0}  # Touch: Chromium's WebXR grip is the aim turned up 45 degrees, 2.5 cm down
 const FIT_ANGLE_RANGE := [-30.0, 90.0]
 const FIT_CM_MAX := 15.0
 
