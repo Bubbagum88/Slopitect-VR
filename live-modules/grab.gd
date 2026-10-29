@@ -8,11 +8,22 @@ extends SlopitectModule
 # are the controls module's "grab_left" and "grab_right" actions; pointing
 # at a panel, the right grip moves the panel instead (the ui module is
 # asked first).
+# Grip a held thing with the other hand too and pull your hands apart or
+# together to make it bigger or smaller; it keeps its shape. Letting go
+# with either hand leaves it in the other. The whole hold, moves and resizes,
+# is one undo.
 
 const REACH := 0.12  # metres from the hand to the thing's box
 const SPEED_FRAMES := 6  # hand speed is taken over this many frames
+const SMALLEST := 0.02  # metres: a resized thing's longest side stays at least this
+const BIGGEST := 20.0  # and at most this
 
 var _held := {}  # hand name -> {"node", "offset": Transform3D, "before": Transform3D}
+# While both hands hold one thing: {"node", "hand": the one it follows,
+# "distance": between the hands when the second took it, "scale": its scale
+# then, "longest": its longest side then, "from_middle": where it was from
+# the point between the hands, in that hand's own directions}
+var _resize := {}
 var _trail := {"left": [], "right": []}  # recent [time, position] of each hand
 
 
@@ -38,8 +49,32 @@ func _physics_process(_delta: float) -> void:
 		var held: Dictionary = _held[hand]
 		if not is_instance_valid(held["node"]) or not (held["node"] as Node3D).is_inside_tree():
 			_held.erase(hand)  # deleted while held
+			_resize.clear()
+			continue
+		if not _resize.is_empty() and _resize["node"] == held["node"]:
+			if hand == _resize["hand"]:
+				_follow_both()
 			continue
 		(held["node"] as Node3D).global_transform = (ctx[hand] as Node3D).global_transform * held["offset"]
+
+
+# Both hands on one thing: it moves and turns with the hand that took it
+# first, and its size goes with how far apart the hands are, growing or
+# shrinking about the point between them (where it was from that point
+# turns with the hand and scales with the size).
+func _follow_both() -> void:
+	var node: Node3D = _resize["node"]
+	var hand: String = _resize["hand"]
+	var left: Vector3 = (ctx["left"] as Node3D).global_position
+	var right: Vector3 = (ctx["right"] as Node3D).global_position
+	var factor: float = left.distance_to(right) / _resize["distance"]
+	factor = clampf(factor, SMALLEST / _resize["longest"], BIGGEST / _resize["longest"])
+	var turn: Basis = (ctx[hand] as Node3D).global_basis.orthonormalized()
+	var follow: Transform3D = (ctx[hand] as Node3D).global_transform * _held[hand]["offset"]
+	var start_scale: Vector3 = _resize["scale"]
+	var from_middle: Vector3 = _resize["from_middle"]
+	node.global_transform = Transform3D(follow.basis.orthonormalized() * Basis.from_scale(start_scale * factor),
+		(left + right) / 2.0 + turn * from_middle * factor)
 
 
 # --- Picking up ----------------------------------------------------------------------
@@ -64,7 +99,7 @@ func _grip(hand: String) -> bool:
 	var best: Node3D = null
 	var best_distance := REACH
 	for thing in _grabbable():
-		if _held.values().any(func(h): return h["node"] == thing):
+		if _held.has(hand) and _held[hand]["node"] == thing:
 			continue
 		if not thing.is_visible_in_tree() or thing.get_meta("slopitect_no_grab", false):
 			continue  # hidden, or made ungrabbable with the inspect tool
@@ -74,6 +109,10 @@ func _grip(hand: String) -> bool:
 			best_distance = distance
 	if best == null:
 		return false
+	var other := "right" if hand == "left" else "left"
+	if _held.has(other) and _held[other]["node"] == best:
+		_start_resize(hand, other, best)
+		return true
 	_held[hand] = {"node": best, "offset": (ctx[hand] as Node3D).global_transform.affine_inverse() * best.global_transform,
 		"before": best.global_transform}
 	var physics: SlopitectModule = ctx["modules"].module("physics")
@@ -84,6 +123,21 @@ func _grip(hand: String) -> bool:
 	return true
 
 
+# The second hand on a held thing: from now on its size follows the hands.
+func _start_resize(hand: String, other: String, node: Node3D) -> void:
+	var distance := (ctx["left"] as Node3D).global_position.distance_to((ctx["right"] as Node3D).global_position)
+	var box := _box(node)
+	var longest := maxf(box.size[box.get_longest_axis_index()], 0.001)
+	_held[hand] = {"node": node, "offset": (ctx[hand] as Node3D).global_transform.affine_inverse() * node.global_transform,
+		"before": _held[other]["before"]}
+	var middle := ((ctx["left"] as Node3D).global_position + (ctx["right"] as Node3D).global_position) / 2.0
+	var from_middle: Vector3 = (ctx[other] as Node3D).global_basis.orthonormalized().inverse() * (node.global_position - middle)
+	_resize = {"node": node, "hand": other, "distance": maxf(distance, 0.01), "scale": node.scale, "longest": longest,
+		"from_middle": from_middle}
+	(ctx[hand] as XRController3D).trigger_haptic_pulse("haptic", 0.0, 0.3, 0.05, 0.0)
+	print("Slopitect grab: %s hand took %s too; pull apart or together to resize" % [hand, node.name])
+
+
 func _let_go(hand: String) -> void:
 	if not _held.has(hand):
 		return
@@ -91,6 +145,15 @@ func _let_go(hand: String) -> void:
 	_held.erase(hand)
 	var node: Node3D = held["node"]
 	if not is_instance_valid(node):
+		_resize.clear()
+		return
+	var other := "right" if hand == "left" else "left"
+	if _held.has(other) and _held[other]["node"] == node:
+		# Still in the other hand: it keeps the size it has now and follows
+		# that hand alone.
+		_resize.clear()
+		_held[other]["offset"] = (ctx[other] as Node3D).global_transform.affine_inverse() * node.global_transform
+		print("Slopitect grab: %s hand let go of %s; the %s hand still has it" % [hand, node.name, other])
 		return
 	var physics: SlopitectModule = ctx["modules"].module("physics")
 	if physics:
@@ -101,7 +164,8 @@ func _let_go(hand: String) -> void:
 	var tools: SlopitectModule = ctx["modules"].module("tools")
 	if tools and not before.is_equal_approx(after):
 		var put := func(t: Transform3D): if is_instance_valid(node): node.global_transform = t
-		tools.call("push_undo", "move %s" % node.name, put.bind(before), put.bind(after))
+		var what := "move" if before.basis.get_scale().is_equal_approx(after.basis.get_scale()) else "resize"
+		tools.call("push_undo", "%s %s" % [what, node.name], put.bind(before), put.bind(after))
 	print("Slopitect grab: %s hand let go of %s" % [hand, node.name])
 
 
@@ -149,7 +213,8 @@ func _status(_request: Dictionary) -> Dictionary:
 	var holding := {}
 	for hand in _held:
 		holding[hand] = String(_held[hand]["node"].name) if is_instance_valid(_held[hand]["node"]) else ""
-	return {"ok": true, "holding": holding}
+	var resizing: String = String(_resize["node"].name) if not _resize.is_empty() and is_instance_valid(_resize["node"]) else ""
+	return {"ok": true, "holding": holding, "resizing": resizing}
 
 
 func _release_command(request: Dictionary) -> Dictionary:

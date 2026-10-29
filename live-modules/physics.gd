@@ -180,8 +180,10 @@ func _physics_process(_delta: float) -> void:
 			_drop_body(node_name)  # deleted or renamed; the scan picks it up again by name
 			continue
 		var scale := node.global_basis.get_scale()
-		if not scale.is_equal_approx(entry["scale"]):
-			_make_body(node, _settings[node_name])  # resized: a new shape to match
+		if not scale.is_equal_approx(entry["scale"]) and not entry["held"]:
+			# Resized: a new shape to match. Not while a hand holds it (two-hand
+			# resizing changes it every frame); it's made when it's let go.
+			_make_body(node, _settings[node_name])
 			continue
 		if entry["held"] or not node.global_transform.is_equal_approx(entry["written"]):
 			# Moved by a hand or a command: the body goes where the thing is.
