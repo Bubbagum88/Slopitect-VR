@@ -68,6 +68,7 @@ All PC-tested. Most are now loaded on the headset; a module counts as Headset on
 | physics | Static or dynamic bodies |
 | inspect | Point at a thing to switch its physics, grabbing and hiding, or delete it |
 | avatar | The agent's avatar, moved out of the APK: animations, emotions, a mouth that follows speech, a paged speech bubble that docks at the edge of view, outfits; `body()` for other modules (jelly). The APK avatar it replaces was seen on the headset; this one is PC-tested only |
+| holster | Stow the avatar at your hip with a grip and pull it out with a flick; hand menu Avatar button (PC-tested with simulated hands, 35 checks; not seen on the headset) |
 | memory | The agent's memory per world and global: notes, past questions with their tools and errors, digests; keys and personal info cleaned out |
 | aimsg | Formats the chat log (who's talking, wrapping, markdown out, code marked); shown through vrui.gd's source "format" |
 | net | Downloads, https only and only from hosts allowed on the PC (`net_config`), redirects checked; records each file's source |
