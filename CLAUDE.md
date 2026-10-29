@@ -3,7 +3,9 @@
 Read [docs/PROJECT-STATE.md](docs/PROJECT-STATE.md) first (what is built and
 how far each part is tested), then
 [docs/LIVE-CHANGES-AND-SAFETY.md](docs/LIVE-CHANGES-AND-SAFETY.md) and, for
-module work, [docs/MODULE-FRAMEWORK.md](docs/MODULE-FRAMEWORK.md).
+module work, [docs/MODULE-FRAMEWORK.md](docs/MODULE-FRAMEWORK.md) and
+[docs/DESIGN.md](docs/DESIGN.md). Headset access over Wi-Fi:
+[docs/WIRELESS-ADB.md](docs/WIRELESS-ADB.md).
 
 ## The owner's rules
 
