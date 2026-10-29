@@ -28,8 +28,8 @@ Keep replies short; they are read on a small panel in VR, and may be read aloud.
 """
 
 # Skills to always follow (true) or only read when needed (false), whatever
-# their own header says. caveman is off since the agent moved to Haiku.
-const ALWAYS := {"caveman": false}
+# their own header says. caveman is on: short replies are quicker to read aloud.
+const ALWAYS := {"caveman": true}
 
 # More skills, without an APK: modules/agent_skills/NAME/SKILL.md in the
 # Slopitect folder, the same format as game/skills/ (a --- header with name:,
