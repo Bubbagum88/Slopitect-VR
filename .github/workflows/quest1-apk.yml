@@ -22,11 +22,18 @@ jobs:
   whisper:
     runs-on: ubuntu-24.04
     steps:
+      - uses: actions/checkout@v4
+        with:
+          path: slopitect
+          sparse-checkout: ci
+
+      # The finished libraries, reused as long as the plugin's commit, the NDK
+      # and our patch to it stay the same: most runs skip the build entirely.
       - id: cache
         uses: actions/cache@v4
         with:
           path: whisper-out
-          key: godot-whisper-${{ env.WHISPER_COMMIT }}-android-arm64-linux-x86_64-ndk${{ env.WHISPER_NDK }}-sgemm-fix1
+          key: godot-whisper-${{ env.WHISPER_COMMIT }}-android-arm64-linux-x86_64-ndk${{ env.WHISPER_NDK }}-patch-${{ hashFiles('slopitect/ci/patch-godot-whisper.py') }}
 
       - if: steps.cache.outputs.cache-hit != 'true'
         uses: actions/checkout@v4
@@ -36,11 +43,15 @@ jobs:
           path: godot-whisper
           submodules: true
 
-      - uses: actions/checkout@v4
-        if: steps.cache.outputs.cache-hit != 'true'
+      # When the libraries do have to be rebuilt, SCons's cache of compiled
+      # files (keyed by each file's contents and flags) from the last build
+      # means only the files that changed are compiled again.
+      - if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache@v4
         with:
-          path: slopitect
-          sparse-checkout: ci
+          path: scons-cache
+          key: godot-whisper-scons-ndk${{ env.WHISPER_NDK }}-${{ github.run_id }}
+          restore-keys: godot-whisper-scons-ndk${{ env.WHISPER_NDK }}-
 
       # The Quest's library goes in the APK. The Linux one is for the editor
       # that imports and exports the project here: Godot 4.7.2 aborts on exit
@@ -53,6 +64,7 @@ jobs:
           (yes || true) | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;${WHISPER_NDK}" > /dev/null
           test -d "$ANDROID_HOME/ndk/${WHISPER_NDK}" || { echo "::error::NDK ${WHISPER_NDK} did not install"; exit 1; }
           pip install scons
+          export SCONS_CACHE="$GITHUB_WORKSPACE/scons-cache"  # godot-cpp's SConstruct turns this into a CacheDir
           cd godot-whisper
           # The plugin's own sgemm.cpp patch leaves a function undefined on the
           # Quest 1's CPU, and the headset then can't load the library.

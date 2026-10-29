@@ -27,6 +27,13 @@ input/transcribe/use_gpu=false
 
 settings/stdout/verbose_stdout=true
 
+[physics]
+
+; Jolt, built into Godot, for 3D physics (physics.gd, grab.gd, inspect.gd).
+; It's faster with many bodies and steadier with stacks than Godot Physics.
+; Godot only makes it the default for new projects, so it's named here.
+3d/physics_engine="Jolt Physics"
+
 [rendering]
 
 ; OpenGL ES 3 renderer. The Quest 1 has GLES 3.2 with GL_OVR_multiview2,

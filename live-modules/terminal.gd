@@ -26,7 +26,8 @@ extends SlopitectModule
 # the headset; the agent using terminal_run is still held to its own
 # allowed tools for everything the line runs.
 #
-# Needs ui.gd for its window; without it the terminal_* commands still work.
+# Needs vrui.gd or ui.gd for its window; without either the terminal_*
+# commands still work.
 
 const PANEL := "terminal"
 const COLS := 62  # characters per screen line at FONT on the screen's width
@@ -106,8 +107,10 @@ func _has_panel() -> bool:
 	return false
 
 
+# The window module: vrui.gd if it's loaded, else ui.gd.
 func _ui() -> SlopitectModule:
-	return ctx["modules"].module("ui")
+	var vrui: SlopitectModule = ctx["modules"].module("vrui")
+	return vrui if vrui != null else ctx["modules"].module("ui")
 
 
 # --- Running a line ------------------------------------------------------------------
