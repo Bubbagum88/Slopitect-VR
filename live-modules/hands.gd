@@ -50,6 +50,7 @@ func setup() -> String:
 			box.visible = false
 			_boxes.append(box)
 	register("hands_status", _status, "the hands' colours")
+	register("hands_colours", _colours_command, "change the hands' colours in the headset (a comfort setting): any of skin (#rrggbb), nails (#rrggbb, every nail)")
 	register("hands_config", _config, "from the PC only: any of skin (#rrggbb), nails (#rrggbb, or 1 to 5 of them thumb to pinky, for both hands), nails_left, nails_right, or reset true")
 	return ""
 
@@ -176,6 +177,19 @@ func _apply_colours() -> void:
 
 func _status(_request: Dictionary) -> Dictionary:
 	return {"ok": true, "settings": settings, "controls": ctx["modules"].module("controls") != null}
+
+
+# Skin and nail colours can change in the headset (isaac's choice,
+# 2026-10-29); one colour per nail and reset stay with hands_config.
+func _colours_command(request: Dictionary) -> Dictionary:
+	var changes := {}
+	for key in request:
+		if key in ["cmd", "id"]:
+			continue
+		if not key in ["skin", "nails"] or typeof(request[key]) != TYPE_STRING:
+			return {"ok": false, "error": "hands_colours changes skin or nails, each a colour like \"#e0ac80\""}
+		changes[key] = request[key]
+	return _config(changes)
 
 
 func _config(request: Dictionary) -> Dictionary:

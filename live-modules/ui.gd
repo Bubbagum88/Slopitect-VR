@@ -74,6 +74,12 @@ const DEFAULT_THEME := {
 	"font_title": 40, "font_body": 36, "font_small": 28,
 }
 const THEME_FONTS := ["font_title", "font_body", "font_small"]
+# The text sizes ui_text_size picks from; "medium" is the default theme's.
+const TEXT_SIZES := {
+	"small": {"font_title": 34, "font_body": 30, "font_small": 24},
+	"medium": {"font_title": 40, "font_body": 36, "font_small": 28},
+	"large": {"font_title": 48, "font_body": 44, "font_small": 34},
+}
 const TYPE_COLORS := {"text": "text", "button": "button", "input": "input", "box": "screen", "toggle": "button", "slider": "accent"}
 # The colours ui.gd used to write into every element, before the theme; an
 # element saved with one of these follows the theme instead.
@@ -161,6 +167,7 @@ func setup() -> String:
 	register("ui_reset", _reset, "put the default panels back: optional id_panel for just that one")
 	register("ui_theme_status", _theme_status, "the theme every panel draws with: colours by name and text sizes")
 	register("ui_config", _config, "from the PC only: theme {name: #rrggbb or a text size}, or reset true")
+	register("ui_text_size", _text_size_command, "make every window's text smaller or bigger (a comfort setting, so it can change in the headset): size (%s)" % ", ".join(TEXT_SIZES.keys()))
 
 	_ray = RayCast3D.new()
 	_ray.target_position = Vector3(0, 0, -LASER_LENGTH)
@@ -1049,6 +1056,15 @@ func _config(request: Dictionary) -> Dictionary:
 	for panel in panels:
 		_build(panel["id_panel"])
 	return _theme_status({})
+
+
+# Text size is a comfort setting, so unlike the rest of the theme it can
+# change in the headset (isaac's choice, 2026-10-29); colours stay PC only.
+func _text_size_command(request: Dictionary) -> Dictionary:
+	var size = request.get("size")
+	if not size in TEXT_SIZES:
+		return {"ok": false, "error": "\"size\" must be one of %s" % [TEXT_SIZES.keys()]}
+	return _config({"theme": TEXT_SIZES[size]})
 
 
 func _check_theme_value(key, value) -> String:

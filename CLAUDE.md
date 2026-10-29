@@ -29,6 +29,10 @@ module work, [docs/MODULE-FRAMEWORK.md](docs/MODULE-FRAMEWORK.md).
   pairing on the command port, and host allowlists for downloads.
 - `NAME_config` settings change only from the PC, never from app buttons or
   the agent.
+  Exception (the owner's choice, 2026-10-29): comfort settings have their own
+  narrow commands usable in the headset (and so by the agent):
+  `move_comfort`, `ui_text_size`, `hands_colours`. Anything touching keys,
+  the agent, the network, files, pairing or code stays PC only.
 - Assets ripped from games on the headset stay local: never in the repo,
   GitHub or a backup.
 

@@ -10,6 +10,8 @@ extends SlopitectModule
 
 const SETTINGS_PATH := "user://move.json"
 const DEFAULTS := {"speed": 1.5, "turn": "snap", "snap_degrees": 30.0, "smooth_degrees": 90.0, "follow_ground": true}
+# What move_comfort may set, and in what range (narrower than move_config's).
+const COMFORT := {"speed": [0.5, 3.0], "snap_degrees": [15.0, 90.0], "smooth_degrees": [30.0, 180.0]}
 const DEADZONE := 0.2
 const SNAP_ON := 0.7  # stick past this turns once...
 const SNAP_OFF := 0.3  # ...and must come back under this before the next turn
@@ -26,6 +28,7 @@ func setup() -> String:
 	_load()
 	register("move_status", _status, "where the person stands and which way they face, and the move settings")
 	register("move_to", _move_to, "put the person somewhere: position [x, z] (their head goes there), optional facing (degrees, 0 = -z)")
+	register("move_comfort", _comfort, "change how you move, in the headset (comfort settings): any of turn (snap or smooth), speed (%s to %s m/s), snap_degrees (%s to %s), smooth_degrees (%s to %s a second)" % [COMFORT["speed"][0], COMFORT["speed"][1], COMFORT["snap_degrees"][0], COMFORT["snap_degrees"][1], COMFORT["smooth_degrees"][0], COMFORT["smooth_degrees"][1]])
 	register("move_config", _config, "from the PC only: any of speed (m/s), turn (snap or smooth), snap_degrees, smooth_degrees (a second), follow_ground (true/false)")
 	return ""
 
@@ -104,6 +107,25 @@ func _vec_out(v: Vector3) -> Array:
 
 
 # --- Settings ------------------------------------------------------------------------
+
+# The comfort settings can change in the headset (isaac's choice,
+# 2026-10-29); follow_ground and wider ranges stay with move_config.
+func _comfort(request: Dictionary) -> Dictionary:
+	var changes := {"cmd": "move_config"}
+	for key in request:
+		if key in ["cmd", "id"]:
+			continue
+		if key == "turn":
+			changes[key] = request[key]
+			continue
+		if not COMFORT.has(key):
+			return {"ok": false, "error": "move_comfort changes turn, speed, snap_degrees or smooth_degrees (the rest is move_config, from the PC)"}
+		var value = request[key]
+		if not _number(value) or float(value) < COMFORT[key][0] or float(value) > COMFORT[key][1]:
+			return {"ok": false, "error": "\"%s\" must be %s to %s" % [key, COMFORT[key][0], COMFORT[key][1]]}
+		changes[key] = value
+	return _config(changes)
+
 
 func _config(request: Dictionary) -> Dictionary:
 	var changes := {}
