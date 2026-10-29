@@ -85,13 +85,17 @@ Live modules only (no new APK):
 1. Keep the repo's paths.gd and tools.gd; drop stick_move.gd. *(Done.)*
 2. controls.gd: add `value(hand, name)` for grip and trigger, and "run a
    command" as a binding kind. Then drop controller.gd. *(Done, PC-tested;
-   panel attaching waits for step 5.)*
+   panel attaching is ui.gd's `hand` place, step 5.)*
 3. hands.gd: read through controls, save colours. *(Done, PC-tested.)*
 4. aimsg.gd: chat formatting only, real fields, no debug file. *(Done,
    PC-tested: ui.gd shows a source through a module's format(), so aimsg
    changes no window; that ui.gd part comes with the VR UI work.)*
 5. vrui.gd: take "point" from controls, respect the Yes/No window, redraw
-   only on change, save panels, take over panel attaching.
+   only on change, save panels, take over panel attaching. *(Done,
+   PC-tested: ui.gd now draws every panel the vrui way, takes "point" from
+   controls, does nothing while a question is up, draws again only on a
+   change and saves panels; panel attaching is the `hand` place. The vrui
+   draft is gone.)*
 6. world.gd: keep the windows, on top of save and projects. *(Done,
    PC-tested: worlds.gd, one window with Worlds, Checkpoints, Files and
    Modules tabs, opened from its tile on the Menu; world's own save format
@@ -116,7 +120,7 @@ Open decisions (the owner's):
 
 - Drop stick_move, controller and world's save format in favour of move,
   controls and save? (Recommended: yes.)
-- Should vrui become how all panels are drawn, or stay a separate kind of
-  window? (Leaning: try it as ui's renderer once it is cheap enough on the
-  Quest 1.)
+- ~~Should vrui become how all panels are drawn?~~ Decided 2026-10-29: yes,
+  ui.gd draws every panel the vrui way, only on a change. Still to see:
+  frame time on the Quest 1 with several panels.
 - Which sites may web downloads come from? assets.gd's list is the start.

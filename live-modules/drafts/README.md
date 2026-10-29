@@ -6,13 +6,7 @@ or tested yet, and they are not in the main `live-modules/` list. Each one
 will move up into `live-modules/` once it has been reworked to the module
 rules in [docs/MODULE-FRAMEWORK.md](../../docs/MODULE-FRAMEWORK.md).
 
-Do not `code_load` them on the headset as they are:
-
-| Draft | What it does | Why it waits |
-| --- | --- | --- |
-| `vrui.gd` | Real Godot buttons and sliders on a panel (idea from MT-ZD/Godot-3D-VR-UI, MIT) | Reads the trigger itself, so it can be pressed while a Yes/No question is open; redraws every frame |
-
-Already reworked or dropped: `hands.gd` moved up into `live-modules/`;
+All of them have been reworked or dropped (still in git history): `hands.gd` moved up into `live-modules/`;
 `aimsg.gd` became `live-modules/aimsg.gd` (the chat formatting only; the
 avatar already shows the agent's state); `web.gd` became
 `live-modules/net.gd` (only hosts allowed on the PC); `jelly.gd` became
@@ -20,8 +14,10 @@ avatar already shows the agent's state); `web.gd` became
 `controller.gd`'s "button runs a command" and "button shows a window" are binding kinds in
 `controls_config`, and right-stick walking is
 `{"sticks": {"right": "walk", "left": "turn"}}` there, so `controller.gd` and
-`stick_move.gd` are gone (still in git history). Panel attaching from
-`controller.gd` waits for the vrui rework.
+`stick_move.gd` are gone. `vrui.gd`'s look (rounded panels, real text and
+buttons, the hand window) is now how `live-modules/ui.gd` draws every
+window, taking "point" from controls and drawing only on a change; panel
+attaching from `controller.gd` is ui.gd's `hand` place.
 
 The full review, and what happens to each, is in
 [docs/MODULE-FRAMEWORK.md](../../docs/MODULE-FRAMEWORK.md).

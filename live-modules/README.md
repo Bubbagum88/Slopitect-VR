@@ -9,7 +9,7 @@ unless its file has changed since.
 | File | What it does |
 |---|---|
 | `controls.gd` | The only thing that reads the controllers: each button is bound to a named action (point, grab_left, grab_right, talk, left_menu, left_y, right_a, right_b) and each thumbstick to a stick (walk, turn). Other modules take the actions, and read how far a grip or trigger is pressed with `value()`. A button can also run a command (never a `*_config` or `agent_` one) or show and hide a window. `controls_status` shows the bindings; `controls_config` (PC only) changes them. X on the left controller always stops the agent and can't be bound |
-| `ui.gd` | Every window: the Menu (a launcher with a tile for every window), wrist panel, the agent's chat window and keyboard, and any panel you or the agent add (`ui_*` commands). Title bars to carry and close windows, tabs, toggles and sliders, one theme. Needs controls.gd for its buttons. See [docs/VR-UI.md](../docs/VR-UI.md) |
+| `ui.gd` | Every window: the Menu (a launcher with a tile for every window), wrist panel, the agent's chat window and keyboard, and any panel you or the agent add (`ui_*` commands). Drawn the way the vrui draft drew windows (rounded, wrapped text), redrawn only on a change. Title bars to carry and close windows, tabs, toggles and sliders, a hand window on a controller, rows/columns/grids that lay themselves out, buttons that open a sub-menu with a back arrow, scrolling text, one theme. Needs controls.gd for its buttons. See [docs/VR-UI.md](../docs/VR-UI.md) |
 | `tools.gd` | The tool window (B on the right controller): a button for each loaded tool, the chosen tool's buttons, and one Undo / Redo list for every tool |
 | `landscape.gd` | Ground you can shape, 20 × 20 m: raise, lower, smooth and flatten brushes. It stands in for the flat floor while it's loaded |
 | `paths.gd` | Roads and trails: put down points with the trigger, then press Finish. Optionally levels the ground under the path |
@@ -143,7 +143,9 @@ APK over the old one). The undo list is not saved.
 | `ui_add`, `ui_update` | a panel: `id_panel` and its fields (see docs/VR-UI.md) |
 | `ui_show` | `id_panel`, `visible` |
 | `ui_page` | `id_panel`, `page` |
-| `ui_element_add`, `ui_element_update`, `ui_element_remove` | `id_panel`, then `element` or `id_element` |
+| `ui_back` | `id_panel` (one a button's `open` opened) |
+| `ui_scroll` | `id_panel`, `id_element` (a `scroll` text), `lines` back from the newest |
+| `ui_element_add`, `ui_element_update`, `ui_element_remove` | `id_panel`, then `element` (and optional `parent`, a row/column/grid) or `id_element` |
 | `ui_press` | `id_panel`, `id_element` (a button or toggle) |
 | `ui_slide` | `id_panel`, `id_element`, `value` |
 | `ui_type`, `ui_key` | `text`; `key` (shift, backspace, clear) |

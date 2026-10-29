@@ -403,10 +403,7 @@ func _on_point_pressed() -> void:
 		"button", "toggle":
 			_pulse(0.4, 0.04)
 			_flash(_hovered)
-			if element.has("open") and not element.has("action"):
-				_open_menu(id_panel, element["open"])
-			else:
-				press(id_panel, id_element)
+			press(id_panel, id_element)
 		"slider":
 			_pulse(0.2, 0.02)
 			_sliding = id_panel + "/" + id_element
@@ -454,13 +451,15 @@ func _in_front() -> Array:
 	return [p.x, p.y, p.z]
 
 
-# A button's "open": the other panel takes this one's place (and this one
-# hides), with a back arrow in its title bar that brings this one back.
-func _open_menu(from: String, to: String) -> void:
+# A button's "open" (after its action works, if it has one): the other
+# panel takes this one's place (and this one hides), with a back arrow in
+# its title bar that brings this one back.
+func _open_menu(from: String, to: String) -> Dictionary:
 	var index := _index_of(to)
 	if index == -1:
-		_notice(from, "no panel \"%s\" to open" % to)
-		return
+		var error := "no panel \"%s\" to open" % to
+		_notice(from, error)
+		return {"ok": false, "error": error}
 	var target: Dictionary = panels[index]
 	_openers[to] = from
 	_build(to)
@@ -475,6 +474,7 @@ func _open_menu(from: String, to: String) -> void:
 	opener["visible"] = false
 	_holders[from].visible = false
 	_set_pointable(_holders[from], false)
+	return {"ok": true}
 
 
 func _back(id_panel: String) -> void:
@@ -521,6 +521,8 @@ func press(id_panel: String, id_element: String) -> Dictionary:
 	var fill := {}
 	if element["type"] == "toggle":
 		fill["{on}"] = not element["on"]
+	if not element.has("action"):
+		return _open_menu(id_panel, element["open"])  # a button that only opens a menu
 	return _run_element(id_panel, element, fill)
 
 
@@ -548,6 +550,8 @@ func _after_press(id_panel: String, element: Dictionary, fill: Dictionary, pendi
 func _pressed(id_panel: String, element: Dictionary, fill: Dictionary, reply: Dictionary) -> void:
 	var id_element: String = element["id"]
 	if reply.get("ok", false):
+		if element.has("open"):
+			_open_menu(id_panel, element["open"])
 		if element.has("clear_input"):
 			_inputs[id_panel + "/" + element["clear_input"]] = ""
 			_show_input(id_panel, element["clear_input"])
