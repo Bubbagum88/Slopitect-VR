@@ -34,6 +34,7 @@ unless its file has changed since.
 | `tts.gd` | Speech out (it used to be the APK's voice module): the agent's replies read aloud by the headset's speech engine (an app such as SherpaTTS), and `tts_say` for anything else. Speed, pitch, volume, voice and reading replies on or off are comfort settings, in the Settings window or with `tts_set`. On the headset Slopitect plays the speech itself (the engine writes each sentence to a sound file), because the Quest 1 played nothing you could hear from the engine's own sound while Slopitect was in front; elsewhere the engine speaks for itself. Speech the engine never finishes is skipped so the next can play. Other modules use `speak()` and `speaking()` |
 | `vtt.gd` | Hold-to-talk (it used to be the APK's voice module): hold the talk button (the left trigger), talk, let go, and the words land in the chat window's input box for you to check and Send, or go straight to the agent (`send_to_agent`, in the Settings window or with `vtt_set`). On the headset with whisper.cpp (the APK's godot-whisper plugin and a model in `models/`), or a service at `vtt_url`; the engine, service and key change only from the PC (`vtt_config`). A red dot on your left hand shows it's listening |
 | `library.gd` | The Library window (its tile on the Menu, or Textures / Assets / Prefabs on the hand menu): three tabs of pictures, 12 to a page with Prev / Next and a category button. Textures: Poly Haven's textures; pick a shape with the Inspect tool, then press one to download it and put it on that shape (textures.gd). Assets: Poly Haven's models, lightest first; press one to download it (assets.gd) and place it in front of you. Prefabs: the sets saved with `prefabs_save` (prefabs.gd), each with a picture drawn once from what it holds; press one to place a copy. The pictures are Poly Haven's 128 px thumbnails, kept in `library/`; they need `cdn.polyhaven.com` allowed on the PC (`net_config`). Needs vrui.gd and net.gd |
+| `joints.gd` | Hinges, sliders, ball joints and fixed joints between any two things (shapes, placed models, anything built later), or between a thing and the world, plus attach points: named spots on a thing's surface to join others at. A part that's dynamic (physics.gd) swings, falls and collides on the engine's own joint (Jolt); otherwise it follows the part it's joined to, and grabbing or moving it turns or slides it only the way the joint lets it. A motor turns a hinge or moves a slider by itself. The Joints tool (Tools menu, its tile, or the hand menu): Connect (the part that stays, then the part that moves; Snap moves the second onto the first), Add point, Remove. Shows its pivots, axes and points while chosen (Settings: always or never). Kept with the world (save.gd); every change is one undo |
 
 A tool is any module with a `tool_info()` function, so a new tool is a new
 file; `tools.gd` explains what a tool gets. Tools work without the tools
@@ -70,6 +71,7 @@ From the platform-tools folder:
 .\adb push "C:\path\to\live-modules\tts.gd" /sdcard/Slopitect/modules/
 .\adb push "C:\path\to\live-modules\vtt.gd" /sdcard/Slopitect/modules/
 .\adb push "C:\path\to\live-modules\library.gd" /sdcard/Slopitect/modules/
+.\adb push "C:\path\to\live-modules\joints.gd" /sdcard/Slopitect/modules/
 .\slopi.ps1 '{"cmd":"code_load","name":"controls"}'
 .\slopi.ps1 '{"cmd":"code_load","name":"ui"}'
 .\slopi.ps1 '{"cmd":"code_load","name":"tools"}'
@@ -95,6 +97,7 @@ From the platform-tools folder:
 .\slopi.ps1 '{"cmd":"code_load","name":"tts"}'
 .\slopi.ps1 '{"cmd":"code_load","name":"vtt"}'
 .\slopi.ps1 '{"cmd":"code_load","name":"library"}'
+.\slopi.ps1 '{"cmd":"code_load","name":"joints"}'
 ```
 
 Each `code_load` shows the code in the headset and waits for your Yes
@@ -124,6 +127,14 @@ right trigger is the tool's.
   No physics / Static / Dynamic (with physics.gd loaded), Grab: on/off,
   Hide, Delete and Unselect. Hidden things can't be pointed at, so
   "Show hidden" appears while any are hidden.
+- **Joints:** in Connect, pull the trigger on the part that stays (a
+  green mark shows the spot), then on the part that moves. Pick Hinge,
+  Slider, Ball or Fixed first, and the axis: Normal (out of the surface:
+  a wheel), Up (a door), Side (level along the surface: a lid). With
+  Snap on, the second part is moved so the two spots touch. "Join to
+  world" joins the first pick to the world instead. Add point puts an
+  attach point (yellow) where you point; Connect uses it when you point
+  near it. Remove takes a thing's joints off, or an attach point.
 - **Undo / Redo** in the window, or `tools_undo` / `tools_redo`, cover
   every stroke and path, including ones the agent made with commands.
 
@@ -154,6 +165,15 @@ APK over the old one). The undo list is not saved.
 | `assets_place` | `id`, optional `resolution`, `name`, `position`, `rotation`, `scale` (a number or [x, y, z]) |
 | `assets_move` | `name`, any of `position`, `rotation`, `scale` |
 | `assets_remove` | `name` (the files stay on the headset) |
+
+| `joints_add` | `b` (the part that moves), optional `a` (the part that stays; left out: the world), `type` (hinge, slider, ball, fixed), `at` [x, y, z], `axis` [x, y, z], `point_a` / `point_b` (attach points), `snap`, `lower` / `upper` (hinge degrees, slider metres, counted from where b is now), `motor` (a second); one undo |
+| `joints_set` | `id`, any of `value`, `motor`, `lower`, `upper` |
+| `joints_remove` | `id`, or `name` (all of a thing's joints); one undo |
+| `joints_list`, `joints_points` | (`joints_points`: optional `name`) |
+| `joints_point_add` | `name`, optional `id`, `position` [x, y, z] or `face` (top, bottom, left, right, front, back), optional `normal`; one undo |
+| `joints_point_remove` | `name`, `id`; one undo |
+| `joints_tool` | any of `mode`, `type`, `axis`, `snap`, `act` (open, cancel, world) |
+| `joints_prefs` | `show` (tool, always, never), `snap` |
 
 | `ui_list`, `ui_get`, `ui_theme_status` | |
 | `ui_add`, `ui_update` | a panel: `id_panel` and its fields (see docs/VR-UI.md) |

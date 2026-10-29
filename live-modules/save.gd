@@ -2,8 +2,8 @@ extends SlopitectModule
 
 # Slopitect live module: save.
 # Keeps what's built: the shapes (the objects module's), the placed models
-# (the assets module's), the ground (landscape), the paths and the inspect
-# tool's switches (hidden, grabbable) are saved by
+# (the assets module's), the ground (landscape), the paths, the inspect
+# tool's switches (hidden, grabbable) and the joints are saved by
 # themselves to saves/world.json in the Slopitect folder whenever they
 # change, and put back when the app starts. A part whose module isn't
 # loaded is kept as it was saved and put back once the module loads.
@@ -13,7 +13,7 @@ extends SlopitectModule
 
 const CHECK_SECONDS := 5.0  # how often it looks for changes to save
 const MAX_CHECKPOINTS := 50
-const PARTS := {"models": "assets", "landscape": "landscape", "paths": "paths", "switches": "inspect"}  # part -> the module it needs
+const PARTS := {"models": "assets", "landscape": "landscape", "paths": "paths", "switches": "inspect", "joints": "joints"}  # part -> the module it needs
 
 var _folder := ""
 var _last_saved := ""  # what world.json holds, to save only on a change
@@ -95,6 +95,8 @@ func _snapshot() -> Dictionary:
 				state["paths"] = module.call("get_paths")
 			"switches":
 				state["switches"] = module.call("get_settings")
+			"joints":
+				state["joints"] = module.call("get_joints")
 	return state
 
 
@@ -143,6 +145,9 @@ func _put_part(part: String, value) -> PackedStringArray:
 		"switches":
 			if typeof(value) == TYPE_DICTIONARY:
 				module.call("set_settings", value)
+		"joints":
+			if typeof(value) == TYPE_DICTIONARY:
+				module.call("set_joints", value)
 	return PackedStringArray()
 
 
