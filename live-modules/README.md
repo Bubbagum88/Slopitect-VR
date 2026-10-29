@@ -19,6 +19,7 @@ unless its file has changed since.
 | `physics.gd` | Makes shapes and models fall, bounce and collide (the engine's own physics) once you set them dynamic; the ground is the floor or the landscape |
 | `projects.gd` | A world per project (`projects/NAME/` in the Slopitect folder: its saves, notes, and the live modules it uses). Needs save.gd |
 | `inspect.gd` | A tool for one thing at a time: point and pull the trigger to select a shape or model, then switch its physics (none, static, dynamic), whether it can be grabbed, hide it, or delete it (one undo). Show hidden brings hidden things back. The switches are kept with each project's world |
+| `terminal.gd` | A command line in the headset (A on the right controller): type any of the app's commands, like `spawn shape=box scale=0.3`, and press Run to see the reply. Tab completes a command's name, Prev / Next step through what you ran, Help lists the commands, Up / Down scroll, Cls clears, and Ask AI sends your line with the last command and its reply to the agent. Won't run `*_config` settings. Needs ui.gd for its window |
 | `assets.gd` | 3D models from [Poly Haven](https://polyhaven.com) (all CC0): search, download to the headset, place in the world. Powered by Poly Haven |
 
 A tool is any module with a `tool_info()` function, so a new tool is a new
@@ -43,6 +44,7 @@ From the platform-tools folder:
 .\adb push "C:\path\to\live-modules\physics.gd" /sdcard/Slopitect/modules/
 .\adb push "C:\path\to\live-modules\projects.gd" /sdcard/Slopitect/modules/
 .\adb push "C:\path\to\live-modules\inspect.gd" /sdcard/Slopitect/modules/
+.\adb push "C:\path\to\live-modules\terminal.gd" /sdcard/Slopitect/modules/
 .\slopi.ps1 '{"cmd":"code_load","name":"controls"}'
 .\slopi.ps1 '{"cmd":"code_load","name":"ui"}'
 .\slopi.ps1 '{"cmd":"code_load","name":"tools"}'
@@ -55,6 +57,7 @@ From the platform-tools folder:
 .\slopi.ps1 '{"cmd":"code_load","name":"physics"}'
 .\slopi.ps1 '{"cmd":"code_load","name":"projects"}'
 .\slopi.ps1 '{"cmd":"code_load","name":"inspect"}'
+.\slopi.ps1 '{"cmd":"code_load","name":"terminal"}'
 ```
 
 Each `code_load` shows the code in the headset and waits for your Yes
@@ -127,6 +130,13 @@ A part whose module isn't loaded is kept as saved and put back when it loads.
 | `projects_config` (PC only) | `name`, `private` (true: never backed up) |
 
 The first time projects.gd loads, the existing saves become project `start`.
+
+| `terminal_run` | `line` (like `"spawn shape=box"`; a line starting with `{` is JSON) |
+| `terminal_type` | `text` |
+| `terminal_key` | `key`: shift, backspace, clear, tab, prev, next, run |
+| `terminal_scroll` | `by` (lines, + is back) or `end` true |
+| `terminal_clear`, `terminal_ask`, `terminal_status` | |
+| `terminal_help` | optional `name` (a command) |
 
 | `move_status` | |
 | `move_to` | `position` [x, z], optional `facing` (degrees, 0 = -z) |
