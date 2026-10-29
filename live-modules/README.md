@@ -11,6 +11,7 @@ unless its file has changed since.
 | `tools.gd` | The tool window (B on the right controller): a button for each loaded tool, the chosen tool's buttons, and one Undo / Redo list for every tool |
 | `landscape.gd` | Ground you can shape, 20 × 20 m: raise, lower, smooth and flatten brushes. It stands in for the flat floor while it's loaded |
 | `paths.gd` | Roads and trails: put down points with the trigger, then press Finish. Optionally levels the ground under the path |
+| `assets.gd` | 3D models from [Poly Haven](https://polyhaven.com) (all CC0): search, download to the headset, place in the world. Powered by Poly Haven |
 
 A tool is any module with a `tool_info()` function, so a new tool is a new
 file; `tools.gd` explains what a tool gets. Tools work without the tools
@@ -25,9 +26,11 @@ From the platform-tools folder:
 .\adb push "C:\path\to\live-modules\tools.gd" /sdcard/Slopitect/modules/
 .\adb push "C:\path\to\live-modules\landscape.gd" /sdcard/Slopitect/modules/
 .\adb push "C:\path\to\live-modules\paths.gd" /sdcard/Slopitect/modules/
+.\adb push "C:\path\to\live-modules\assets.gd" /sdcard/Slopitect/modules/
 .\slopi.ps1 '{"cmd":"code_load","name":"tools"}'
 .\slopi.ps1 '{"cmd":"code_load","name":"landscape"}'
 .\slopi.ps1 '{"cmd":"code_load","name":"paths"}'
+.\slopi.ps1 '{"cmd":"code_load","name":"assets"}'
 ```
 
 Each `code_load` shows the code in the headset and waits for your Yes.
@@ -68,6 +71,22 @@ APK over the old one). The undo list is not saved.
 | `paths_delete` | `path` (its id); one undo |
 | `paths_settings` | any of `width`, `width_step`, `color`, `flatten` |
 | `paths_draft` | `action`: finish, cancel or remove_last |
+| `assets_search` | `query` (words), optional `category`; lightest models first |
+| `assets_get` | `id`, optional `resolution` (1k, 2k, 4k; default 1k); downloads in the background |
+| `assets_status`, `assets_downloaded`, `assets_placed` | |
+| `assets_place` | `id`, optional `resolution`, `name`, `position`, `rotation`, `scale` (a number or [x, y, z]) |
+| `assets_move` | `name`, any of `position`, `rotation`, `scale` |
+| `assets_remove` | `name` (the files stay on the headset) |
+
+### What assets.gd may reach
+
+Only `https://api.polyhaven.com` and `https://dl.polyhaven.org`, fixed in the
+file (changing them changes the file, which needs a new Yes). It sends no key,
+cookies or names, only the User-Agent `Slopitect/0.1` that Poly Haven asks
+for. Every file must be the size and MD5 Poly Haven lists, a model over 80 MB
+isn't downloaded, and files are written only to
+`/sdcard/Slopitect/assets/polyhaven/ID/RES/`, with a `credits.json`. Placed
+models aren't saved yet; the files are.
 
 The agent can use them too once they're loaded (it may use any live
 module you said Yes to). It needs a new conversation to see new tools,
