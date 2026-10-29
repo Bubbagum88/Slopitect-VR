@@ -3,7 +3,7 @@
 How to reach the Quest 1 from the PC without a cable, then talk to
 Slopitect, sync live modules and read the log. Every command runs in
 PowerShell in the folder that holds `adb.exe` (Android platform-tools), so
-it's written `.\adb`. Replace `192.168.1.95` with your headset's IP (in the
+it's written `.\adb`. Replace `192.168.1.60` (an example) with your headset's IP (in the
 headset: Settings > Wi-Fi > your network).
 
 You need developer mode on the headset and the PC on the same Wi-Fi.
@@ -20,16 +20,16 @@ There are two ways. Pick one.
    screen itself, and it's a different number.
 2. Pair once per PC, with the real numbers from that screen:
    ```
-   .\adb pair 192.168.1.95:37099 123456
+   .\adb pair 192.168.1.60:37099 123456
    ```
 3. Connect, using the *connect* port:
    ```
-   .\adb connect 192.168.1.95:41024
+   .\adb connect 192.168.1.60:41024
    .\adb devices
    ```
 
 The connect port changes after every headset restart. You don't have to
-look it up: `slopi-sync.ps1 -Device 192.168.1.95` (just the IP) tries the
+look it up: `slopi-sync.ps1 -Device 192.168.1.60` (just the IP) tries the
 headset's open ports and connects to the one that answers. Pairing is kept,
 so you don't pair again.
 
@@ -39,7 +39,7 @@ Plug the headset in, allow the PC in the headset, then:
 
 ```
 .\adb tcpip 5555
-.\adb connect 192.168.1.95:5555
+.\adb connect 192.168.1.60:5555
 ```
 
 Unplug it. The port stays 5555 until the headset restarts; after that, run
@@ -75,7 +75,7 @@ kept in `slopi-key.txt` next to the script: keep it private and never
 commit it. `-SetKey` sends the agent's API key into the app's storage
 without showing or saving it. `slopi-chat.ps1` talks to the agent from the PC.
 
-With more than one device on adb, add `-s 192.168.1.95:41024` after `.\adb`.
+With more than one device on adb, add `-s 192.168.1.60:41024` after `.\adb`.
 
 ## 4. Sync live modules
 
@@ -86,7 +86,7 @@ With more than one device on adb, add `-s 192.168.1.95:41024` after `.\adb`.
 
 ```
 # What's on the headset, loaded and approved, compared with the PC
-powershell -ExecutionPolicy Bypass -File C:\Ptojects\Slopitect-VR\tools\slopi-sync.ps1 -Tools D:\quest1-root-project\tools\platform-tools -Device 192.168.1.95 -Status
+powershell -ExecutionPolicy Bypass -File C:\Ptojects\Slopitect-VR\tools\slopi-sync.ps1 -Tools D:\quest1-root-project\tools\platform-tools -Device 192.168.1.60 -Status
 
 # Push the changed modules and load them (a Yes in the headset for each)
 powershell -ExecutionPolicy Bypass -File C:\Ptojects\Slopitect-VR\tools\slopi-sync.ps1 -Tools D:\quest1-root-project\tools\platform-tools -Load
