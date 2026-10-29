@@ -35,8 +35,9 @@ const PAGES := {"main": PANEL, "load": LOAD_PANEL, "worlds": "pause_worlds"}
 const OLD_SETTINGS_PANEL := "pause_settings"  # settings.gd took the Settings page over
 const HAND_BUTTON := [0.16, 0.07]
 const CHECK_SECONDS := 1.0
-const WIDTH := 0.42
-const BUTTON := [0.42, 0.06]
+const WIDTH := 0.7
+const BUTTON := [0.7, 0.06]
+const HALF := [0.34, 0.07]  # the main menu's buttons, two to a row
 const MAX_WORLDS := 6
 const MAX_CHECKPOINTS := 6
 
@@ -70,7 +71,7 @@ func _process(delta: float) -> void:
 	var ui := _ui()
 	if ui == null:
 		return
-	var signature := JSON.stringify([ui.get_instance_id(), _has("tools"), _has("settings"), _hand_items(), _wrist_buttons()])
+	var signature := JSON.stringify([ui.get_instance_id(), _has("tools"), _has("settings"), _hand_items(), _wrist_buttons(), _hand_statuses().map(func(st): return st["id"])])
 	if signature != _hand_signature or not _run({"cmd": "ui_get", "id_panel": HAND_PANEL}).get("ok", false):
 		_hand_signature = signature
 		_build_hand()
@@ -220,38 +221,41 @@ func _put(id_panel: String, title: String, elements: Array) -> String:
 	return "" if reply.get("ok", false) else "%s: %s" % [id_panel, reply.get("error", "?")]
 
 
-func _text(id: String, text: String, color := "text", font_size := 30) -> Dictionary:
-	return {"type": "text", "id": id, "text": text.left(400), "width": WIDTH, "color": color, "font_size": font_size}
+func _text(id: String, text: String, color := "text", font_size := 30, width := WIDTH) -> Dictionary:
+	return {"type": "text", "id": id, "text": text.left(400), "width": width, "color": color, "font_size": font_size}
 
 
 func _button(id: String, label: String, action: Dictionary, color := "button", size := BUTTON) -> Dictionary:
 	return {"type": "button", "id": id, "label": label.left(40), "size": size, "action": action, "color": color}
 
 
-func _opener(id: String, label: String, to: String) -> Dictionary:
-	return {"type": "button", "id": id, "label": label, "size": BUTTON, "open": to}
+func _opener(id: String, label: String, to: String, size := HALF) -> Dictionary:
+	return {"type": "button", "id": id, "label": label, "size": size, "open": to}
 
 
 func _main_elements() -> Array:
-	var out := [
-		{"type": "text", "id": "where", "width": WIDTH, "font_size": 26, "color": "muted", "source": {"cmd": "pause_status", "field": "line"}},
-		_button("resume", "Resume", {"cmd": "pause_do", "act": "hide"}, "accent"),
-		_button("save", "Save world", {"cmd": "pause_do", "act": "save"}, "ok") if _has("save") else _text("save_missing", "Load save.gd to save the world.", "muted", 26),
+	# Wide, with the buttons two to a row, so the menu isn't a tall column.
+	var buttons := [
+		_button("resume", "Resume", {"cmd": "pause_do", "act": "hide"}, "accent", HALF),
+		_button("save", "Save world", {"cmd": "pause_do", "act": "save"}, "ok", HALF) if _has("save") else _text("save_missing", "Load save.gd to save.", "muted", 26, HALF[0]),
 		_opener("load", "Load", LOAD_PANEL),
 		_opener("worlds_list", "Worlds", WORLDS_PANEL),
-		_opener("windows", "All windows", "bar"),
-		_button("hand", "Hand menu", {"cmd": "pause_do", "act": "hand_menu"}),
 	]
 	if _has("settings"):
 		# settings.gd fills its window, which opens in this menu's place.
-		out.insert(5, {"type": "button", "id": "settings", "label": "Settings", "size": BUTTON,
+		buttons.append({"type": "button", "id": "settings", "label": "Settings", "size": HALF,
 			"action": {"cmd": "settings_do", "act": "refresh"}, "open": "settings"})
+	buttons.append(_opener("windows", "All windows", "bar"))
+	buttons.append(_button("hand", "Hand menu", {"cmd": "pause_do", "act": "hand_menu"}, "button", HALF))
 	if _has("worlds"):
 		# Opens in this menu's place, with a back arrow to it.
-		var worlds := _button("worlds", "Files & modules", {"cmd": "worlds_do", "act": "show"})
+		var worlds := _button("worlds", "Files & modules", {"cmd": "worlds_do", "act": "show"}, "button", HALF)
 		worlds["open"] = "worlds"
-		out.append(worlds)
-	return out
+		buttons.append(worlds)
+	return [
+		{"type": "text", "id": "where", "width": WIDTH, "font_size": 26, "color": "muted", "source": {"cmd": "pause_status", "field": "line"}},
+		{"type": "grid", "id": "main_buttons", "columns": 2, "children": buttons},
+	]
 
 
 func _worlds_elements() -> Array:
@@ -294,6 +298,24 @@ func _hand_items() -> Array:
 	return items
 
 
+# Status lines under the hand menu's buttons, from each loaded module with
+# hand_status() -> {"id", "text", "color" (a theme colour name)}. The
+# module keeps its line ("st_" + id) up to date itself (ui_element_update);
+# only which modules have one makes the menu rebuild.
+func _hand_statuses() -> Array:
+	var out := []
+	for child in ctx["modules"].get_children():
+		if child == self or not child.has_method("hand_status"):
+			continue
+		var status = child.call("hand_status")
+		if typeof(status) != TYPE_DICTIONARY or typeof(status.get("id")) != TYPE_STRING or typeof(status.get("text")) != TYPE_STRING:
+			push_error("Slopitect pause: %s's hand_status() needs id and text" % child.name)
+			continue
+		out.append(status)
+	out.sort_custom(func(a, b): return a["id"] < b["id"])
+	return out
+
+
 func _build_hand() -> void:
 	var buttons := [_button("home", "Home", {"cmd": "pause_do", "act": "toggle"}, "accent", HAND_BUTTON)]
 	if _has("settings"):
@@ -307,6 +329,8 @@ func _build_hand() -> void:
 	for button in _wrist_buttons():
 		buttons.append(_button("w_" + str(button["id"]).left(30), str(button.get("label", button["id"])), button["action"], "button", HAND_BUTTON))
 	var elements := [{"type": "grid", "id": "buttons", "columns": 2, "children": buttons}]
+	for status in _hand_statuses():
+		elements.append(_text("st_" + str(status["id"]).left(30), str(status["text"]), str(status.get("color", "muted")), 24))
 	var reply: Dictionary
 	if _run({"cmd": "ui_get", "id_panel": HAND_PANEL}).get("ok", false):
 		reply = _run({"cmd": "ui_update", "id_panel": HAND_PANEL, "elements": elements})
