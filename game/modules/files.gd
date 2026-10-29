@@ -12,6 +12,12 @@ extends SlopitectModule
 #
 # Paths are text: "notes/todo.txt" is inside the Slopitect folder; a path
 # starting with / is a full path, like "/sdcard/Android/obb".
+#
+# Files in modules/ named agent_* (agent_tuning.gd, agent_settings.gd, the
+# settings copy agent_config.json, a folder like agent_skills/) tune the
+# agent, so no command writes, moves or deletes them, and the modules folder
+# itself isn't moved or deleted. They can be read. They're put on the
+# headset from the PC with adb.
 
 const SETTINGS_PATH := "user://files.json"
 const SHARED := "/sdcard"
@@ -94,6 +100,21 @@ func _resolve(value, field := "path") -> Dictionary:
 		if _inside(full, folder) and not _unblocked.any(func(open): return _inside(full, open)):
 			return {"error": "%s is in %s, which is blocked because it holds personal things; only files_config from the PC can unblock it" % [full, folder]}
 	return {"path": full, "access": "ask"}
+
+
+# A resolved target, or why it can't be changed: the agent's own files (see
+# the top), and, when a whole folder can move or go (`folders`), the modules
+# folder and the folders above it.
+func _changeable(target: Dictionary, folders := false) -> Dictionary:
+	if target.has("error"):
+		return target
+	var modules := _home + "/modules"
+	var path: String = target["path"]
+	if _inside(path, modules) and path.length() > modules.length() and path.substr(modules.length() + 1).to_lower().begins_with("agent_"):
+		return {"error": "%s tunes the agent (a modules/agent_* file), so it can't be changed this way; put it on the headset from the PC" % path}
+	if folders and _inside(modules, path):
+		return {"error": "%s holds the modules folder, so it can't be moved or deleted" % path}
+	return target
 
 
 # Shared storage ignores letter case, so /sdcard/dcim is DCIM: compare that way.
@@ -237,7 +258,7 @@ func _read(request: Dictionary) -> Dictionary:
 
 
 func _write(request: Dictionary) -> Dictionary:
-	var target := _resolve(request.get("path"))
+	var target := _changeable(_resolve(request.get("path")))
 	var bytes: PackedByteArray
 	if typeof(request.get("text")) == TYPE_STRING:
 		bytes = request["text"].to_utf8_buffer()
@@ -268,7 +289,7 @@ func _write(request: Dictionary) -> Dictionary:
 
 
 func _mkdir(request: Dictionary) -> Dictionary:
-	var target := _resolve(request.get("path"))
+	var target := _changeable(_resolve(request.get("path")))
 	return _gate([target], "Let Slopitect make this folder?", func():
 		var err := DirAccess.make_dir_recursive_absolute(target["path"])
 		if err != OK:
@@ -277,7 +298,7 @@ func _mkdir(request: Dictionary) -> Dictionary:
 
 
 func _delete(request: Dictionary) -> Dictionary:
-	var target := _resolve(request.get("path"))
+	var target := _changeable(_resolve(request.get("path")), true)
 	if not target.has("error") and target["path"].to_lower() == _home.to_lower():
 		return {"ok": false, "error": "the Slopitect folder itself can't be deleted"}
 	return _gate([target], "Let Slopitect DELETE this?", func():
@@ -291,8 +312,8 @@ func _delete(request: Dictionary) -> Dictionary:
 
 
 func _move(request: Dictionary) -> Dictionary:
-	var from := _resolve(request.get("from"), "from")
-	var to := _resolve(request.get("to"), "to")
+	var from := _changeable(_resolve(request.get("from"), "from"), true)
+	var to := _changeable(_resolve(request.get("to"), "to"), true)
 	return _gate([from, to], "Let Slopitect move this?", func():
 		if FileAccess.file_exists(to["path"]) or DirAccess.dir_exists_absolute(to["path"]):
 			return {"ok": false, "error": "%s already exists; delete it first or pick another name" % to["path"]}
@@ -305,7 +326,7 @@ func _move(request: Dictionary) -> Dictionary:
 
 func _copy(request: Dictionary) -> Dictionary:
 	var from := _resolve(request.get("from"), "from")
-	var to := _resolve(request.get("to"), "to")
+	var to := _changeable(_resolve(request.get("to"), "to"))
 	return _gate([from, to], "Let Slopitect copy this?", func():
 		if not FileAccess.file_exists(from["path"]):
 			return {"ok": false, "error": "%s isn't a file" % from["path"]}

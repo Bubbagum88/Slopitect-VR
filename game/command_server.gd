@@ -171,6 +171,11 @@ func run_for_agent(request: Dictionary) -> Dictionary:
 	return reply
 
 
+# Whether the command running now is the agent's (or run by one of its).
+func for_agent() -> bool:
+	return _agent_depth > 0
+
+
 func register(module: String, cmd: String, call: Callable, summary: String) -> String:
 	if cmd in ["ping", "help", "modules"]:
 		return "\"%s\" is built into the server" % cmd
