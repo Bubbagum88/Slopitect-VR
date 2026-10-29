@@ -82,15 +82,23 @@ PC first.
 
 Live modules only (no new APK):
 
-1. Keep the repo's paths.gd and tools.gd; drop stick_move.gd.
+1. Keep the repo's paths.gd and tools.gd; drop stick_move.gd. *(Done.)*
 2. controls.gd: add `value(hand, name)` for grip and trigger, and "run a
-   command" as a binding kind. Then drop controller.gd.
-3. hands.gd: read through controls, save colours.
-4. aimsg.gd: chat formatting only, real fields, no debug file.
+   command" as a binding kind. Then drop controller.gd. *(Done, PC-tested;
+   panel attaching waits for step 5.)*
+3. hands.gd: read through controls, save colours. *(Done, PC-tested.)*
+4. aimsg.gd: chat formatting only, real fields, no debug file. *(Done,
+   PC-tested: ui.gd shows a source through a module's format(), so aimsg
+   changes no window; that ui.gd part comes with the VR UI work.)*
 5. vrui.gd: take "point" from controls, respect the Yes/No window, redraw
    only on change, save panels, take over panel attaching.
-6. world.gd: keep the windows, on top of save and projects.
-7. web.gd: fold into a net helper with an allowed-sites list.
+6. world.gd: keep the windows, on top of save and projects. *(Done,
+   PC-tested: worlds.gd, one window with Worlds, Checkpoints, Files and
+   Modules tabs, opened from its tile on the Menu; world's own save format
+   is dropped.)*
+7. web.gd: fold into a net helper with an allowed-sites list. *(Done,
+   PC-tested against a local https server: net.gd, hosts in net_config,
+   redirects checked hop by hop. Poly Haven's two hosts to start.)*
 
 Needs the next APK:
 
