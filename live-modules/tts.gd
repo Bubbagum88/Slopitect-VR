@@ -24,7 +24,7 @@ const SETTINGS_PATH := "user://tts.json"
 const OLD_SETTINGS_PATH := "user://voice.json"  # the APK's voice module kept these before
 const POLL_SECONDS := 0.5
 const FILE_POLL_SECONDS := 0.1
-const SENTENCE_CHARS := 200  # sentences after the first are joined up to about this long; each plays while the next is written
+const SENTENCE_CHARS := 200  # sentences are joined up to about this long; the first plays while the rest are written
 const ENGINE_NOT_HEARD := -99  # onInit hasn't come yet
 const MAX_SAY := 2000
 const SPEECH_GRACE_SECONDS := 15.0
@@ -72,7 +72,6 @@ var _waiting := []  # what to say once the engine is ready: [text, voice]
 var _jobs := []  # sentences being written, in order: {path, chars, since, stream}
 var _player: AudioStreamPlayer
 var _next_id := 0
-var _has_word := RegEx.create_from_string("\\w")  # a piece with no letters or digits ("...") isn't a sentence on its own
 var _last_written := 0  # when the engine last finished writing a piece (ms)
 var _since_files := 0.0
 var _voice_set := ""  # the voice the in-app engine was last set to
@@ -365,9 +364,7 @@ func _sentences(text: String) -> PackedStringArray:
 	var regex := RegEx.create_from_string("[^.!?\\n]*[.!?]+\\s*|[^.!?\\n]+|\\n+")
 	for m in regex.search_all(text):
 		var piece := m.get_string()
-		# The first sentence goes alone: nothing is heard until its whole
-		# file is written, so the shorter it is, the sooner speech starts.
-		if _has_word.search(current) and (out.is_empty() or current.length() + piece.length() > SENTENCE_CHARS):
+		if not current.is_empty() and current.length() + piece.length() > SENTENCE_CHARS:
 			out.append(current.strip_edges())
 			current = ""
 		current += piece
