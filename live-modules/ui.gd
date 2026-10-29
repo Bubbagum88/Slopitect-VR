@@ -86,6 +86,8 @@ const PADDING := 0.016  # inside a window's edge
 const BORDER := 0.0025
 const PANEL_RADIUS := 0.022  # the rounded corners
 const BUTTON_RADIUS := 0.014
+const BUTTON_PADDING := 0.006
+const SMALLEST_LABEL := 16  # the text size a button's label shrinks to before it's cut short
 const PANEL_ALPHA := 0.94
 const PX_PER_M := 1250.0  # a panel's picture: about what the Quest 1 shows at 0.6 m
 const APP_COLUMNS := 5
@@ -1630,6 +1632,7 @@ func _title_bar(panel: Dictionary, view: Dictionary) -> Control:
 	if _openers.has(id_panel):
 		row.add_child(_small_button(view, id_panel, "back", "<", side, _theme_color("button")))
 	var title := _label(panel["title"], theme_values["font_title"], _theme_color("title"), false, "left")
+	_one_line(title, 0.0)
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	title.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	row.add_child(title)
@@ -1644,7 +1647,9 @@ func _small_button(view: Dictionary, id_panel: String, kind: String, text: Strin
 	button.custom_minimum_size = size
 	button.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	_pointable(view, button, id_panel, "", kind, "", color, BUTTON_RADIUS)
-	button.add_child(_label(text, theme_values["font_title"], _theme_color("text"), false, "center"))
+	var label := _label(text, theme_values["font_title"], _theme_color("text"), false, "center")
+	_one_line(label, size.x - 2 * _px(BUTTON_PADDING))
+	button.add_child(label)
 	return button
 
 
@@ -1658,26 +1663,35 @@ func _tabs(panel: Dictionary, view: Dictionary) -> Control:
 		tab.custom_minimum_size = Vector2(_px(0.08), _px(TAB_BAR))
 		tab.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		_pointable(view, tab, panel["id_panel"], "", "tab", page, color, BUTTON_RADIUS)
-		tab.add_child(_label(page, theme_values["font_small"], _theme_color("text"), false, "center"))
+		var label := _label(page, theme_values["font_small"], _theme_color("text"), false, "center")
+		_one_line(label, 0.0)
+		tab.add_child(label)
 		row.add_child(tab)
 	return row
 
 
-# The launcher's tiles, in rows above the panel's own elements.
+# The launcher's tiles, in rows above the panel's own elements. They share
+# the panel's width (its "size") between them; a panel without one gets
+# tiles APP_CELL wide.
 func _app_tiles(panel: Dictionary, view: Dictionary) -> Control:
 	var grid := GridContainer.new()
 	grid.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	grid.columns = mini(_apps.size(), APP_COLUMNS)
 	grid.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	var cell := APP_CELL
+	if panel.has("size"):
+		cell.x = (panel["size"][0] - GAP * (grid.columns - 1)) / grid.columns
 	grid.add_theme_constant_override("h_separation", _px(GAP))
 	grid.add_theme_constant_override("v_separation", _px(GAP))
 	for app in _apps:
 		var open: bool = not app["panel"].is_empty() and _index_of(app["panel"]) != -1 and panels[_index_of(app["panel"])]["visible"]
 		var tile := PanelContainer.new()
 		tile.name = "App_" + app["id"]
-		tile.custom_minimum_size = APP_CELL * PX_PER_M
+		tile.custom_minimum_size = (cell * PX_PER_M).floor()
 		_pointable(view, tile, panel["id_panel"], "", "app", app["id"], _theme_color("accent") if open else _theme_color("button"), BUTTON_RADIUS)
-		tile.add_child(_label(app["label"], theme_values["font_body"], _theme_color("text"), false, "center"))
+		var label := _label(app["label"], theme_values["font_body"], _theme_color("text"), false, "center")
+		_one_line(label, tile.custom_minimum_size.x - 2 * _px(BUTTON_PADDING))
+		tile.add_child(label)
 		grid.add_child(tile)
 	view["apps"] = grid
 	return grid
@@ -1713,19 +1727,28 @@ func _content(panel: Dictionary, view: Dictionary) -> Control:
 		right = -left
 		top = panel["size"][1] / 2.0
 		bottom = -top
+	# Buttons with no "at" sit in a grid of "columns". In a panel with a
+	# "size" the grid fills its width and sits in its middle; otherwise each
+	# button is "cell" big and the first row is at the centre.
+	var cell_size: Array = panel.get("cell", [0.14, 0.07])
+	var cell := Vector2(cell_size[0], cell_size[1])
+	var per_row: int = clampi(panel.get("columns", 4), 1, maxi(1, grid_buttons.size()))
+	var cell_gap := cell.y * 0.25
+	var first_row := 0.0
+	if panel.has("size") and not grid_buttons.is_empty():
+		cell.x = (panel["size"][0] - cell_gap * (per_row - 1)) / per_row
+		var rows := ceili(grid_buttons.size() / float(per_row))
+		first_row = (rows * cell.y + (rows - 1) * cell_gap) / 2.0 - cell.y / 2.0
 	for element in panel["elements"]:
 		var at := Vector2.ZERO
 		var size := Vector2.ZERO
 		if element.has("at"):
 			at = Vector2(element["at"][0], element["at"][1])
 		if element["type"] == "button" and not element.has("at"):
-			var cell := Vector2(panel["cell"][0], panel["cell"][1])
-			var per_row: int = panel["columns"]
-			var gap := cell.y * 0.25
 			var row := grid_index / per_row
 			var in_row := mini(per_row, grid_buttons.size() - row * per_row)
 			var col := grid_index % per_row
-			at = Vector2((col - (in_row - 1) / 2.0) * (cell.x + gap), -row * (cell.y + gap))
+			at = Vector2((col - (in_row - 1) / 2.0) * (cell.x + cell_gap), first_row - row * (cell.y + cell_gap))
 			size = cell
 			grid_index += 1
 		elif element.has("size"):
@@ -1778,6 +1801,9 @@ func _control_for(id_panel: String, element: Dictionary, view: Dictionary, size:
 			var label := _label(element["text"] if not element.has("source") else element["source"].get("empty", ""), element["font_size"], color, element["mono"], element["align"])
 			label.text = _live_text.get(id_panel + "/" + element["id"], label.text)
 			label.custom_minimum_size.x = element["width"] * PX_PER_M
+			# Wrapped text measures its height at its width; until the layout
+			# runs it has none and would count a line per letter.
+			label.size.x = label.custom_minimum_size.x
 			if element.has("height"):
 				label.custom_minimum_size.y = element["height"] * PX_PER_M
 				label.clip_text = true
@@ -1788,7 +1814,9 @@ func _control_for(id_panel: String, element: Dictionary, view: Dictionary, size:
 		"button":
 			control = PanelContainer.new()
 			_pointable(view, control, id_panel, element["id"], "element", "", color, BUTTON_RADIUS)
-			control.add_child(_label(element["label"], _button_font(size), _theme_color("text"), false, "center"))
+			var label := _label(element["label"], _button_font(size), _theme_color("text"), false, "center")
+			_one_line(label, size.x - 2 * _px(BUTTON_PADDING) if size.x > 0.0 else 0.0)
+			control.add_child(label)
 		"input":
 			control = PanelContainer.new()
 			_pointable(view, control, id_panel, element["id"], "element", "", _theme_color("input_bg"), BUTTON_RADIUS * 0.5)
@@ -1812,6 +1840,7 @@ func _control_for(id_panel: String, element: Dictionary, view: Dictionary, size:
 			row.mouse_filter = Control.MOUSE_FILTER_IGNORE
 			control.add_child(row)
 			var label := _label(element["label"], _button_font(size), _theme_color("text"), false, "left")
+			_one_line(label, size.x - 2 * _px(BUTTON_PADDING) - _px(0.05) - _px(GAP) if size.x > 0.0 else 0.0)
 			label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 			label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 			row.add_child(label)
@@ -1874,7 +1903,7 @@ func _control_for(id_panel: String, element: Dictionary, view: Dictionary, size:
 # Makes a Control something the pointer can hover and press.
 func _pointable(view: Dictionary, control: Control, id_panel: String, id_element: String, kind: String, value: String, color: Color, radius: float) -> void:
 	control.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var style := _box(color, radius, Color.TRANSPARENT, 0.0, 0.006)
+	var style := _box(color, radius, Color.TRANSPARENT, 0.0, BUTTON_PADDING)
 	control.add_theme_stylebox_override("panel", style)
 	control.set_meta("panel", id_panel)
 	control.set_meta("element", id_element)
@@ -2031,6 +2060,24 @@ func _label(text: String, font_size: int, color: Color, mono: bool, align: Strin
 		font.font_names = PackedStringArray(["monospace"])
 		label.add_theme_font_override("font", font)
 	return label
+
+
+# A label that stays on one line: a button's, tile's, tab's or title's.
+# Its text shrinks to fit `width` pixels (down to SMALLEST_LABEL) rather
+# than breaking a word, and is cut short with "..." if it still doesn't fit.
+# A width of 0 is unknown (it's set by the layout): it is only cut short.
+func _one_line(label: Label, width: float) -> void:
+	label.autowrap_mode = TextServer.AUTOWRAP_OFF
+	label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	label.clip_text = true
+	if width <= 0.0:
+		return
+	var font := label.get_theme_font("font")
+	var font_size := label.get_theme_font_size("font_size")
+	var smallest := mini(font_size, _font_px(SMALLEST_LABEL))
+	while font_size > smallest and font.get_string_size(label.text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x > width:
+		font_size -= 1
+	label.add_theme_font_size_override("font_size", font_size)
 
 
 # Rounded corners and an optional edge, sizes in metres.

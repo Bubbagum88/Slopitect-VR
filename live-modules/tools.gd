@@ -203,7 +203,7 @@ func _build_panel(infos: Dictionary) -> void:
 	var width := widest * (CELL.x + GAP) + GAP
 	var height := (rows.size() + 1) * (CELL.y + GAP) + GAP
 	var top := height / 2.0 - GAP - CELL.y / 2.0
-	var elements := [{"type": "text", "id": "status", "at": [-width / 2.0 + GAP, top], "width": width - 2 * GAP,
+	var elements := [{"type": "text", "id": "status", "at": [0.0, top], "width": width - 2 * GAP,
 		"font_size": 22, "source": {"cmd": "tools_status", "field": "line"}}]
 	for r in rows.size():
 		var row: Array = rows[r]
