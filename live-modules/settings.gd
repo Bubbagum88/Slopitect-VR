@@ -39,7 +39,7 @@ const FULL := [0.42, 0.055]
 const SCAN_SECONDS := 1.0  # while the window is open: redraw if a module or a value changed
 const KINDS := ["choice", "slider", "toggle", "button"]
 const PAGES := ["Move", "Look", "Other", "Speech"]
-const PAGE_OF := {"move": "Move", "vrui": "Look", "hands": "Look", "avatar": "Look", "tts": "Speech", "vtt": "Speech"}
+const PAGE_OF := {"controls": "Move", "vrui": "Look", "hands": "Look", "avatar": "Look", "tts": "Speech", "vtt": "Speech"}
 const PAGE_OTHER := "Other"
 
 var _signature := ""  # what the window was last drawn from

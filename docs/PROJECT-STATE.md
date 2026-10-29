@@ -55,7 +55,7 @@ All PC-tested. Most are now loaded on the headset; a module counts as Headset on
 
 | Module | What it does |
 | --- | --- |
-| controls | The only reader of buttons and thumbsticks; turns them into named actions, or runs a command; `value()` for how far a grip or trigger is pressed; `pulse()` buzzes a controller; bindings changed from the PC (`controls_config`) |
+| controls | The only reader of buttons and thumbsticks; turns them into named actions, or runs a command; `value()` for how far a grip or trigger is pressed; `pulse()` buzzes a controller; walks (left stick) and turns (right stick), with speed, dead zone and turning in the Settings window (it took over move.gd); bindings changed from the PC (`controls_config`) |
 | ui | Every window: panels of text, buttons, inputs, toggles and sliders that you or the agent can change live, drawn the vrui way (rounded, wrapped text, redrawn only on change); title bars, tabs, a launcher Menu, a hand window on a controller, rows/columns/grids, menus inside menus with a back arrow, scrolling text, one theme, hover and haptic feedback ([VR-UI.md](VR-UI.md)). PC-tested; the vrui look was seen on the headset as the draft, this version not yet |
 | tools | Tool picker with shared undo |
 | landscape | Terrain |
@@ -63,7 +63,6 @@ All PC-tested. Most are now loaded on the headset; a module counts as Headset on
 | assets | Poly Haven models (CC0), only from allowed hosts |
 | save | Checkpoints with undo; shapes, models, landscape, paths and inspect switches |
 | projects | A folder (world) per project |
-| move | Walk (left stick) and turn (right stick) |
 | grab | Pick things up with the grip; grip with both hands and pull apart or together to resize (PC-tested with simulated hands) |
 | physics | Static or dynamic bodies |
 | inspect | Point at a thing to switch its physics, grabbing and hiding, or delete it |
