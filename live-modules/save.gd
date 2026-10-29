@@ -1,27 +1,34 @@
 extends SlopitectModule
 
 # Slopitect live module: save.
-# Keeps what's built: the shapes (the objects module's) and the placed
-# models (the assets module's, if loaded) are saved by themselves to
-# saves/world.json in the Slopitect folder whenever they change, and put
-# back when the app starts. Checkpoints keep the whole world at a moment,
-# the ground (landscape) and paths too, to go back to later; going back is
-# one undo in the tools window (if the tools module is loaded).
+# Keeps what's built: the shapes (the objects module's), the placed models
+# (the assets module's), the ground (landscape) and the paths are saved by
+# themselves to saves/world.json in the Slopitect folder whenever they
+# change, and put back when the app starts. A part whose module isn't
+# loaded is kept as it was saved and put back once the module loads.
+# Checkpoints keep the whole world at a moment to go back to later; going
+# back is one undo in the tools window (if the tools module is loaded).
+# With the projects module, each project has its own saves folder.
 
 const CHECK_SECONDS := 5.0  # how often it looks for changes to save
 const MAX_CHECKPOINTS := 50
-const WAIT_FOR_MODULES_SECONDS := 30.0  # at start, how long it waits for assets to load before putting models back
+const PARTS := {"models": "assets", "landscape": "landscape", "paths": "paths"}  # part -> the module it needs
 
 var _folder := ""
 var _last_saved := ""  # what world.json holds, to save only on a change
 var _since_check := 0.0
-var _pending_assets: Array = []  # placed models from world.json, waiting for the assets module
-var _waited := 0.0
+var _pending := {}  # part -> its saved value, while its module isn't loaded; kept in every save until it is
 var _restoring := false
 
 
 func setup() -> String:
-	_folder = ("/sdcard/Slopitect" if OS.get_name() == "Android" else OS.get_user_data_dir() + "/files_home") + "/saves"
+	var home := "/sdcard/Slopitect" if OS.get_name() == "Android" else OS.get_user_data_dir() + "/files_home"
+	_folder = home + "/saves"
+	# In a project (the projects module), start in its folder rather than
+	# load the old one and switch.
+	var projects = JSON.parse_string(FileAccess.get_file_as_string("user://projects.json")) if FileAccess.file_exists("user://projects.json") else null
+	if typeof(projects) == TYPE_DICTIONARY and typeof(projects.get("current")) == TYPE_STRING and projects["current"].is_valid_filename():
+		_folder = "%s/projects/%s/saves" % [home, projects["current"]]
 	var made := DirAccess.make_dir_recursive_absolute(_folder + "/checkpoints")
 	if made != OK:
 		return "save can't make its folder %s (error %d)" % [_folder, made]
@@ -46,16 +53,13 @@ func _exit_tree() -> void:
 
 
 func _process(delta: float) -> void:
-	if not _pending_assets.is_empty():
-		_waited += delta
-		if _assets() != null:
-			var models := _pending_assets
-			_pending_assets = []
-			_put_models(models)
-		elif _waited > WAIT_FOR_MODULES_SECONDS:
-			print("Slopitect save: the assets module didn't load, so %d saved model(s) weren't put back (they stay in world.json until something changes)" % _pending_assets.size())
-			_pending_assets = []
-		return  # nothing is saved until the saved world is back
+	for part in _pending.keys():
+		if ctx["modules"].module(PARTS[part]) != null:
+			var value = _pending[part]
+			_pending.erase(part)
+			for problem in _put_part(part, value):
+				push_error("Slopitect save: " + problem)
+			print("Slopitect save: put back the saved %s now that its module is loaded" % part)
 	_since_check += delta
 	if _since_check >= CHECK_SECONDS:
 		_since_check = 0.0
@@ -66,36 +70,34 @@ func _run(request: Dictionary) -> Dictionary:
 	return ctx["server"].run(request)
 
 
-func _assets() -> SlopitectModule:
-	return ctx["modules"].module("assets")
-
-
 # --- What the world is --------------------------------------------------------------
 
 func _shapes() -> Array:
 	return _run({"cmd": "list"}).get("objects", [])
 
 
-func _models() -> Array:
-	return _run({"cmd": "assets_placed"}).get("placed", []) if _assets() else []
-
-
-# The whole world; with everything, also the ground and the paths.
-func _snapshot(everything: bool) -> Dictionary:
-	var state := {"version": 1, "saved": Time.get_datetime_string_from_system(true), "shapes": _shapes(), "models": _models()}
-	if not everything:
-		return state
-	var landscape: SlopitectModule = ctx["modules"].module("landscape")
-	if landscape:
-		state["landscape"] = Marshalls.raw_to_base64((landscape.call("get_heights") as PackedFloat32Array).to_byte_array())
-	var paths: SlopitectModule = ctx["modules"].module("paths")
-	if paths:
-		state["paths"] = paths.call("get_paths")
+# The whole world. A part whose module isn't loaded is the one last saved.
+func _snapshot() -> Dictionary:
+	var state := {"version": 2, "saved": Time.get_datetime_string_from_system(true), "shapes": _shapes()}
+	for part in PARTS:
+		var module: SlopitectModule = ctx["modules"].module(PARTS[part])
+		if module == null:
+			if _pending.has(part):
+				state[part] = _pending[part]
+			continue
+		match part:
+			"models":
+				state["models"] = _run({"cmd": "assets_placed"}).get("placed", [])
+			"landscape":
+				state["landscape"] = Marshalls.raw_to_base64((module.call("get_heights") as PackedFloat32Array).to_byte_array())
+			"paths":
+				state["paths"] = module.call("get_paths")
 	return state
 
 
 func _put_back(state: Dictionary) -> PackedStringArray:
 	_restoring = true
+	_pending.clear()
 	var problems := PackedStringArray()
 	for shape in _shapes():
 		_run({"cmd": "delete", "name": shape["name"]})
@@ -109,22 +111,33 @@ func _put_back(state: Dictionary) -> PackedStringArray:
 		var reply := _run(request)
 		if not reply.get("ok", false):
 			problems.append("shape %s: %s" % [shape.get("name"), reply.get("error")])
-	if _assets():
-		for model in _models():
-			_run({"cmd": "assets_remove", "name": model["name"]})
-		problems.append_array(_put_models(state.get("models", [])))
-	elif not state.get("models", []).is_empty():
-		problems.append("%d model(s) weren't put back: the assets module isn't loaded" % state["models"].size())
-	var landscape: SlopitectModule = ctx["modules"].module("landscape")
-	if landscape and typeof(state.get("landscape")) == TYPE_STRING:
-		landscape.call("set_heights", Marshalls.base64_to_raw(state["landscape"]).to_float32_array())
-	var paths: SlopitectModule = ctx["modules"].module("paths")
-	if paths and typeof(state.get("paths")) == TYPE_DICTIONARY:
-		paths.call("set_paths", state["paths"])
+	for part in PARTS:
+		if not state.has(part):
+			continue
+		if ctx["modules"].module(PARTS[part]) == null:
+			_pending[part] = state[part]  # put back when its module loads
+		else:
+			problems.append_array(_put_part(part, state[part]))
 	_restoring = false
 	for problem in problems:
 		push_error("Slopitect save: " + problem)
 	return problems
+
+
+func _put_part(part: String, value) -> PackedStringArray:
+	var module: SlopitectModule = ctx["modules"].module(PARTS[part])
+	match part:
+		"models":
+			for model in _run({"cmd": "assets_placed"}).get("placed", []):
+				_run({"cmd": "assets_remove", "name": model["name"]})
+			return _put_models(value if typeof(value) == TYPE_ARRAY else [])
+		"landscape":
+			if typeof(value) == TYPE_STRING:
+				module.call("set_heights", Marshalls.base64_to_raw(value).to_float32_array())
+		"paths":
+			if typeof(value) == TYPE_DICTIONARY:
+				module.call("set_paths", value)
+	return PackedStringArray()
 
 
 func _put_models(models: Array) -> PackedStringArray:
@@ -144,31 +157,32 @@ func _put_models(models: Array) -> PackedStringArray:
 func _load_world() -> void:
 	var path := _folder + "/world.json"
 	if not FileAccess.file_exists(path):
+		_last_saved = ""
 		return
 	var state = JSON.parse_string(FileAccess.get_file_as_string(path))
 	if typeof(state) != TYPE_DICTIONARY:
 		push_error("Slopitect save: %s isn't a save; nothing was put back, and it's kept as world.json.bad" % path)
 		DirAccess.rename_absolute(path, path + ".bad")
 		return
-	var models: Array = state.get("models", [])
-	state["models"] = []
 	var problems := _put_back(state)
-	_pending_assets = models  # put back once the assets module has loaded
-	_last_saved = _comparable(state.get("shapes", []), models)
-	print("Slopitect save: put back %d shape(s); %d model(s) to follow%s" % [state.get("shapes", []).size(), models.size(),
+	_last_saved = _comparable(_snapshot())
+	print("Slopitect save: put back %d shape(s) from %s%s%s" % [state.get("shapes", []).size(), path,
+		"" if _pending.is_empty() else "; waiting for modules to load for: " + ", ".join(_pending.keys()),
 		"" if problems.is_empty() else "; problems: " + "; ".join(problems)])
 
 
 # Without the time, so the same world compares the same.
-func _comparable(shapes: Array, models: Array) -> String:
-	return JSON.stringify([shapes, models])
+func _comparable(state: Dictionary) -> String:
+	var copy := state.duplicate()
+	copy.erase("saved")
+	return JSON.stringify(copy)
 
 
 func _autosave() -> void:
-	if _restoring or not _pending_assets.is_empty() or _folder.is_empty():
+	if _restoring or _folder.is_empty():
 		return
-	var state := _snapshot(false)
-	var now := _comparable(state["shapes"], state["models"])
+	var state := _snapshot()
+	var now := _comparable(state)
 	if now == _last_saved:
 		return
 	var problem := _write(_folder + "/world.json", state)
@@ -176,6 +190,37 @@ func _autosave() -> void:
 		_last_saved = now
 	else:
 		push_error("Slopitect save: " + problem)
+
+
+# For the projects module: saves this world where it belongs, then switches
+# to another folder's world (an empty world if it has none yet).
+func use_folder(folder: String) -> String:
+	if folder == _folder:
+		return ""
+	if DirAccess.dir_exists_absolute(_folder):
+		_autosave()
+	var made := DirAccess.make_dir_recursive_absolute(folder + "/checkpoints")
+	if made != OK:
+		return "can't make %s (error %d)" % [folder, made]
+	_folder = folder
+	if FileAccess.file_exists(folder + "/world.json"):
+		_load_world()
+	else:
+		var empty := {"shapes": [], "models": [], "paths": {"paths": {}, "next": 1}}
+		var landscape: SlopitectModule = ctx["modules"].module("landscape")
+		if landscape:
+			var flat := PackedFloat32Array()
+			flat.resize((landscape.call("get_heights") as PackedFloat32Array).size())
+			empty["landscape"] = Marshalls.raw_to_base64(flat.to_byte_array())
+		_put_back(empty)
+		_last_saved = ""
+		_autosave()
+	print("Slopitect save: now saving in %s" % folder)
+	return ""
+
+
+func folder() -> String:
+	return _folder
 
 
 # Writes to a temporary file first, so a save cut short never replaces a good one.
@@ -230,13 +275,13 @@ func _checkpoint(request: Dictionary) -> Dictionary:
 	if not files.is_empty():
 		number = int(files[-1].get_slice("-", 0)) + 1
 	var id := "%04d" % number
-	var state := _snapshot(true)
+	var state := _snapshot()
 	state["label"] = label
 	var problem := _write("%s/checkpoints/%s-checkpoint.json" % [_folder, id], state)
 	if not problem.is_empty():
 		return {"ok": false, "error": problem}
 	print("Slopitect save: checkpoint %s \"%s\"" % [id, label])
-	return {"ok": true, "checkpoint": id, "label": label, "shapes": state["shapes"].size(), "models": state["models"].size(),
+	return {"ok": true, "checkpoint": id, "label": label, "shapes": state["shapes"].size(), "models": state.get("models", []).size(),
 		"ground": state.has("landscape"), "paths": state.has("paths")}
 
 
@@ -272,7 +317,7 @@ func _restore_command(request: Dictionary) -> Dictionary:
 	var read := _read_checkpoint(request.get("checkpoint"))
 	if read.has("error"):
 		return {"ok": false, "error": read["error"]}
-	var before := _snapshot(true)
+	var before := _snapshot()
 	var state: Dictionary = read["state"]
 	var problems := _put_back(state)
 	var tools: SlopitectModule = ctx["modules"].module("tools")

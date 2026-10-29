@@ -15,6 +15,7 @@ unless its file has changed since.
 | `move.gd` | Walk with the left stick (the way you look), turn with the right (30° steps, or smooth); you stand on the landscape's ground |
 | `grab.gd` | Hold the grip near a shape or model to pick it up; let go to drop it (or throw it, with physics). One undo per pick-up |
 | `physics.gd` | Makes shapes and models fall, bounce and collide (the engine's own physics) once you set them dynamic; the ground is the floor or the landscape |
+| `projects.gd` | A world per project (`projects/NAME/` in the Slopitect folder: its saves, notes, and the live modules it uses). Needs save.gd |
 | `assets.gd` | 3D models from [Poly Haven](https://polyhaven.com) (all CC0): search, download to the headset, place in the world. Powered by Poly Haven |
 
 A tool is any module with a `tool_info()` function, so a new tool is a new
@@ -35,6 +36,7 @@ From the platform-tools folder:
 .\adb push "C:\path\to\live-modules\move.gd" /sdcard/Slopitect/modules/
 .\adb push "C:\path\to\live-modules\grab.gd" /sdcard/Slopitect/modules/
 .\adb push "C:\path\to\live-modules\physics.gd" /sdcard/Slopitect/modules/
+.\adb push "C:\path\to\live-modules\projects.gd" /sdcard/Slopitect/modules/
 .\slopi.ps1 '{"cmd":"code_load","name":"tools"}'
 .\slopi.ps1 '{"cmd":"code_load","name":"landscape"}'
 .\slopi.ps1 '{"cmd":"code_load","name":"paths"}'
@@ -43,6 +45,7 @@ From the platform-tools folder:
 .\slopi.ps1 '{"cmd":"code_load","name":"move"}'
 .\slopi.ps1 '{"cmd":"code_load","name":"grab"}'
 .\slopi.ps1 '{"cmd":"code_load","name":"physics"}'
+.\slopi.ps1 '{"cmd":"code_load","name":"projects"}'
 ```
 
 Each `code_load` shows the code in the headset and waits for your Yes.
@@ -95,10 +98,18 @@ APK over the old one). The undo list is not saved.
 | `save_restore` | `checkpoint` (its id, like "0003" or 3); one undo |
 | `save_delete` | `checkpoint` |
 
-Saves are in `/sdcard/Slopitect/saves/`: `world.json` (shapes and models,
-saved within 5 seconds of a change and when the headset pauses the app) and
-`checkpoints/`. The ground and paths keep saving themselves as before;
-checkpoints hold them too.
+Saves are in `/sdcard/Slopitect/saves/` (with projects.gd, in the project's
+own `saves/`): `world.json` (shapes, models, ground and paths, saved within 5
+seconds of a change and when the headset pauses the app) and `checkpoints/`.
+A part whose module isn't loaded is kept as saved and put back when it loads.
+
+| `projects_list`, `projects_current` | |
+| `projects_new` | `name`, optional `modules` [names], `open` (true) |
+| `projects_open` | `name` (the world you're in is saved first) |
+| `projects_modules` | `name`, `modules` [names]: loaded when it opens |
+| `projects_config` (PC only) | `name`, `private` (true: never backed up) |
+
+The first time projects.gd loads, the existing saves become project `start`.
 
 | `move_status` | |
 | `move_to` | `position` [x, z], optional `facing` (degrees, 0 = -z) |
