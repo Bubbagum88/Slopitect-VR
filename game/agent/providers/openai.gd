@@ -23,10 +23,18 @@ func build_request(settings: Dictionary, system: String, history: Array, tools: 
 					message["tool_calls"] = calls
 				messages.append(message)
 			"tool_results":
+				# A tool message can only hold text, so pictures follow in a user
+				# message (models without vision will refuse it).
+				var pictures := []
 				for result in item["results"]:
 					messages.append({"role": "tool", "tool_call_id": result["id"], "content": result["content"]})
+					if result.has("image"):
+						pictures.append({"type": "text", "text": "The picture from %s:" % result["name"]})
+						pictures.append({"type": "image_url", "image_url": {"url": "data:%s;base64,%s" % [result["image"]["media_type"], result["image"]["base64"]]}})
 				if item.has("text"):
-					messages.append({"role": "user", "content": item["text"]})
+					pictures.append({"type": "text", "text": item["text"]})
+				if not pictures.is_empty():
+					messages.append({"role": "user", "content": pictures if pictures.size() > 1 or pictures[0]["type"] != "text" else pictures[0]["text"]})
 	var tool_list := []
 	for tool in tools:
 		tool_list.append({"type": "function", "function": {"name": tool["name"], "description": tool["description"], "parameters": tool["schema"]}})

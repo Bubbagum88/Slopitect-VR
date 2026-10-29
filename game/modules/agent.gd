@@ -45,11 +45,15 @@ const DEFAULTS := {
 	# The agent's firewall: the only commands it may use. A name ending in *
 	# allows every command starting with it. A new module's commands are off
 	# for the agent until they're added here.
-	"allowed_tools": ["list", "spawn", "move", "color", "delete", "ui_*", "modules", "avatar_*", "files_*", "confirm_status", "voice_*", "code_*"],
+	"allowed_tools": ["list", "spawn", "move", "color", "delete", "ui_*", "modules", "avatar_*", "files_*", "confirm_status", "voice_*", "code_*", "view_*"],
 }
-# The list allowed_tools had by default before the menu became panels. A saved
-# copy of exactly that is moved to the new default; a list you changed is kept.
-const OLD_DEFAULT_TOOLS := ["list", "spawn", "move", "color", "delete", "menu_*", "modules", "avatar_*"]
+# The lists allowed_tools had by default before (before the menu became
+# panels; before view_look). A saved copy of exactly one of them is moved to
+# the new default; a list you changed is kept.
+const OLD_DEFAULT_TOOLS := [
+	["list", "spawn", "move", "color", "delete", "menu_*", "modules", "avatar_*"],
+	["list", "spawn", "move", "color", "delete", "ui_*", "modules", "avatar_*", "files_*", "confirm_status", "voice_*", "code_*"],
+]
 
 const SYSTEM_PROMPT := """You are the AI agent inside Slopitect, a VR sandbox running on an Oculus Quest 1. The person you work with is standing in the world wearing the headset, and you build it with them, live.
 
@@ -355,6 +359,7 @@ func _run_tools(calls: Array) -> Array:
 	for call in calls:
 		var content: String
 		var is_error := false
+		var image := {}
 		var input: Dictionary = call["input"] if typeof(call["input"]) == TYPE_DICTIONARY else {}
 		# Every call needs a result, even ones that never ran.
 		if _stop_requested:
@@ -396,6 +401,11 @@ func _run_tools(calls: Array) -> Array:
 					await _waiting_on.done
 				outcome = _waiting_on.result
 				_waiting_on = null
+			# A picture (view_look) goes to the model as an image, not as text.
+			if typeof(outcome.get("image")) == TYPE_DICTIONARY:
+				image = outcome["image"]
+				outcome = outcome.duplicate()
+				outcome["image"] = "(attached)"
 			content = JSON.stringify(outcome)
 			is_error = not outcome.get("ok", false)
 			# Each tool reply is sent again on every later round, so a huge one
@@ -404,7 +414,10 @@ func _run_tools(calls: Array) -> Array:
 			if content.length() > cap:
 				content = content.left(cap) + "\n[cut: %d more characters. Ask for less, like files_read with offset and max_bytes.]" % (content.length() - cap)
 		_note("tool %s %s -> %s" % [call["name"], JSON.stringify(input).left(200), "FAILED: " + content.left(200) if is_error else "ok"])
-		results.append({"id": call["id"], "name": call["name"], "content": content, "is_error": is_error})
+		var result := {"id": call["id"], "name": call["name"], "content": content, "is_error": is_error}
+		if not image.is_empty():
+			result["image"] = image
+		results.append(result)
 	return results
 
 
@@ -599,9 +612,9 @@ func _load_settings() -> void:
 				break
 			loaded[key] = checked[1]
 		if problem.is_empty():
-			if loaded["allowed_tools"] == OLD_DEFAULT_TOOLS:
+			if loaded["allowed_tools"] in OLD_DEFAULT_TOOLS:
 				loaded["allowed_tools"] = DEFAULTS["allowed_tools"].duplicate()
-				print("Slopitect agent: allowed_tools was the old default; moved menu_* to ui_*")
+				print("Slopitect agent: allowed_tools was an old default; moved it to the new one: %s" % [loaded["allowed_tools"]])
 			settings = loaded
 			print("Slopitect agent: loaded settings (%s, %s, key %s)" % [settings["provider"], settings["model"], "set" if not String(settings["api_key"]).is_empty() else "not set"])
 			return
