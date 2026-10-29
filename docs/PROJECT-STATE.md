@@ -81,7 +81,7 @@ All PC-tested. Most are now loaded on the headset; a module counts as Headset on
 | settings | The Settings window, built from each loaded module's `settings_info()`; nothing in it names a module |
 | library | The Library window: Textures, Assets and Prefabs tabs of thumbnail tiles (Poly Haven, CC0), 12 to a page |
 | joints | Hinges, sliders, ball and fixed joints between things, with attach points that snap together; Jolt joints for dynamic things. Loaded on the headset |
-| hands | Drawn hands with nails in place of the controller boxes; fingers curl with grip, trigger and thumb rest; colours from the PC (`hands_config`). The hands lie on the controller's handle and wrap it (the controllers follow the aim pose, so the handle is found 45 degrees up from it; `hands_config` grip_angle, grip_offset, rest_curl tune the fit). Curling and the fit were checked on the PC with a stand-in for the controllers; the fit is not seen on the headset |
+| hands | Drawn hands with nails in place of the controller boxes; they pose like the Oculus Home hands (index points off the trigger, thumb lifts off the buttons into a thumbs-up, grip closes the rest); colours from the PC (`hands_config`). The hands lie on the controller's handle and wrap it (the controllers follow the aim pose, so the handle is found 45 degrees up from it; `hands_config` grip_angle, grip_offset, rest_curl tune the fit). Curling and the fit were checked on the PC with a stand-in for the controllers; the fit is not seen on the headset |
 
 Every draft has been reworked or dropped; what happened to each is in
 [live-modules/drafts/](../live-modules/drafts/) and

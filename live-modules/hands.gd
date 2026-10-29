@@ -2,11 +2,14 @@ extends SlopitectModule
 
 # Slopitect live module: hands.
 # Drawn hands with coloured nails on both controllers, in place of the
-# APK's box on each one. The fingers curl as the grip is pressed, the index
-# finger with the trigger (a little when a finger only rests on it), and
-# the thumb when it rests on a button or the thumbstick. How far each is
-# pressed comes from the controls module (value()); without it the hands
-# stay open. The boxes come back when the module is unloaded.
+# APK's box on each one. They pose like the Oculus Home hands, from what
+# each finger touches: the index finger points when it is off the trigger,
+# rests curled on it when touching and closes as it is pulled; the thumb
+# lies on the buttons or thumbstick when touching them and lifts off them
+# when not (a thumbs-up with the grip held); the middle, ring and little
+# fingers close with the grip. What each finger touches and presses comes
+# from the controls module (value()); without it the hands stay open. The
+# boxes come back when the module is unloaded.
 # Hide hands: a switch in the Settings window (hands_hide, also usable by the
 # agent). The hands also hide by themselves while the beatsaber module is
 # loaded, and come back when it is unloaded.
@@ -29,6 +32,8 @@ const FINGER_R := [0.0095, 0.0095, 0.009, 0.008]
 const SPLIT := [0.45, 0.3, 0.25]  # how a finger's length splits into its three bones
 const CURL := [75.0, 95.0, 70.0]  # degrees each bone bends when fully curled
 const FOLLOW := 18.0  # how fast a finger catches up with the press
+const INDEX_ON := 0.35  # index curl when it rests on the trigger without pulling
+const THUMB_ON := 0.75  # thumb curl when it rests on a button or the thumbstick
 
 # Fitting a hand to the controller. The controller nodes follow the "aim"
 # pose (Godot's default action map binds the default pose to aim): -Z where
@@ -44,7 +49,8 @@ const FOLLOW := 18.0  # how fast a finger catches up with the press
 # middle, forward, along it.
 const PALM_AT := Vector3(0.032, 0.002, 0.004)
 const HAND_TILT := 40.0
-const THUMB_SPREAD := 45.0  # degrees the open thumb points away from the fingers
+const THUMB_SPREAD := 45.0  # degrees the thumb is built turned away from the fingers
+const THUMB_UP := 75.0  # degrees it turns away when lifted off the buttons (a thumbs-up with the grip held)
 const GRIP_ANGLE_RANGE := [-30.0, 90.0]
 const GRIP_OFFSET_MAX := 15.0  # cm, each of x, y, z
 
@@ -119,7 +125,9 @@ func _process(delta: float) -> void:
 		# The fingers rest round the handle a little even when nothing is pressed.
 		var rest: float = settings["rest_curl"]
 		var held := lerpf(rest, 1.0, grip)
-		var targets := [maxf(maxf(0.75 * thumb_on, grip * 0.6), rest * 0.5), maxf(maxf(trigger, 0.25 * finger_on), rest * 0.5), held, held, held]
+		# Off the trigger the index points; off the buttons the thumb lifts.
+		var index := lerpf(INDEX_ON, 1.0, trigger) if finger_on > 0.5 or trigger > 0.0 else 0.0
+		var targets := [THUMB_ON * thumb_on, index, held, held, held]
 		var curl: Array = h["curl"]
 		for i in 5:
 			curl[i] = lerpf(curl[i], targets[i], k)
@@ -128,7 +136,7 @@ func _process(delta: float) -> void:
 			for j in 3:
 				(bones[j] as Node3D).rotation.x = -deg_to_rad(CURL[j]) * curl[i + 1]
 		var side: float = h["side"]
-		(h["tbase"] as Node3D).rotation_degrees = Vector3(-20.0 * curl[0], side * THUMB_SPREAD * (curl[0] - 1.0), 0.0)
+		(h["tbase"] as Node3D).rotation_degrees = Vector3(-20.0 * curl[0], side * THUMB_UP * (curl[0] - 1.0), 0.0)
 		(h["thumb"][1] as Node3D).rotation.x = -deg_to_rad(30.0) * curl[0]
 		(h["thumb"][2] as Node3D).rotation.x = -deg_to_rad(45.0) * curl[0]
 
