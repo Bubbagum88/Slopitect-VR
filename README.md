@@ -352,6 +352,7 @@ registering the plugin first.)
 | `docs/LIVE-CHANGES-AND-SAFETY.md` | What changes live, what needs a new APK, and the safety rules |
 | `tools/slopi.ps1` | Sends one command from your PC and prints the reply |
 | `tools/slopi-chat.ps1` | Talks to the agent from your PC and shows its replies and tool calls as they happen |
+| `tools/slopi-backup.ps1` | Backs up a project from the headset into a git repository on the PC, and pushes it with -Push (private projects and assets/ are never taken) |
 | `ci/debug.keystore` | Debug signing key, so each build installs over the last |
 | `game/export_presets.cfg` | The "Quest 1" Android export (Quest 1 and 2 only) |
 | `.github/workflows/quest1-apk.yml` | Builds and checks the APK |
