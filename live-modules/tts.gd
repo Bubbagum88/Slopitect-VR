@@ -38,6 +38,22 @@ const DEFAULTS := {
 	"volume": 80,
 }
 
+# How replies are made sayable (speakable()).
+var _speech_drop := [
+	RegEx.create_from_string("^#+\\s*"),  # heading marks
+	RegEx.create_from_string("^>\\s*"),  # quote marks
+	RegEx.create_from_string("^([-*+]|\\d+[.)])\\s+"),  # list bullets and numbers
+	RegEx.create_from_string("^\\|?[\\s:|-]+\\|[\\s:|-]*$"),  # a table's ---|--- line
+	RegEx.create_from_string("^\\|\\s*|\\s*\\|$"),  # a table row's outer bars
+	RegEx.create_from_string("[*~`]+"),  # bold, italic, code and strike marks (underscores become spaces below)
+]
+var _speech_link := RegEx.create_from_string("\\[([^\\]]*)\\]\\([^)]*\\)")
+var _speech_url := RegEx.create_from_string("\\b(?:https?|res|user|file)://\\S+")
+var _speech_path := RegEx.create_from_string("(?<![\\w/])(?:[\\w.-]*[A-Za-z][\\w.-]*/)+([\\w.-]+)")
+const SPEECH_WORDS := [["->", " to "], ["=>", " to "], ["&", " and "], ["|", ", "], ["_", " "], ["\\", " "]]
+var _speech_symbols := RegEx.create_from_string("[^\\p{L}\\p{N}\\s.,!?;:'\"()%°$€£+=/-]")
+var _speech_spaces := RegEx.create_from_string("\\s+")
+
 var settings := DEFAULTS.duplicate()
 
 var _voice_cache := []  # the engine's voices, asked once it has some (each ask is a slow call into Android)
@@ -144,7 +160,9 @@ func _voice_list(fresh := false) -> Array:
 # For other modules: says text aloud; "" when it's on its way, or why not.
 # interrupt stops what is being said first; otherwise it waits its turn.
 func speak(text: String, voice := "", interrupt := false) -> String:
-	text = text.left(MAX_SAY)
+	text = speakable(text).left(MAX_SAY)
+	if text.is_empty():
+		return ""
 	if _in_app_problem.is_empty():
 		if interrupt:
 			_stop_in_app()
@@ -163,6 +181,47 @@ func speak(text: String, voice := "", interrupt := false) -> String:
 	_speech_deadline = (maxf(_speech_deadline, now) if not interrupt and _speech_deadline > 0.0 else now) + seconds
 	DisplayServer.tts_speak(text, voice, int(settings["volume"]), float(settings["pitch"]), float(settings["rate"]), 0, interrupt)
 	return ""
+
+
+# For other modules: the part of a text that should be said aloud. The
+# chat window still shows everything; this leaves out what a voice would
+# read as noise: code blocks (said as "the code is in the chat"), markdown
+# marks, list bullets, table bars, web addresses and file paths (only
+# their last part), emoji and other symbols. Each line becomes a sentence.
+func speakable(text: String) -> String:
+	var had_code := false
+	var lines := PackedStringArray()
+	var in_code := false
+	for raw in text.split("\n"):
+		var line := raw.strip_edges()
+		if line.begins_with("```"):
+			in_code = not in_code
+			had_code = true
+			continue
+		if in_code or line.is_empty():
+			continue
+		line = _speech_line(line)
+		if line.is_empty():
+			continue
+		# A line without its own full stop (a heading, a list item) ends a sentence.
+		if not line[line.length() - 1] in [".", "!", "?", ":", ";", ","]:
+			line += "."
+		lines.append(line)
+	if had_code:
+		lines.append("The code is in the chat.")
+	return " ".join(lines)
+
+
+func _speech_line(line: String) -> String:
+	for pattern in _speech_drop:
+		line = pattern.sub(line, "", true)
+	line = _speech_link.sub(line, "$1", true)  # [words](address) -> words
+	line = _speech_url.sub(line, "a link", true)
+	line = _speech_path.sub(line, "$1", true)  # folder/name.gd -> name.gd
+	for pair in SPEECH_WORDS:
+		line = line.replace(pair[0], pair[1])
+	line = _speech_symbols.sub(line, " ", true)
+	return _speech_spaces.sub(line, " ", true).replace(" ,", ",").strip_edges()
 
 
 # For other modules: whether something is being said (or about to be).
