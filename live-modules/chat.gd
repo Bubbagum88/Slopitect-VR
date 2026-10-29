@@ -146,6 +146,12 @@ func _show_screen() -> void:
 	ui.call("set_text", PANEL, "log", text)
 
 
+# The conversation as this window shows it, laid out, oldest line first
+# (the terminal's chat mode shows the same).
+func transcript() -> PackedStringArray:
+	return _screen
+
+
 func _status(_request: Dictionary) -> Dictionary:
 	return {"ok": true, "lines": _screen.size(), "newest": _screen.slice(maxi(0, _screen.size() - ROWS)), "window": _is_ours()}
 

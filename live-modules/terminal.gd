@@ -22,6 +22,13 @@ extends SlopitectModule
 # and its reply, so it can help with what's on the screen; its answer is
 # printed here when it's done.
 #
+# Chat (top of the tools) turns the same window into the agent's chat: the
+# screen shows the conversation, Run sends what you typed to the agent as
+# it is, the keyboard has ' ? ! instead of the command symbols, and the
+# tools are STOP, New chat, the scroll buttons and Cls. Terminal turns it
+# back. The conversation is chat.gd's when it's loaded (with aimsg.gd's
+# layout); without it, the agent's recent events as they are.
+#
 # What the terminal won't run: settings (any *_config command, PC only) and
 # terminal_run inside itself. A command run from here is yours, so one that
 # needs your Yes (code_load, files outside the agent's folder) still asks in
@@ -48,6 +55,8 @@ const LINE_COLS := 44  # characters of the typed line shown, at LINE_FONT
 const KEY := 0.045
 const GAP := 0.007
 const ROWS_OF_KEYS := ["1234567890-", "qwertyuiop/", "asdfghjkl_=", "zxcvbnm,.[]"]
+const CHAT_KEYS := ["1234567890-", "qwertyuiop'", "asdfghjkl?!", "zxcvbnm,./:"]
+const CHAT_POLL_SECONDS := 0.5
 const CHECK_SECONDS := 1.0
 const ASK_POLL_SECONDS := 0.5
 
@@ -63,6 +72,10 @@ var _asking := false
 var _since_ask_poll := 0.0
 var _ui_id := 0  # the ui module the window was built on (its instance id)
 var _since_check := CHECK_SECONDS
+var _mode := "terminal"  # or "chat"
+var _other_line := ""  # what's typed in the other mode, kept for when you switch back
+var _chat_text := ""  # the conversation as last shown
+var _since_chat_poll := CHAT_POLL_SECONDS
 
 
 func setup() -> String:
@@ -73,7 +86,8 @@ func setup() -> String:
 	register("terminal_clear", _clear_command, "clear the terminal's screen")
 	register("terminal_help", _help_command, "print the commands on the terminal, or one command's summary: optional name")
 	register("terminal_ask", _ask_command, "send the terminal's line to the agent with the last command and its reply")
-	register("terminal_status", _status, "the terminal's line, its last screen lines and its history")
+	register("terminal_status", _status, "the terminal's mode (terminal or chat), line, last screen lines and history")
+	register("terminal_mode", _mode_command, "switch the terminal's window between the command line and the agent's chat: mode (terminal or chat)")
 	_print("Slopitect terminal. Type a command and press Run; Help lists them.")
 	return ""
 
@@ -100,6 +114,11 @@ func _process(delta: float) -> void:
 		if ui != null and (id != _ui_id or not _has_panel()):
 			_build_panel()
 		_ui_id = id
+	if _mode == "chat":
+		_since_chat_poll += delta
+		if _since_chat_poll >= CHAT_POLL_SECONDS:
+			_since_chat_poll = 0.0
+			_show_chat()
 	if _asking:
 		_since_ask_poll += delta
 		if _since_ask_poll >= ASK_POLL_SECONDS:
@@ -321,10 +340,10 @@ func _scrolling_ui() -> bool:
 	return ui != null and ui.has_method("scroll_text")
 
 
-# The screen's lines wrapped to COLS, for the older ui.gd.
-func _wrapped() -> PackedStringArray:
+# Lines wrapped to COLS, for the older ui.gd.
+func _wrapped(lines: PackedStringArray = _screen) -> PackedStringArray:
 	var wrapped := PackedStringArray()
-	for raw in _screen:
+	for raw in lines:
 		var line: String = raw
 		if line.is_empty():
 			wrapped.append("")
@@ -340,30 +359,94 @@ func _wrapped() -> PackedStringArray:
 	return wrapped
 
 
-func _visible_lines() -> PackedStringArray:
-	var wrapped := _wrapped()
+func _visible_lines(lines: PackedStringArray = _screen) -> PackedStringArray:
+	var wrapped := _wrapped(lines)
 	var end := wrapped.size() - _scroll
 	return wrapped.slice(maxi(0, end - ROWS), end)
 
 
 func _show_screen() -> void:
+	if _mode == "chat":
+		_chat_text = ""
+		_show_chat()
+		return
+	_show_lines(_screen)
+
+
+func _show_lines(lines: PackedStringArray) -> void:
 	if _scrolling_ui():
 		# The newest lines that fit in a text element; ui.gd wraps them.
-		var text := "\n".join(_screen).right(SCROLL_CHARS)
+		var text := "\n".join(lines).right(SCROLL_CHARS)
 		var first := text.find("\n")
 		if text.length() == SCROLL_CHARS and first != -1:
 			text = text.substr(first + 1)  # no half line at the top
 		_set_text("screen_text", text)
 		return
-	var text := "\n".join(_visible_lines())
+	var text := "\n".join(_visible_lines(lines))
 	if _scroll > 0:
 		text += "\n(%d more lines below: Down)" % _scroll
 	_set_text("screen_text", text)
 
 
+# --- Chat ----------------------------------------------------------------------------
+
+# The conversation: chat.gd's screen when it's loaded, else the agent's
+# recent events (laid out by aimsg.gd when that's loaded).
+func _chat_lines() -> PackedStringArray:
+	var chat: SlopitectModule = ctx["modules"].module("chat")
+	if chat != null and chat.has_method("transcript"):
+		return PackedStringArray(chat.call("transcript"))
+	var lines := PackedStringArray()
+	var status: Dictionary = ctx["server"].run({"cmd": "agent_status"})
+	if not status.get("ok", false):
+		lines.append("(the agent isn't available: %s)" % status.get("error", "?"))
+		return lines
+	var aimsg: SlopitectModule = ctx["modules"].module("aimsg")
+	for event in status.get("events", []):
+		if aimsg != null and aimsg.has_method("event_lines"):
+			lines.append_array(PackedStringArray(aimsg.call("event_lines", str(event))))
+		else:
+			lines.append(str(event))
+	return lines
+
+
+# Shows the conversation, only when it changed (it's checked twice a second).
+func _show_chat() -> void:
+	var lines := _chat_lines()
+	if lines.is_empty():
+		lines.append("agent ready. type below and press Send.")
+	var text := "\n".join(lines)
+	if text == _chat_text:
+		return
+	_chat_text = text
+	_show_lines(lines)
+
+
+func _set_mode(mode: String) -> void:
+	if mode == _mode:
+		return
+	var typed := _line
+	_line = _other_line
+	_other_line = typed
+	_mode = mode
+	_shift = false
+	_history_at = -1
+	_scroll = 0
+	_build_panel()
+
+
+func _send_chat(text: String) -> Dictionary:
+	var reply: Dictionary = ctx["server"].run({"cmd": "agent_ask", "prompt": text})
+	if not reply.get("ok", false):
+		_line = text  # kept, to send again once the agent is free
+		_show_line()
+	_since_chat_poll = CHAT_POLL_SECONDS  # show "you: ..." straight away
+	return reply
+
+
 func _show_line() -> void:
 	var shown := _line.right(LINE_COLS)  # the end of a long line, where you type
-	_set_text("line", "$ " + shown + "|" + (" (SHIFT)" if _shift else ""))
+	_set_text("line", ("> " if _mode == "chat" else "$ ") + shown + "|" + (" (SHIFT)" if _shift else ""))
 
 
 func _set_text(id_element: String, text: String) -> void:
@@ -420,6 +503,8 @@ func _key(key: String) -> Dictionary:
 				return {"ok": false, "error": "nothing to run"}
 			_line = ""
 			_show_line()
+			if _mode == "chat":
+				return _send_chat(line)
 			run_line(line)
 			return {"ok": true, "ran": line}
 		_:
@@ -565,6 +650,10 @@ func _scroll_command(request: Dictionary) -> Dictionary:
 
 
 func _clear_command(_request: Dictionary) -> Dictionary:
+	if _mode == "chat" and ctx["modules"].module("chat") != null:
+		var reply: Dictionary = ctx["server"].run({"cmd": "chat_clear"})
+		_show_screen()
+		return reply
 	_screen.clear()
 	_scroll = 0
 	_show_screen()
@@ -580,8 +669,17 @@ func _ask_command(_request: Dictionary) -> Dictionary:
 	return _ask()
 
 
+func _mode_command(request: Dictionary) -> Dictionary:
+	var mode = request.get("mode")
+	if not mode in ["terminal", "chat"]:
+		return {"ok": false, "error": "\"mode\" must be terminal or chat"}
+	_set_mode(mode)
+	return {"ok": true, "mode": _mode}
+
+
 func _status(_request: Dictionary) -> Dictionary:
-	return {"ok": true, "line": _line, "screen": _visible_lines(), "scroll": _scroll,
+	var shown := _chat_lines() if _mode == "chat" else _screen
+	return {"ok": true, "mode": _mode, "line": _line, "screen": _visible_lines(shown), "scroll": _scroll,
 		"history": _history, "asking": _asking, "window": _ui() != null}
 
 
@@ -591,38 +689,51 @@ func _status(_request: Dictionary) -> Dictionary:
 # column on the right. The window's place is kept by ui.gd; this only adds it
 # the first time and replaces its elements after.
 func _build_panel() -> void:
+	var chat := _mode == "chat"
+	var keys: Array = CHAT_KEYS if chat else ROWS_OF_KEYS
 	var unit := KEY + GAP
-	var width: float = ROWS_OF_KEYS[0].length() * unit - GAP
+	var width: float = keys[0].length() * unit - GAP
 	var left := -width / 2.0
 	var screen_height := ROWS * FONT * 0.0006 * 1.25 + 0.02
 	var line_y := 0.09
-	var screen_y := line_y + 0.035 + screen_height / 2.0
+	var screen_y := line_y + 0.05 + screen_height / 2.0
 	var elements := [
 		{"type": "box", "id": "screen", "at": [0, screen_y], "size": [width + 0.02, screen_height], "color": "#08100a"},
 		{"type": "text", "id": "screen_text", "at": [0, screen_y + screen_height / 2.0 - 0.01], "width": width,
 			"font_size": FONT, "color": "#8cff99", "mono": true, "text": ""},
 		{"type": "text", "id": "line", "at": [0, line_y + 0.012], "width": width, "font_size": LINE_FONT, "color": "#b3e6ff", "mono": true, "text": "$ |"},
 	]
+	if chat:
+		# What the agent is doing, between the conversation and your line.
+		elements.append({"type": "text", "id": "state", "at": [0, line_y + 0.042], "width": width, "font_size": 20,
+			"color": "#5f9f6a", "mono": true, "source": {"cmd": "agent_status", "field": "status_line"}})
 	if _scrolling_ui():
 		# The new ui.gd's text area: it wraps, clips at its box and keeps
 		# to the newest lines, and Up / Down scroll it.
 		elements[1]["height"] = screen_height - 0.02
 		elements[1]["scroll"] = true
-	for r in ROWS_OF_KEYS.size():
-		var row: String = ROWS_OF_KEYS[r]
+	for r in keys.size():
+		var row: String = keys[r]
 		for c in row.length():
 			var ch := row[c]
 			elements.append({"type": "button", "id": "key_%d_%d" % [r, c], "label": ch,
 				"at": [left + KEY / 2.0 + c * unit, line_y - 0.05 - r * unit], "size": [KEY, KEY],
 				"action": {"cmd": "terminal_type", "text": ch}})
-	var bottom := line_y - 0.05 - ROWS_OF_KEYS.size() * unit
+	var bottom := line_y - 0.05 - keys.size() * unit
 	var x := left
-	for key in [["shift", "Shift", 2, {"cmd": "terminal_key", "key": "shift"}],
+	var bottom_row := [["shift", "Shift", 2, {"cmd": "terminal_key", "key": "shift"}],
 			["quote", "\"", 1, {"cmd": "terminal_type", "text": "\""}],
 			["space", "Space", 4, {"cmd": "terminal_type", "text": " "}],
 			["del", "Del", 1, {"cmd": "terminal_key", "key": "backspace"}],
 			["clear", "Clr", 1, {"cmd": "terminal_key", "key": "clear"}],
-			["run", "Run", 2, {"cmd": "terminal_key", "key": "run"}]]:
+			["run", "Run", 2, {"cmd": "terminal_key", "key": "run"}]]
+	if chat:
+		bottom_row = [["shift", "Shift", 2, {"cmd": "terminal_key", "key": "shift"}],
+			["space", "Space", 4, {"cmd": "terminal_type", "text": " "}],
+			["del", "Del", 2, {"cmd": "terminal_key", "key": "backspace"}],
+			["clear", "Clr", 1, {"cmd": "terminal_key", "key": "clear"}],
+			["run", "Send", 2, {"cmd": "terminal_key", "key": "run"}]]
+	for key in bottom_row:
 		var w: float = key[2] * unit - GAP
 		var button := {"type": "button", "id": key[0], "label": key[1], "at": [x + w / 2.0, bottom], "size": [w, KEY], "action": key[3]}
 		if key[0] == "run":
@@ -630,6 +741,7 @@ func _build_panel() -> void:
 		elements.append(button)
 		x += key[2] * unit
 	var tools := [
+		["mode", "Chat", {"cmd": "terminal_mode", "mode": "chat"}],
 		["tab", "Tab", {"cmd": "terminal_key", "key": "tab"}],
 		["prev", "Prev", {"cmd": "terminal_key", "key": "prev"}],
 		["next", "Next", {"cmd": "terminal_key", "key": "next"}],
@@ -639,16 +751,32 @@ func _build_panel() -> void:
 		["cls", "Cls", {"cmd": "terminal_clear"}],
 		["ask", "Ask AI", {"cmd": "terminal_ask"}],
 	]
+	if chat:
+		tools = [
+			["mode", "Terminal", {"cmd": "terminal_mode", "mode": "terminal"}],
+			["stop", "STOP", {"cmd": "agent_stop"}],
+			["new_chat", "New chat", {"cmd": "agent_reset"}],
+			["up", "Up", {"cmd": "terminal_scroll", "by": ROWS - 1}],
+			["down", "Down", {"cmd": "terminal_scroll", "by": -(ROWS - 1)}],
+			["cls", "Cls", {"cmd": "terminal_clear"}],
+		]
 	var tool_x := width / 2.0 + 0.02 + 0.055
 	var top := screen_y + screen_height / 2.0 - KEY / 2.0
 	for i in tools.size():
-		elements.append({"type": "button", "id": "tool_" + tools[i][0], "label": tools[i][1],
-			"at": [tool_x, top - i * unit], "size": [0.11, KEY], "action": tools[i][2]})
-	var panel := {"cmd": "ui_add", "id_panel": PANEL, "title": "Terminal", "place": "front", "distance": 0.6, "height": -0.3,
+		var tool := {"type": "button", "id": "tool_" + tools[i][0], "label": tools[i][1],
+			"at": [tool_x, top - i * unit], "size": [0.11, KEY], "action": tools[i][2]}
+		if tools[i][0] == "stop":
+			tool["color"] = "#8c1f1f"
+		elif tools[i][0] == "mode":
+			tool["color"] = "#2a4f8f"
+		elements.append(tool)
+	var title := "Chat" if chat else "Terminal"
+	var panel := {"cmd": "ui_add", "id_panel": PANEL, "title": title, "place": "front", "distance": 0.6, "height": -0.3,
 		"toggle": "right_a", "elements": elements}
 	if _has_panel():
-		# Only the elements: where you put the window, and its toggle, stay.
-		panel = {"cmd": "ui_update", "id_panel": PANEL, "elements": elements}
+		# Only the title and elements: where you put the window, and its
+		# toggle, stay.
+		panel = {"cmd": "ui_update", "id_panel": PANEL, "title": title, "elements": elements}
 	var reply: Dictionary = ctx["server"].run(panel)
 	if not reply.get("ok", false):
 		push_error("Slopitect terminal: the window could not be built: %s" % reply.get("error"))
