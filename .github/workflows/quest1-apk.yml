@@ -22,7 +22,7 @@ env:
   # used as it is. 1.13.8 is the last with espeak-ng, which Piper voices
   # need to turn text into sounds (2.0 removed it).
   SHERPA_ONNX_VERSION: 1.13.8
-  SHERPA_AAR_SHA256: ""
+  SHERPA_AAR_SHA256: 633c24321e06b1fe79feafa03ea16cbc0f8a286641e2da3559bac91bdb13bd96
 
 jobs:
   whisper:
