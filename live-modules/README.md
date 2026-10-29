@@ -22,7 +22,7 @@ unless its file has changed since.
 | `projects.gd` | A world per project (`projects/NAME/` in the Slopitect folder: its saves, notes, and the live modules it uses). Needs save.gd |
 | `hands.gd` | Drawn hands with coloured nails in place of the controller boxes; the fingers curl with the grip, trigger and where your thumb rests. Colours from the PC (`hands_config`). Needs controls.gd to move |
 | `inspect.gd` | A tool for one thing at a time: point and pull the trigger to select a shape or model, then switch its physics (none, static, dynamic), whether it can be grabbed, hide it, or delete it (one undo). Show hidden brings hidden things back. The switches are kept with each project's world |
-| `terminal.gd` | A command line in the headset (A on the right controller): type any of the app's commands, like `spawn shape=box scale=0.3`, and press Run to see the reply. Tab completes a command's name, Prev / Next step through what you ran, Help lists the commands, Up / Down scroll, Cls clears, and Ask AI sends your line with the last command and its reply to the agent. Won't run `*_config` settings. Needs vrui.gd for its window |
+| `terminal.gd` | A command line in the headset (A on the right controller): type any of the app's commands, like `spawn shape=box scale=0.3`, and press Run to see the reply. Tab completes a command's name, Prev / Next step through what you ran, Help lists the commands, Up / Down scroll, Cls clears, and Ask AI sends your line with the last command and its reply to the agent. Won't run `*_config` settings. Chat turns the same window into the agent's chat (the conversation from chat.gd, Send, STOP, New chat, a keyboard with ' ? !); Terminal turns it back. Needs vrui.gd for its window |
 | `avatar.gd` | The agent's avatar (it used to be built into the APK): a red cube with a face that thinks while the agent works, shows emotions (`avatar_emotion`), moves its mouth with the words while the speech engine talks, and shows replies a page at a time in a speech bubble above its head, which waits at the edge of your view when the avatar is out of sight. Outfits are made of simple shapes (`avatar_outfit_add`). Other modules use `body()`, `say()`, `set_state()`, `set_emotion()` and `speaking()` |
 | `aimsg.gd` | Makes the chat log easier to read: "you>" and "ai>" tags, the agent's words wrapped, markdown marks taken out, code marked with "\|", tool calls and thinking on one short line. It changes no window: the chat log's source asks for it (`"format": "aimsg"`, which needs the vrui.gd from the VR UI work), and shows plain lines when it isn't loaded. Width and height from the PC (`aimsg_config`) |
 | `net.gd` | Downloads from the internet, only https and only from hosts allowed on the PC (`net_config`; Poly Haven's to start). Files go in `downloads/HOST/` with a `.source.json` saying where they came from. Other modules download through its `fetch()` |
@@ -181,6 +181,7 @@ The first time projects.gd loads, the existing saves become project `start`.
 | `terminal_key` | `key`: shift, backspace, clear, tab, prev, next, run |
 | `terminal_scroll` | `by` (lines, + is back) or `end` true |
 | `terminal_clear`, `terminal_ask`, `terminal_status` | |
+| `terminal_mode` | `mode`: terminal or chat |
 | `terminal_help` | optional `name` (a command) |
 
 | `move_status` | |
