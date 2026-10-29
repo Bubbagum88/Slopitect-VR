@@ -17,6 +17,10 @@ env:
   # (whisper.cpp v1.8.4 as its submodule), with the NDK its godot-cpp asks for.
   WHISPER_COMMIT: e490cbbb74b0f79abc787b34970f18dc15b258f3
   WHISPER_NDK: 23.2.8568313
+  # sherpa-onnx (Apache-2.0): fast streaming speech to text on the headset
+  # (vtt.gd's "sherpa" engine). Its released Android library, used as it is.
+  SHERPA_ONNX_VERSION: 2.0.1
+  SHERPA_AAR_SHA256: ""
 
 jobs:
   whisper:
@@ -124,6 +128,22 @@ jobs:
           name: godot-whisper
           path: game/addons/godot_whisper
 
+      # Godot's gradle build adds any .aar in res://addons to the APK.
+      - name: Download sherpa-onnx's Android library
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          aar="sherpa-onnx-${SHERPA_ONNX_VERSION}.aar"
+          curl -fsSL -o "game/addons/$aar" "https://github.com/k2-fsa/sherpa-onnx/releases/download/v${SHERPA_ONNX_VERSION}/$aar"
+          got=$(sha256sum "game/addons/$aar" | awk '{print $1}')
+          if [ "$got" != "$SHERPA_AAR_SHA256" ]; then
+            github=$(gh api "repos/k2-fsa/sherpa-onnx/releases/tags/v${SHERPA_ONNX_VERSION}" --jq ".assets[] | select(.name == \"$aar\") | .digest" || true)
+            echo "::error::$aar has SHA-256 $got; SHERPA_AAR_SHA256 in this workflow is '$SHERPA_AAR_SHA256' (GitHub's release lists $github)"
+            exit 1
+          fi
+          unzip -l "game/addons/$aar" | grep -E "arm64-v8a/.*\.so$"
+
       - name: Import the project
         run: |
           set -euo pipefail
@@ -169,8 +189,14 @@ jobs:
           for perm in INTERNET RECORD_AUDIO READ_EXTERNAL_STORAGE WRITE_EXTERNAL_STORAGE MANAGE_EXTERNAL_STORAGE; do
             grep -q "android.permission.$perm\"" manifest.txt && echo "has permission $perm" || { echo "::error::missing permission $perm"; fail=1; }
           done
-          for lib in lib/arm64-v8a/libgodot_android.so lib/arm64-v8a/libgodotopenxrvendors.so lib/arm64-v8a/libgodot_whisper.android.template_release.arm64.so; do
+          for lib in lib/arm64-v8a/libgodot_android.so lib/arm64-v8a/libgodotopenxrvendors.so lib/arm64-v8a/libgodot_whisper.android.template_release.arm64.so \
+            lib/arm64-v8a/libsherpa-onnx-jni.so lib/arm64-v8a/libonnxruntime.so; do
             unzip -l "$apk" "$lib" > /dev/null && echo "has $lib" || { echo "::error::missing $lib"; fail=1; }
+          done
+          # vtt.gd reaches sherpa-onnx's Java classes by these names.
+          unzip -o -q "$apk" 'classes*.dex' -d dex
+          for cls in OnlineRecognizer OnlineRecognizerConfig OnlineStream; do
+            grep -q -a "Lcom/k2fsa/sherpa/onnx/$cls;" dex/classes*.dex && echo "has com.k2fsa.sherpa.onnx.$cls" || { echo "::error::missing the class com.k2fsa.sherpa.onnx.$cls"; fail=1; }
           done
           # Signed with ci/debug.keystore, so it installs over earlier builds.
           expected=1af887e3d0bf44b1e7bb1b3593896f705c9c84b6b08e636bf2d1f92e1dcdbc6b
