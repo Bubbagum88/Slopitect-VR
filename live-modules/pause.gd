@@ -71,7 +71,7 @@ func _process(delta: float) -> void:
 	var ui := _ui()
 	if ui == null:
 		return
-	var signature := JSON.stringify([ui.get_instance_id(), _has("tools"), _has("settings"), _hand_items(), _wrist_buttons()])
+	var signature := JSON.stringify([ui.get_instance_id(), _has("tools"), _has("settings"), _hand_items(), _wrist_buttons(), _hand_statuses().map(func(st): return st["id"])])
 	if signature != _hand_signature or not _run({"cmd": "ui_get", "id_panel": HAND_PANEL}).get("ok", false):
 		_hand_signature = signature
 		_build_hand()
@@ -298,6 +298,24 @@ func _hand_items() -> Array:
 	return items
 
 
+# Status lines under the hand menu's buttons, from each loaded module with
+# hand_status() -> {"id", "text", "color" (a theme colour name)}. The
+# module keeps its line ("st_" + id) up to date itself (ui_element_update);
+# only which modules have one makes the menu rebuild.
+func _hand_statuses() -> Array:
+	var out := []
+	for child in ctx["modules"].get_children():
+		if child == self or not child.has_method("hand_status"):
+			continue
+		var status = child.call("hand_status")
+		if typeof(status) != TYPE_DICTIONARY or typeof(status.get("id")) != TYPE_STRING or typeof(status.get("text")) != TYPE_STRING:
+			push_error("Slopitect pause: %s's hand_status() needs id and text" % child.name)
+			continue
+		out.append(status)
+	out.sort_custom(func(a, b): return a["id"] < b["id"])
+	return out
+
+
 func _build_hand() -> void:
 	var buttons := [_button("home", "Home", {"cmd": "pause_do", "act": "toggle"}, "accent", HAND_BUTTON)]
 	if _has("settings"):
@@ -311,6 +329,8 @@ func _build_hand() -> void:
 	for button in _wrist_buttons():
 		buttons.append(_button("w_" + str(button["id"]).left(30), str(button.get("label", button["id"])), button["action"], "button", HAND_BUTTON))
 	var elements := [{"type": "grid", "id": "buttons", "columns": 2, "children": buttons}]
+	for status in _hand_statuses():
+		elements.append(_text("st_" + str(status["id"]).left(30), str(status["text"]), str(status.get("color", "muted")), 24))
 	var reply: Dictionary
 	if _run({"cmd": "ui_get", "id_panel": HAND_PANEL}).get("ok", false):
 		reply = _run({"cmd": "ui_update", "id_panel": HAND_PANEL, "elements": elements})

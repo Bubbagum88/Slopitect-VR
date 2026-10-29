@@ -83,7 +83,7 @@ In place:
   change the code you're shown, or take Stop away. While a question is
   open, the controls module sends no actions.
 - **The microphone** only records while you hold the talk button (the left
-  trigger by default), with a red dot on your hand. No command turns it on;
+  trigger by default), with REC shown on the hand menu. No command turns it on;
   only the controls module does, which is code you said Yes to. With speech to text on
   the headset (`vtt_engine` `"local"`), nothing you say leaves it. With a
   service, nothing leaves until you set one, and the recording is deleted

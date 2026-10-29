@@ -5,8 +5,10 @@ extends SlopitectModule
 # default bindings) and talk; let go and the recording is turned into text,
 # and the words land in the chat window's input box (or go straight to the
 # agent, if you turn that on). The microphone records only while the button
-# is held, and a red dot on your left hand shows it. No command turns it on,
-# not the agent's, not a panel button's; only the controls module does.
+# is held. A line on the hand menu (hand_status()) shows it: REC while it
+# listens, then while the words are worked out, then what it heard. No
+# command turns it on, not the agent's, not a panel button's; only the
+# controls module does.
 #
 # Two ways to turn speech into text (vtt_engine, set with vtt_config from
 # the PC):
@@ -61,7 +63,8 @@ var _mic_player: AudioStreamPlayer
 var _http: HTTPRequest
 var _busy := false  # a recording is being turned into text
 var _last := ""  # what happened last, for vtt_status
-var _dot: MeshInstance3D
+var _status_shown := []  # [text, colour] last put on the hand menu
+var _status_retry_at := 0.0  # when to try again while there's no hand menu
 
 
 func setup() -> String:
@@ -89,19 +92,6 @@ func setup() -> String:
 	_mic_player.bus = MIC_BUS
 	add_child(_mic_player)
 
-	_dot = MeshInstance3D.new()
-	var sphere := SphereMesh.new()
-	sphere.radius = 0.008
-	sphere.height = 0.016
-	_dot.mesh = sphere
-	var material := StandardMaterial3D.new()
-	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	material.albedo_color = Color(1.0, 0.1, 0.1)
-	_dot.material_override = material
-	_dot.position = Vector3(0, 0.03, -0.02)
-	_dot.visible = false
-	ctx["left"].add_child(_dot)
-
 	register("vtt_status", _status, "whether hold-to-talk works, which engine, the model, and what it heard or what went wrong last")
 	register("vtt_set", _set_command, "a comfort setting, so it changes in the headset too: send_to_agent (true: your words go straight to the agent)")
 	register("vtt_config", _config, "from the PC only: show or change any of: %s" % ", ".join(DEFAULTS.keys()))
@@ -114,8 +104,6 @@ func _exit_tree() -> void:
 	if _recording:
 		_record.set_recording_active(false)
 		_mic_player.stop()
-	if _dot and is_instance_valid(_dot):
-		_dot.queue_free()
 	if _local_thread and _local_thread.is_started():
 		_local_thread.wait_to_finish()
 	if _local:
@@ -131,7 +119,39 @@ func settings_info() -> Dictionary:
 	]}
 
 
+# The hand menu's line for hold-to-talk (pause.gd puts it under the buttons).
+func hand_status() -> Dictionary:
+	var status := _status_now()
+	return {"id": "vtt", "text": status[0], "color": status[1]}
+
+
+# What hold-to-talk is doing, as [text, colour name from the window theme].
+func _status_now() -> Array:
+	if _recording:
+		return ["REC  Listening... let go when you're done", "notice"]
+	if _busy:
+		return ["Turning your words into text...", "accent"]
+	if _last.is_empty():
+		return ["Hold the left trigger to talk", "muted"]
+	return [_last.left(70) + ("..." if _last.length() > 70 else ""), "muted"]
+
+
+# Changes the hand menu's line only when the status changed (each change
+# redraws the menu).
+func _show_status() -> void:
+	var status := _status_now()
+	var now := Time.get_ticks_msec() / 1000.0
+	if status == _status_shown or now < _status_retry_at:
+		return
+	var reply: Dictionary = ctx["server"].run({"cmd": "ui_element_update", "id_panel": "hand_menu", "id_element": "st_vtt", "text": status[0], "color": status[1]})
+	if reply.get("ok", false):
+		_status_shown = status
+	else:
+		_status_retry_at = now + 1.0  # no hand menu (yet): pause.gd builds it, with this line
+
+
 func _process(_delta: float) -> void:
+	_show_status()
 	if not _recording:
 		return
 	if Time.get_ticks_msec() / 1000.0 - _started_at >= MAX_SECONDS:
@@ -197,7 +217,6 @@ func _start_listening() -> void:
 	_record.set_recording_active(true)
 	_recording = true
 	_started_at = Time.get_ticks_msec() / 1000.0
-	_dot.visible = true
 	print("Slopitect vtt: listening")
 
 
@@ -205,7 +224,6 @@ func _stop_listening() -> void:
 	if not _recording:
 		return
 	_recording = false
-	_dot.visible = false
 	_record.set_recording_active(false)
 	_mic_player.stop()
 	var seconds := Time.get_ticks_msec() / 1000.0 - _started_at
