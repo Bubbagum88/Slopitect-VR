@@ -92,7 +92,7 @@ var _left: XRController3D
 var _right: XRController3D
 var _holders := {}  # id_panel -> Node3D
 var _inputs := {}  # "panel/element" -> typed text (not saved)
-var _live_text := {}  # "panel/element" -> text from set_text (not saved)
+var _live_text := {}  # "panel/element" -> text set with set_text (not saved: it can be anything)
 var _focus := ""  # "panel/element" of the input box that typing goes to
 var _shift := false
 var _ray: RayCast3D
@@ -496,21 +496,6 @@ func _fill_action(value, id_panel: String, fill := {}):
 	return value
 
 
-# Changes what a text element shows, at once and without redrawing or saving
-# the panel: for windows that change many times a second (a terminal's
-# screen). The text isn't saved, since it can be anything a command replied;
-# a redraw keeps it. Returns false when there's no such text element.
-func set_text(id_panel: String, id_element: String, text: String) -> bool:
-	var element := _element(id_panel, id_element)
-	if element.is_empty() or element["type"] != "text":
-		return false
-	_live_text[id_panel + "/" + id_element] = text.left(MAX_TEXT)
-	var label := _find_node(id_panel, id_element) as Label3D
-	if label:
-		label.text = _live_text[id_panel + "/" + id_element]
-	return true
-
-
 # The theme, with the PC's changes: {name: Color or text size}.
 func theme() -> Dictionary:
 	return theme_values.duplicate()
@@ -840,9 +825,6 @@ func _remove(request: Dictionary) -> Dictionary:
 		return {"ok": false, "error": "no panel \"%s\" (ui_list shows them)" % str(request.get("id_panel"))}
 	var removed: Dictionary = panels.pop_at(index)
 	_drop_holder(removed["id_panel"])
-	for key in _live_text.keys():
-		if key.begins_with(removed["id_panel"] + "/"):
-			_live_text.erase(key)
 	if _focus.begins_with(removed["id_panel"] + "/"):
 		_focus = ""
 	for key in _live_text.keys():
