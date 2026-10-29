@@ -8,7 +8,7 @@ unless its file has changed since.
 
 | File | What it does |
 |---|---|
-| `controls.gd` | The only thing that reads the controllers: each button is bound to a named action (point, grab_left, grab_right, talk, left_menu, left_y, right_a, right_b, left_stick) and each thumbstick to a stick (walk, turn). Other modules take the actions, and read how far a grip or trigger is pressed with `value()`. A button can also run a command (never a `*_config` or `agent_` one) or show and hide a window. `controls_status` shows the bindings; `controls_config` (PC only) changes them. X on the left controller always stops the agent and can't be bound |
+| `controls.gd` | The only thing that reads the controllers: each button is bound to a named action (point, grab_left, grab_right, talk, left_menu, left_y, right_a, right_b, left_stick) and each thumbstick to a stick (walk, turn). It also walks you with the walk stick (the way you look) and turns you with the turn stick (30° steps, or smooth), so you stand on the landscape's ground; speed, stick dead zone and turning are in the Settings window (Moving). Other modules take the actions, and read how far a grip or trigger is pressed with `value()`. A button can also run a command (never a `*_config` or `agent_` one) or show and hide a window. `controls_status` shows the bindings; `controls_config` (PC only) changes them. X on the left controller always stops the agent and can't be bound |
 | `vrui.gd` | Every window: the Menu (a launcher with a tile for every window), wrist panel, the agent's chat window and keyboard, and any panel you or the agent add (`ui_*` commands). Drawn the way the vrui draft drew windows (rounded, wrapped text), redrawn only on a change. Title bars to carry and close windows, tabs, toggles and sliders, a hand window on a controller, rows/columns/grids that lay themselves out, buttons that open a sub-menu with a back arrow, scrolling text (point at a window and push the right thumbstick up or down), one theme. Needs controls.gd for its buttons. See [docs/VR-UI.md](../docs/VR-UI.md) |
 | `tools.gd` | The Tools menu (B on the right controller, or its tile): a button for each loaded tool, which chooses it and opens that tool's own menu (its buttons, Undo / Redo, a back arrow); the windows that are tools (the terminal; any module whose `menu_info()` has `"tools": true`); and one Undo / Redo list for every tool |
 | `pause.gd` | The pause menu, on the left home button (≡; or its tile): Resume, Save world (a checkpoint), Load (the newest checkpoints), Worlds (the saved worlds, to open one), Settings (settings.gd's window, when it's loaded), All windows (the Menu bar), Hand menu, and Files & modules (worlds.gd). Also the hand menu above the left controller: Home, Settings (with settings.gd), Undo, Redo (pressing the left thumbstick in shows and hides it), a button for each module with `hand_info()` (Tools, Terminal), and the wrist panel's buttons (the wrist panel is hidden, so there's one hand menu). Each button opens and closes its window. It doesn't stop the world. Needs vrui.gd; save.gd and projects.gd for saving and loading, tools.gd for Undo / Redo |
@@ -19,7 +19,6 @@ unless its file has changed since.
 | `landscape.gd` | Ground you can shape, 20 × 20 m: raise, lower, smooth and flatten brushes. It stands in for the flat floor while it's loaded |
 | `paths.gd` | Roads and trails: put down points with the trigger, then press Finish. Optionally levels the ground under the path |
 | `save.gd` | Keeps the shapes and models: saved by themselves when they change and put back at start. Checkpoints keep the whole world (ground and paths too) to go back to, with undo |
-| `move.gd` | Walk with the left stick (the way you look), turn with the right (30° steps, or smooth); you stand on the landscape's ground |
 | `grab.gd` | Hold the grip near a shape or model to pick it up; let go to drop it (or throw it, with physics). Grip it with the other hand too and pull your hands apart or together to resize it (2 cm to 20 m); let go with either hand and the other keeps it. One undo per pick-up, resizes included |
 | `physics.gd` | Makes shapes and models fall, bounce and collide (the engine's own physics) once you set them dynamic; the ground is the floor or the landscape |
 | `projects.gd` | A world per project (`projects/NAME/` in the Slopitect folder: its saves, notes, and the live modules it uses). Needs save.gd |
@@ -62,7 +61,6 @@ From the platform-tools folder:
 .\adb push "C:\path\to\live-modules\paths.gd" /sdcard/Slopitect/modules/
 .\adb push "C:\path\to\live-modules\assets.gd" /sdcard/Slopitect/modules/
 .\adb push "C:\path\to\live-modules\save.gd" /sdcard/Slopitect/modules/
-.\adb push "C:\path\to\live-modules\move.gd" /sdcard/Slopitect/modules/
 .\adb push "C:\path\to\live-modules\grab.gd" /sdcard/Slopitect/modules/
 .\adb push "C:\path\to\live-modules\physics.gd" /sdcard/Slopitect/modules/
 .\adb push "C:\path\to\live-modules\projects.gd" /sdcard/Slopitect/modules/
@@ -90,7 +88,6 @@ From the platform-tools folder:
 .\slopi.ps1 '{"cmd":"code_load","name":"paths"}'
 .\slopi.ps1 '{"cmd":"code_load","name":"assets"}'
 .\slopi.ps1 '{"cmd":"code_load","name":"save"}'
-.\slopi.ps1 '{"cmd":"code_load","name":"move"}'
 .\slopi.ps1 '{"cmd":"code_load","name":"grab"}'
 .\slopi.ps1 '{"cmd":"code_load","name":"physics"}'
 .\slopi.ps1 '{"cmd":"code_load","name":"projects"}'
@@ -226,9 +223,10 @@ The first time projects.gd loads, the existing saves become project `start`.
 | `terminal_mode` | `mode`: terminal or chat |
 | `terminal_help` | optional `name` (a command) |
 
-| `move_status` | |
+| `move_status` (controls.gd) | |
 | `move_to` | `position` [x, z], optional `facing` (degrees, 0 = -z) |
-| `move_config` (PC only) | any of `speed`, `turn` (snap, smooth), `snap_degrees`, `smooth_degrees`, `follow_ground` |
+| `move_comfort` | any of `turn` (snap, smooth), `speed` (0.5 to 3), `deadzone` (0.05 to 0.5), `snap_degrees` (15 to 90), `smooth_degrees` (30 to 180) |
+| `move_config` (PC only) | any of `speed`, `deadzone`, `turn` (snap, smooth), `snap_degrees`, `smooth_degrees`, `follow_ground` |
 | `grab_status` | |
 | `grab_release` | optional `hand` |
 | `physics_set` | `name`, `mode` (dynamic, static, off), optional `mass`, `bounce`, `friction` |
