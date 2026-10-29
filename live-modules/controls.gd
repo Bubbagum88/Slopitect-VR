@@ -42,6 +42,7 @@ const DEFAULT_BUTTONS := {
 	"left/by_button": "left_y",
 	"right/by_button": "right_b",
 	"right/ax_button": "right_a",
+	"left/primary_click": "left_stick",  # pressing the left thumbstick in
 }
 const DEFAULT_STICKS := {"left": "walk", "right": "turn"}
 const VALUES := ["grip", "trigger", "trigger_touch", "thumb_touch"]

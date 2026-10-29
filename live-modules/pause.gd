@@ -11,7 +11,8 @@ extends SlopitectModule
 #   saved worlds (projects.gd) to open, each with a back arrow.
 # - Settings opens settings.gd's window, when it's loaded.
 # - All windows opens the Menu bar (every window's tile, and the shapes).
-# - Hand menu shows or hides the hand menu.
+# - Hand menu shows or hides the hand menu (so does pressing the left
+#   thumbstick in, the "left_stick" action).
 # - Files & modules opens worlds.gd's window, when it's loaded.
 # The hand menu sits above the left controller: Home (this menu), Settings,
 # Undo / Redo (tools.gd's one list for every change), a button for each
@@ -84,10 +85,10 @@ func action_order() -> int:
 
 
 func on_action(action: String, down: bool) -> bool:
-	if action != "left_menu" or _ui() == null:
+	if not action in ["left_menu", "left_stick"] or _ui() == null:
 		return false
 	if down:
-		_do({"act": "toggle"})
+		_do({"act": "toggle"} if action == "left_menu" else {"act": "hand_menu"})
 	return true
 
 
