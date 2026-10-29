@@ -13,12 +13,12 @@ config/features=PackedStringArray("4.7", "GL Compatibility")
 
 [audio]
 
-; The microphone, for hold-to-talk (the stt live module). Android still asks you before
+; The microphone, for hold-to-talk (the vtt live module). Android still asks you before
 ; the app can use it.
 driver/enable_input=true
 ; Speech out through the headset's text-to-speech engine (the tts live module).
 general/text_to_speech=true
-; On-headset speech to text (the stt live module, stt_engine "local") runs on the
+; On-headset speech to text (the vtt live module, vtt_engine "local") runs on the
 ; processor: whisper.cpp's graphics-chip path (OpenCL) is untested on the
 ; Quest 1's Adreno 540.
 input/transcribe/use_gpu=false

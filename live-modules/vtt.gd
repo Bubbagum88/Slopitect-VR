@@ -1,6 +1,6 @@
 extends SlopitectModule
 
-# Slopitect live module: stt (speech to text, "voice to text").
+# Slopitect live module: vtt (speech to text, "voice to text").
 # Hold the "talk" button (the left trigger, with the controls module's
 # default bindings) and talk; let go and the recording is turned into text,
 # and the words land in the chat window's input box (or go straight to the
@@ -8,19 +8,20 @@ extends SlopitectModule
 # is held, and a red dot on your left hand shows it. No command turns it on,
 # not the agent's, not a panel button's; only the controls module does.
 #
-# Two ways to turn speech into text (stt_engine, set with stt_config from
+# Two ways to turn speech into text (vtt_engine, set with vtt_config from
 # the PC):
 # - "local" (the default): whisper.cpp on the headset itself (the
 #   godot-whisper plugin built into the APK), with a model file in the
 #   Slopitect folder. Nothing you say leaves the headset.
-# - "web": a service at stt_url that takes the OpenAI-style upload (a "file"
+# - "web": a service at vtt_url that takes the OpenAI-style upload (a "file"
 #   and a "model" in a multipart form, "text" in the JSON reply): OpenAI,
 #   Groq, or a whisper.cpp server on your PC (its /inference address).
 # Where the words go (send_to_agent) is a comfort setting: it changes in the
 # headset's Settings window too. Everything else changes only from the PC.
 
-const SETTINGS_PATH := "user://stt.json"
-const OLD_SETTINGS_PATH := "user://voice.json"  # the APK's voice module kept these before
+const SETTINGS_PATH := "user://vtt.json"
+const OLD_SETTINGS_PATHS := ["user://stt.json", "user://voice.json"]  # this module as stt.gd, then the APK's voice module, kept these before (as stt_ settings)
+const OLD_VOICE_PATH := "user://voice.json"
 const MIC_PERMISSION := "android.permission.RECORD_AUDIO"
 const MIC_BUS := "SlopitectMic"
 const MAX_SECONDS := 30.0
@@ -28,18 +29,22 @@ const MIN_SECONDS := 0.4
 const HTTP_TIMEOUT := 60.0
 const LOCAL_CLASS := "SpeechToText"  # from the godot-whisper plugin
 const LOCAL_LANGUAGES := {"": 0, "en": 1}  # its Language enum: 0 Auto, 1 English
+const TRIM_FRAME := 320  # 20 ms at 16 kHz, the steps quiet is measured in
+const TRIM_RELATIVE := 0.1  # quieter than a tenth of the loudest 20 ms counts as quiet
+const TRIM_FLOOR := 0.002  # and so does anything this quiet, however quiet the rest
+const TRIM_PAD_SECONDS := 0.3  # kept either side of the words, so their edges aren't cut
 const CHAT_INPUT := ["chat", "line"]  # the chat window's input box, where your words go
 
 const DEFAULTS := {
-	"stt_engine": "local",  # "local": on the headset itself; "web": the service at stt_url
-	"stt_local_model": "models/ggml-tiny.en.bin",  # for "local": a whisper.cpp model, in the Slopitect folder
-	"stt_url": "",  # for "web"; "" means hold-to-talk is off there
-	"stt_key": "",
-	"stt_model": "whisper-1",
-	"stt_language": "",  # like "en"; "" lets it decide (an English-only model always hears English)
+	"vtt_engine": "local",  # "local": on the headset itself; "web": the service at vtt_url
+	"vtt_local_model": "models/ggml-tiny.en.bin",  # for "local": a whisper.cpp model, in the Slopitect folder
+	"vtt_url": "",  # for "web"; "" means hold-to-talk is off there
+	"vtt_key": "",
+	"vtt_model": "whisper-1",
+	"vtt_language": "",  # like "en"; "" lets it decide (an English-only model always hears English)
 	"send_to_agent": false,  # false: words go in the chat's input box for you to check and Send
 }
-const COMFORT := ["send_to_agent"]  # settings stt_set may change in the headset
+const COMFORT := ["send_to_agent"]  # settings vtt_set may change in the headset
 
 var settings := DEFAULTS.duplicate()
 
@@ -54,7 +59,7 @@ var _local_thread: Thread
 var _mic_player: AudioStreamPlayer
 var _http: HTTPRequest
 var _busy := false  # a recording is being turned into text
-var _last := ""  # what happened last, for stt_status
+var _last := ""  # what happened last, for vtt_status
 var _dot: MeshInstance3D
 
 
@@ -96,11 +101,11 @@ func setup() -> String:
 	_dot.visible = false
 	ctx["left"].add_child(_dot)
 
-	register("stt_status", _status, "whether hold-to-talk works, which engine, the model, and what it heard or what went wrong last")
-	register("stt_set", _set_command, "a comfort setting, so it changes in the headset too: send_to_agent (true: your words go straight to the agent)")
-	register("stt_config", _config, "from the PC only: show or change any of: %s" % ", ".join(DEFAULTS.keys()))
-	var problem := _stt_problem()
-	print("Slopitect stt: hold-to-talk %s (%s)" % ["on" if problem.is_empty() else "off: " + problem, settings["stt_engine"]])
+	register("vtt_status", _status, "whether hold-to-talk works, which engine, the model, and what it heard or what went wrong last")
+	register("vtt_set", _set_command, "a comfort setting, so it changes in the headset too: send_to_agent (true: your words go straight to the agent)")
+	register("vtt_config", _config, "from the PC only: show or change any of: %s" % ", ".join(DEFAULTS.keys()))
+	var problem := _vtt_problem()
+	print("Slopitect vtt: hold-to-talk %s (%s)" % ["on" if problem.is_empty() else "off: " + problem, settings["vtt_engine"]])
 	return ""
 
 
@@ -119,7 +124,7 @@ func _exit_tree() -> void:
 func settings_info() -> Dictionary:
 	return {"title": "Speech to text", "order": 41, "settings": [
 		{"id": "send_to_agent", "type": "toggle", "label": "Send my words straight to the agent", "value": settings["send_to_agent"],
-			"set": {"cmd": "stt_set", "send_to_agent": "{value}"}},
+			"set": {"cmd": "vtt_set", "send_to_agent": "{value}"}},
 	]}
 
 
@@ -135,17 +140,17 @@ func _process(_delta: float) -> void:
 
 
 # Why hold-to-talk can't work now, or "" when it can.
-func _stt_problem() -> String:
-	if settings["stt_engine"] == "local":
+func _vtt_problem() -> String:
+	if settings["vtt_engine"] == "local":
 		if not ClassDB.class_exists(LOCAL_CLASS):
 			return "this build has no on-headset speech-to-text (the godot-whisper plugin isn't in it)"
 		if not FileAccess.file_exists(_local_model_path()):
-			return "no model at %s: put a whisper.cpp model there (ggml-tiny.en.bin is about 78 MB), or set stt_local_model" % _local_model_path()
-		if not LOCAL_LANGUAGES.has(settings["stt_language"]):
-			return "on the headset, stt_language can only be \"en\" or \"\" (any) for now"
+			return "no model at %s: put a whisper.cpp model there (ggml-tiny.en.bin is about 78 MB), or set vtt_local_model" % _local_model_path()
+		if not LOCAL_LANGUAGES.has(settings["vtt_language"]):
+			return "on the headset, vtt_language can only be \"en\" or \"\" (any) for now"
 		return ""
-	if String(settings["stt_url"]).is_empty():
-		return "set a speech-to-text service with stt_config from the PC"
+	if String(settings["vtt_url"]).is_empty():
+		return "set a speech-to-text service with vtt_config from the PC"
 	return ""
 
 
@@ -154,7 +159,7 @@ func _local_model_path() -> String:
 	var home: String = files.get("_home") if files else ""
 	if home.is_empty():
 		home = "/sdcard/Slopitect" if OS.get_name() == "Android" else OS.get_user_data_dir() + "/files_home"
-	return home.path_join(settings["stt_local_model"])
+	return home.path_join(settings["vtt_local_model"])
 
 
 # The controls module's "talk" action: held, it records.
@@ -171,7 +176,7 @@ func on_action(action: String, down: bool) -> bool:
 func _start_listening() -> void:
 	if _recording or _busy:
 		return
-	var problem := _stt_problem()
+	var problem := _vtt_problem()
 	if not problem.is_empty():
 		_note("hold-to-talk is off: " + problem)
 		return
@@ -190,7 +195,7 @@ func _start_listening() -> void:
 	_recording = true
 	_started_at = Time.get_ticks_msec() / 1000.0
 	_dot.visible = true
-	print("Slopitect stt: listening")
+	print("Slopitect vtt: listening")
 
 
 func _stop_listening() -> void:
@@ -207,15 +212,15 @@ func _stop_listening() -> void:
 	if recording == null or seconds < MIN_SECONDS:
 		_note("too short to hear anything (%.1f s); hold the trigger while you talk" % seconds)
 		return
-	if settings["stt_engine"] == "local":
+	if settings["vtt_engine"] == "local":
 		_transcribe_local(_frames, seconds)
 		_frames = PackedVector2Array()
 		return
-	print("Slopitect stt: heard %.1f s, sending it to speech-to-text" % seconds)
+	print("Slopitect vtt: heard %.1f s, sending it to speech-to-text" % seconds)
 	_transcribe(recording)
 
 
-# --- On the headset (stt_engine "local") ---------------------------------------
+# --- On the headset (vtt_engine "local") ---------------------------------------
 # The model loads on first use and stays loaded; loading and turning speech
 # into text take seconds, so both run on their own thread, and everything
 # about the attempt is logged in one line when it's done.
@@ -229,12 +234,12 @@ func _transcribe_local(frames: PackedVector2Array, seconds: float) -> void:
 			return
 	# An English-only model (*.en.bin) can only hear English; left to guess,
 	# it picks a random language and turns English into nonsense.
-	var language: String = settings["stt_language"]
+	var language: String = settings["vtt_language"]
 	if language.is_empty() and path.get_file().contains(".en."):
 		language = "en"
 	_local.set("language", LOCAL_LANGUAGES[language])
 	_busy = true
-	print("Slopitect stt: heard %.1f s (%d frames at %d Hz), turning it into text on the headset" % [seconds, frames.size(), int(AudioServer.get_mix_rate())])
+	print("Slopitect vtt: heard %.1f s (%d frames at %d Hz), turning it into text on the headset" % [seconds, frames.size(), int(AudioServer.get_mix_rate())])
 	_local_thread = Thread.new()
 	_local_thread.start(_local_work.bind(frames, path))
 
@@ -264,6 +269,13 @@ func _local_work(frames: PackedVector2Array, path: String) -> void:
 	var samples: PackedFloat32Array = _local.call("resample", frames, 2)  # SRC_SINC_FASTEST
 	report["samples_16k"] = samples.size()
 	report["resample_ms"] = Time.get_ticks_msec() - started
+	# The quiet before and after the words is cut off: whisper's work grows
+	# with the audio it is given, and trailing quiet is where it repeats itself.
+	samples = _trim_quiet(samples)
+	report["speech_s"] = snappedf(samples.size() / 16000.0, 0.01)
+	if samples.is_empty():
+		call_deferred("_local_done", report, "")
+		return
 	started = Time.get_ticks_msec()
 	# Whisper's encoder covers a fixed 30 s window (an audio context of 1500,
 	# 50 per second) however short the recording; covering only what was
@@ -279,14 +291,48 @@ func _local_work(frames: PackedVector2Array, path: String) -> void:
 	if not error.is_empty():
 		report["error"] = error
 	var words: String = String(result[0]) if not result.is_empty() else ""
+	# The rest of the result is one entry per token whisper wrote: with the
+	# time, it tells the listening (encoder) apart from the writing (decoder).
+	report["tokens"] = maxi(result.size() - 1, 0)
 	call_deferred("_local_done", report, words)
+
+
+# The part of a 16 kHz recording from a little before the first loud 20 ms
+# to a little after the last; "loud" is relative to the loudest part, so a
+# quiet microphone works too. Empty when it was all quiet.
+func _trim_quiet(samples: PackedFloat32Array) -> PackedFloat32Array:
+	var frame := TRIM_FRAME
+	var count := samples.size() / frame
+	if count == 0:
+		return samples
+	var levels := PackedFloat32Array()
+	levels.resize(count)
+	var loudest := 0.0
+	for i in count:
+		var sum := 0.0
+		for j in range(i * frame, (i + 1) * frame):
+			sum += samples[j] * samples[j]
+		levels[i] = sqrt(sum / frame)
+		loudest = maxf(loudest, levels[i])
+	var threshold := maxf(loudest * TRIM_RELATIVE, TRIM_FLOOR)
+	var first := -1
+	var last := -1
+	for i in count:
+		if levels[i] >= threshold:
+			if first == -1:
+				first = i
+			last = i
+	if first == -1:
+		return PackedFloat32Array()
+	var pad := int(TRIM_PAD_SECONDS * 16000)
+	return samples.slice(maxi(first * frame - pad, 0), mini((last + 1) * frame + pad, samples.size()))
 
 
 func _local_done(report: Dictionary, words: String) -> void:
 	_local_thread.wait_to_finish()
 	_local_thread = null
 	_busy = false
-	print("Slopitect stt: on-headset speech-to-text: ", JSON.stringify(report))
+	print("Slopitect vtt: on-headset speech-to-text: ", JSON.stringify(report))
 	if report.has("error"):
 		_note("on-headset speech-to-text failed: " + String(report["error"]))
 		return
@@ -310,26 +356,26 @@ func _transcribe(recording: AudioStreamWAV) -> void:
 		return
 	var boundary := "slopitect%d" % Time.get_ticks_usec()
 	var body := PackedByteArray()
-	var fields := {"model": settings["stt_model"], "response_format": "json"}
-	if not String(settings["stt_language"]).is_empty():
-		fields["language"] = settings["stt_language"]
+	var fields := {"model": settings["vtt_model"], "response_format": "json"}
+	if not String(settings["vtt_language"]).is_empty():
+		fields["language"] = settings["vtt_language"]
 	for key in fields:
 		body.append_array(("--%s\r\nContent-Disposition: form-data; name=\"%s\"\r\n\r\n%s\r\n" % [boundary, key, fields[key]]).to_utf8_buffer())
 	body.append_array(("--%s\r\nContent-Disposition: form-data; name=\"file\"; filename=\"speech.wav\"\r\nContent-Type: audio/wav\r\n\r\n" % boundary).to_utf8_buffer())
 	body.append_array(audio)
 	body.append_array(("\r\n--%s--\r\n" % boundary).to_utf8_buffer())
 	var headers := PackedStringArray(["Content-Type: multipart/form-data; boundary=" + boundary])
-	if not String(settings["stt_key"]).is_empty():
-		headers.append("Authorization: Bearer " + settings["stt_key"])
-	err = _http.request_raw(settings["stt_url"], headers, HTTPClient.METHOD_POST, body)
+	if not String(settings["vtt_key"]).is_empty():
+		headers.append("Authorization: Bearer " + settings["vtt_key"])
+	err = _http.request_raw(settings["vtt_url"], headers, HTTPClient.METHOD_POST, body)
 	if err != OK:
 		_busy = false
-		_note("couldn't send the recording to %s (%s)" % [settings["stt_url"], error_string(err)])
+		_note("couldn't send the recording to %s (%s)" % [settings["vtt_url"], error_string(err)])
 		return
 	var result: Array = await _http.request_completed
 	_busy = false
 	if result[0] != HTTPRequest.RESULT_SUCCESS:
-		_note("no answer from %s (result %d: is the address right, and is the headset online?)" % [settings["stt_url"], result[0]])
+		_note("no answer from %s (result %d: is the address right, and is the headset online?)" % [settings["vtt_url"], result[0]])
 		return
 	var text_body: String = (result[3] as PackedByteArray).get_string_from_utf8()
 	if result[1] != 200:
@@ -370,18 +416,18 @@ func _deliver(words: String) -> void:
 
 func _note(text: String) -> void:
 	_last = text
-	print("Slopitect stt: ", text)
+	print("Slopitect vtt: ", text)
 
 
 # --- Status and settings ------------------------------------------------------------
 
 func _status(_request: Dictionary) -> Dictionary:
-	var problem := _stt_problem()
+	var problem := _vtt_problem()
 	return {
 		"ok": true,
 		"hold_to_talk": "on (hold the left trigger)" if problem.is_empty() else "off: " + problem,
-		"stt_engine": settings["stt_engine"],
-		"stt_url": settings["stt_url"],
+		"vtt_engine": settings["vtt_engine"],
+		"vtt_url": settings["vtt_url"],
 		"send_to_agent": settings["send_to_agent"],
 		"microphone_in_build": ProjectSettings.get_setting("audio/driver/enable_input", false),
 		"microphone_permission": OS.get_name() != "Android" or MIC_PERMISSION in OS.get_granted_permissions(),
@@ -400,7 +446,7 @@ func _set_command(request: Dictionary) -> Dictionary:
 		if key in ["cmd", "id"]:
 			continue
 		if not key in COMFORT:
-			return {"ok": false, "error": "stt_set changes only %s; \"%s\" changes from the PC with stt_config" % [", ".join(COMFORT), key]}
+			return {"ok": false, "error": "vtt_set changes only %s; \"%s\" changes from the PC with vtt_config" % [", ".join(COMFORT), key]}
 	return _change(request)
 
 
@@ -420,20 +466,20 @@ func _change(request: Dictionary) -> Dictionary:
 			return {"ok": false, "error": problem}
 		changes[key] = request[key]
 	# A key belongs to one service: a new address without a key clears it.
-	if changes.has("stt_url") and changes["stt_url"] != settings["stt_url"] and not changes.has("stt_key"):
-		changes["stt_key"] = ""
+	if changes.has("vtt_url") and changes["vtt_url"] != settings["vtt_url"] and not changes.has("vtt_key"):
+		changes["vtt_key"] = ""
 	for key in changes:
 		settings[key] = changes[key]
 	if not changes.is_empty():
 		_save_settings()
 	# Off "local", the model's memory (100 MB or more) is given back.
-	if settings["stt_engine"] != "local" and _local and not _busy:
+	if settings["vtt_engine"] != "local" and _local and not _busy:
 		_local.free()
 		_local = null
 		_local_model = ""
-		print("Slopitect stt: on-headset speech-to-text model unloaded")
+		print("Slopitect vtt: on-headset speech-to-text model unloaded")
 	var shown := settings.duplicate()
-	shown["stt_key"] = "(set)" if not String(settings["stt_key"]).is_empty() else "(not set)"
+	shown["vtt_key"] = "(set)" if not String(settings["vtt_key"]).is_empty() else "(not set)"
 	return {"ok": true, "settings": shown}
 
 
@@ -442,18 +488,18 @@ func _check_setting(key: String, value) -> String:
 		"send_to_agent":
 			if typeof(value) != TYPE_BOOL:
 				return "\"send_to_agent\" must be true or false"
-		"stt_key", "stt_model", "stt_language":
+		"vtt_key", "vtt_model", "vtt_language":
 			if typeof(value) != TYPE_STRING or value.length() > 300:
 				return "\"%s\" must be text" % key
-		"stt_engine":
+		"vtt_engine":
 			if not value in ["web", "local"]:
-				return "\"stt_engine\" must be \"local\" (on the headset) or \"web\" (the service at stt_url)"
-		"stt_local_model":
+				return "\"vtt_engine\" must be \"local\" (on the headset) or \"web\" (the service at vtt_url)"
+		"vtt_local_model":
 			if typeof(value) != TYPE_STRING or not value.ends_with(".bin") or value.begins_with("/") or ".." in value or "\\" in value or "://" in value:
-				return "\"stt_local_model\" must be a .bin file inside the Slopitect folder, like \"models/ggml-tiny.en.bin\""
-		"stt_url":
+				return "\"vtt_local_model\" must be a .bin file inside the Slopitect folder, like \"models/ggml-tiny.en.bin\""
+		"vtt_url":
 			if typeof(value) != TYPE_STRING or not (value.is_empty() or value.begins_with("https://") or value.begins_with("http://")):
-				return "\"stt_url\" must be an http(s) address (like https://api.openai.com/v1/audio/transcriptions or http://192.168.1.10:8080/inference), or \"\" to turn the web service off"
+				return "\"vtt_url\" must be an http(s) address (like https://api.openai.com/v1/audio/transcriptions or http://192.168.1.10:8080/inference), or \"\" to turn the web service off"
 	return ""
 
 
@@ -461,45 +507,54 @@ func _check_setting(key: String, value) -> String:
 # before (only the keys this module has, with the engine it used then); a
 # broken file is kept aside and the defaults used.
 func _load_settings() -> void:
-	var path := SETTINGS_PATH if FileAccess.file_exists(SETTINGS_PATH) else OLD_SETTINGS_PATH
+	var path := SETTINGS_PATH
+	for old in OLD_SETTINGS_PATHS:
+		if not FileAccess.file_exists(path):
+			path = old
 	if not FileAccess.file_exists(path):
 		return
 	var json := JSON.new()
 	var problem := ""
+	var data := {}
 	if json.parse(FileAccess.get_file_as_string(path)) != OK or typeof(json.data) != TYPE_DICTIONARY:
 		problem = "not a JSON object"
 	else:
 		for key in json.data:
+			# The old files called the settings stt_...
+			var name := String(key)
+			data["vtt_" + name.substr(4) if path != SETTINGS_PATH and name.begins_with("stt_") else name] = json.data[key]
+		for key in data:
 			if not DEFAULTS.has(key):
 				if path == SETTINGS_PATH:
 					problem = "unknown setting \"%s\"" % key
 					break
 				continue
-			problem = _check_setting(key, json.data[key])
+			problem = _check_setting(key, data[key])
 			if not problem.is_empty():
 				break
 	if problem.is_empty():
-		for key in json.data:
+		for key in data:
 			if DEFAULTS.has(key):
-				settings[key] = json.data[key]
+				settings[key] = data[key]
 		# The old module's "web" was its default, kept even when no address was set.
-		if path == OLD_SETTINGS_PATH:
-			if settings["stt_engine"] == "web" and String(settings["stt_url"]).is_empty():
-				settings["stt_engine"] = "local"
+		if path == OLD_VOICE_PATH:
+			if settings["vtt_engine"] == "web" and String(settings["vtt_url"]).is_empty():
+				settings["vtt_engine"] = "local"
+		if path != SETTINGS_PATH:
 			_save_settings()
 		return
 	settings = DEFAULTS.duplicate()
 	if path != SETTINGS_PATH:
-		push_warning("Slopitect stt: %s is broken (%s); used the defaults" % [path, problem])
+		push_warning("Slopitect vtt: %s is broken (%s); used the defaults" % [path, problem])
 		return
 	DirAccess.rename_absolute(path, path + ".bad")
-	push_error("Slopitect stt: %s is broken (%s); kept it as %s and used the defaults" % [path, problem, path + ".bad"])
+	push_error("Slopitect vtt: %s is broken (%s); kept it as %s and used the defaults" % [path, problem, path + ".bad"])
 
 
 func _save_settings() -> void:
 	var file := FileAccess.open(SETTINGS_PATH, FileAccess.WRITE)
 	if file == null:
-		push_error("Slopitect stt: could not save %s (%s)" % [SETTINGS_PATH, error_string(FileAccess.get_open_error())])
+		push_error("Slopitect vtt: could not save %s (%s)" % [SETTINGS_PATH, error_string(FileAccess.get_open_error())])
 		return
 	file.store_string(JSON.stringify(settings, "  "))
 	file.close()

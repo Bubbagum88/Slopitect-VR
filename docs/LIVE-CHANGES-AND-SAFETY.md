@@ -13,7 +13,7 @@
 | What the agent may do | `agent_config` from the PC: `allowed_tools` | Yes |
 | How the agent works | `agent_config`: `effort`, `max_tokens`, `max_tool_rounds`, `show_thinking`, and the token limits `max_tokens_per_ask`, `max_context_tokens`, `max_tool_result_chars` | Yes |
 | Speech out | `tts_set` (comfort: speed, pitch, volume, voice), also in the Settings window | Yes, `user://tts.json` |
-| Hold-to-talk | `stt_config` from the PC (engine, service, key); `send_to_agent` with `stt_set` too | Yes, `user://stt.json` |
+| Hold-to-talk | `vtt_config` from the PC (engine, service, key); `send_to_agent` with `vtt_set` too | Yes, `user://vtt.json` |
 | Personal folders the agent may reach | `files_config` from the PC (`unblock`, `block`) | Yes, `user://files.json` |
 | The agent's skills | `SKILL.md` files in `user://skills/<name>/` (replace a shipped skill of the same name) | Yes |
 
@@ -49,7 +49,7 @@ In place:
   sent back by any command. Give it with `.\slopi.ps1 -SetKey`, which asks
   for it hidden. It is only ever sent to the address it was set for:
   changing `base_url` or `provider` without giving the key again clears it.
-  The same goes for the speech-to-text key and `stt_url`.
+  The same goes for the speech-to-text key and `vtt_url`.
 - **A firewall on what the agent can do:** it can only use the commands in
   `allowed_tools`, plus the commands of live modules you said Yes to. It
   can never use its own `agent_*` commands or any `*_config` command, so it
@@ -85,7 +85,7 @@ In place:
 - **The microphone** only records while you hold the talk button (the left
   trigger by default), with a red dot on your hand. No command turns it on;
   only the controls module does, which is code you said Yes to. With speech to text on
-  the headset (`stt_engine` `"local"`), nothing you say leaves it. With a
+  the headset (`vtt_engine` `"local"`), nothing you say leaves it. With a
   service, nothing leaves until you set one, and the recording is deleted
   once it's sent.
 - **Outside text is data, not orders.** The agent is told that only your

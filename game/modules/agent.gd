@@ -45,17 +45,18 @@ const DEFAULTS := {
 	# The agent's firewall: the only commands it may use. A name ending in *
 	# allows every command starting with it. A new module's commands are off
 	# for the agent until they're added here.
-	"allowed_tools": ["list", "spawn", "move", "color", "delete", "ui_*", "modules", "avatar_*", "files_*", "confirm_status", "tts_*", "stt_*", "code_*", "view_*", "errors_*"],
+	"allowed_tools": ["list", "spawn", "move", "color", "delete", "ui_*", "modules", "avatar_*", "files_*", "confirm_status", "tts_*", "vtt_*", "code_*", "view_*", "errors_*"],
 }
 # The lists allowed_tools had by default before (before the menu became
 # panels; before view_look and errors_recent; before voice became the tts and
-# stt live modules). A saved copy of exactly one of them is moved to
+# stt live modules; before stt was renamed vtt). A saved copy of exactly one of them is moved to
 # the new default; a list you changed is kept.
 const OLD_DEFAULT_TOOLS := [
 	["list", "spawn", "move", "color", "delete", "menu_*", "modules", "avatar_*"],
 	["list", "spawn", "move", "color", "delete", "ui_*", "modules", "avatar_*", "files_*", "confirm_status", "voice_*", "code_*"],
 	["list", "spawn", "move", "color", "delete", "ui_*", "modules", "avatar_*", "files_*", "confirm_status", "voice_*", "code_*", "view_*"],
 	["list", "spawn", "move", "color", "delete", "ui_*", "modules", "avatar_*", "files_*", "confirm_status", "voice_*", "code_*", "view_*", "errors_*"],
+	["list", "spawn", "move", "color", "delete", "ui_*", "modules", "avatar_*", "files_*", "confirm_status", "tts_*", "stt_*", "code_*", "view_*", "errors_*"],
 ]
 
 const SYSTEM_PROMPT := """You are the AI agent inside Slopitect, a VR sandbox running on an Oculus Quest 1. The person you work with is standing in the world wearing the headset, and you build it with them, live.

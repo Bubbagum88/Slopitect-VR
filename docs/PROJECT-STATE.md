@@ -71,8 +71,8 @@ All PC-tested, none yet on the headset. See
 | net | Downloads, https only and only from hosts allowed on the PC (`net_config`), redirects checked; records each file's source |
 | worlds | The Worlds window (a tile on the Menu): tabs to open or make a project's world, keep and go back to checkpoints, look through the Slopitect folder, and load or unload live modules. Built on projects, save, files and code |
 | jelly | Squash and stretch on the avatar, volume kept; needs the live avatar module's `body()`. Tested on the PC with a stand-in avatar |
-| tts | Speech out, moved out of the APK: replies read aloud through Android TTS; speed, pitch, volume and voice in the Settings window (`tts_set`); a stuck utterance is reset. Headset: SherpaTTS synthesizes, but Slopitect's speech not heard yet |
-| stt | Hold-to-talk, moved out of the APK: whisper.cpp on the headset (local, the default) or a web service (`stt_config`, PC only); words go into the chat window's input box. Headset (old built-in version): heard "Hello." in 22 s, words didn't reach the chat box; English forcing, length-cut audio and chat delivery are PC-tested only |
+| tts | Speech out, moved out of the APK: replies read aloud through Android TTS; speed, pitch, volume and voice in the Settings window (`tts_set`); a stuck utterance is reset. On Android it plays the speech itself (synthesizeToFile through JavaClassWrapper, then an AudioStreamPlayer). Headset: SherpaTTS played its own sound (Android showed it, nothing muted) but isaac heard nothing; the in-app playing is PC-tested only (the Java calls can only run on the headset) |
+| vtt | Hold-to-talk, moved out of the APK: whisper.cpp on the headset (local, the default) or a web service (`vtt_config`, PC only); words go into the chat window's input box. Headset (old built-in version): heard "Hello." in 22 s, words didn't reach the chat box; English forcing, length-cut audio and chat delivery are PC-tested only |
 | hands | Drawn hands with nails in place of the controller boxes; fingers curl with grip, trigger and thumb rest; colours from the PC (`hands_config`). Curling was checked on the PC with a stand-in for the controllers |
 
 Every draft has been reworked or dropped; what happened to each is in
@@ -139,7 +139,7 @@ container).
   half-float vector maths (the Quest 1); `ci/patch-godot-whisper.py` keeps it,
   and CI now fails if the library is missing any of its own functions.
   Fixed and seen on the headset (it heard "Hello."). Speech moved into the
-  `stt` and `tts` live modules; they need the next APK (without the old
+  `vtt` and `tts` live modules; they need the next APK (without the old
   voice module) and a headset test. Speech out still isn't audible: the
   engine (SherpaTTS) synthesizes, but nothing is heard from Slopitect.
 - **Module framework** ([MODULE-FRAMEWORK.md](MODULE-FRAMEWORK.md)): the

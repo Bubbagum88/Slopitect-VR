@@ -770,7 +770,7 @@ func _type_command(request: Dictionary) -> Dictionary:
 	var text = request.get("text")
 	if typeof(text) != TYPE_STRING or text.is_empty():
 		return {"ok": false, "error": "ui_type needs \"text\""}
-	# A module can name the input box to type into (stt puts what was heard
+	# A module can name the input box to type into (vtt puts what was heard
 	# in the chat line); it becomes the selected one.
 	if request.has("id_panel") or request.has("id_element"):
 		var id_panel := str(request.get("id_panel", ""))

@@ -504,6 +504,10 @@ func _draw_mouth(wide: float, open: float, smile: float) -> void:
 
 
 func _read_engine() -> bool:
+	# The tts module plays speech itself on the headset, so it knows best.
+	var tts: SlopitectModule = ctx["modules"].module("tts")
+	if tts != null:
+		return tts.speaking()
 	return ProjectSettings.get_setting("audio/general/text_to_speech", false) and DisplayServer.tts_is_speaking()
 
 
