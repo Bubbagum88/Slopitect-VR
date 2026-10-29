@@ -14,8 +14,9 @@
 #   .\slopi-sync.ps1 -Tools D:\quest1-root-project\tools\platform-tools -Load
 #   .\slopi-sync.ps1 move,grab -Load
 #   .\slopi-sync.ps1 -Status
-# After a headset restart the Wi-Fi adb port changes; give the new one:
-#   .\slopi-sync.ps1 -Device 192.168.1.95:5555
+# After a headset restart the Wi-Fi adb port changes; give just the IP and
+# the port is found (or give the port yourself, like 192.168.1.95:41024):
+#   .\slopi-sync.ps1 -Device 192.168.1.95
 param(
     [Parameter(Position = 0)][string[]]$Name,
     [switch]$Load,
@@ -56,7 +57,39 @@ if (-not $From) {
 
 # --- Connecting -------------------------------------------------------------------
 
-if ($Device) {
+if ($Device -and $Device -notmatch ":\d+$") {
+    # Just the IP: find the port. Wireless debugging picks a new one in this
+    # range at every restart; the PC's earlier pairing still holds.
+    Write-Host "Looking for the adb port on $Device..."
+    $open = @()
+    for ($start = 30000; $start -lt 50000; $start += 2000) {
+        $tries = @()
+        foreach ($p in $start..($start + 1999)) {
+            $c = [System.Net.Sockets.TcpClient]::new()
+            $tries += , @($p, $c, $c.ConnectAsync($Device, $p))
+        }
+        Start-Sleep -Milliseconds 1500
+        foreach ($t in $tries) {
+            if ($t[2].Status -eq "RanToCompletion") { $open += $t[0] }
+            $t[1].Dispose()
+        }
+    }
+    $ip = $Device
+    $Device = $null
+    foreach ($p in $open) {
+        # The pairing port is open too, but doesn't connect.
+        if ((& $adb connect "${ip}:$p") -match "^connected|already connected") {
+            & $adb devices | Out-Null
+            if ((& $adb -s "${ip}:$p" get-state 2>$null) -eq "device") { $Device = "${ip}:$p"; break }
+        }
+        & $adb disconnect "${ip}:$p" | Out-Null
+    }
+    if (-not $Device) {
+        Write-Error "No adb port on $ip answered (open: $($open -join ', ')). Is wireless debugging on, and was this PC paired?"
+        exit 1
+    }
+    Write-Host "Connected on port $($Device.Split(':')[1])"
+} elseif ($Device) {
     $said = & $adb connect $Device
     Write-Host $said
 }
