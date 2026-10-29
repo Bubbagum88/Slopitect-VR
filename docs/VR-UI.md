@@ -80,6 +80,10 @@ controls.gd ── actions ("point", "grab_right", toggles) ──► vrui.gd �
   its newest lines in view, like a terminal. `height` (metres) sets how
   tall the box is. `ui_scroll` with `lines` moves it back (0 is the
   newest); a module can call `ui.scroll_text(id_panel, id_element, lines)`.
+- **text `select`**: pull the trigger on a row and move along while holding
+  it to pick whole rows (lit behind the text); pulling it again on the one
+  row picked lets it go. New text drops the pick. The terminal's screen
+  has it; the keyboard's Copy copies the rows (`ui.selected_text`).
 - **button `image`**: a picture file (.png, .jpg or .webp) in the
   Slopitect folder or `user://`, shown over the label, which gets small:
   a tile in a browser (library.gd's thumbnails). Pictures are shrunk to
@@ -141,6 +145,9 @@ do before you press:
 | `ui.theme()` | vrui.gd | The theme: colours as `Color`, `font_title` / `font_body` / `font_small` as text sizes |
 | `ui.set_text(id_panel, id_element, text)` | vrui.gd | Changes one text element now, without rebuilding the panel or saving (a terminal's screen). The text isn't saved, since it can be anything. A `scroll` text keeps its newest lines in view |
 | `ui.scroll_text(id_panel, id_element, lines)` | vrui.gd | Scrolls a `scroll` text back by `lines` from the newest (0 = newest) |
+| `ui.selected_text(id_panel, id_element = "")` | vrui.gd | The rows picked in a panel's `select` text, or `""` |
+| `ui.copy_text(text)`, `ui.clipboard()` | vrui.gd | The app's own clipboard (never Android's), shared by every module |
+| `ui.input_text("panel/element")` | vrui.gd | What's typed in an input box |
 | `ui.focused_window()`, `ui.focus()` | vrui.gd | The window with the focus (`""` if none), and the input box typed into (`"panel/element"` or `""`) |
 | `ui.press(id_panel, id_element)` | vrui.gd | Presses a button or toggle |
 | `controls.pulse(hand, strength, seconds)` | controls.gd | A buzz on a controller |

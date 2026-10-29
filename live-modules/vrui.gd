@@ -47,7 +47,8 @@ extends SlopitectModule
 # "at", so a menu is a list of what's in it. A button with "open" opens
 # another panel in its place, with a back arrow: menus inside menus.
 # A text element with "scroll" keeps its newest lines in view (a terminal);
-# ui_scroll moves it back and forth. A button with an "image" (a picture
+# ui_scroll moves it back and forth; with "select" too, pulling the trigger
+# on it and moving along picks whole rows to copy. A button with an "image" (a picture
 # file in the Slopitect folder) shows it over its label: a tile in a
 # browser. Docs: docs/VR-UI.md.
 
@@ -156,6 +157,9 @@ var _dragging := ""  # id_panel being carried, by the grip or by its title bar
 var _drag_offset: Transform3D
 var _sliding := ""  # "panel/element" of the slider the trigger is holding
 var _slide_value := 0.0
+var _selecting := ""  # "panel/element" of the text the trigger is picking rows in
+var _selection := {}  # "panel/element" -> [anchor row, other end row], rows of its wrapped text
+var _clipboard := ""  # what was copied or cut last (only in the app, not Android's clipboard)
 var _since_poll := 0.0
 var _apps: Array = []  # launcher tiles from menu_info(), see _scan_apps
 var _apps_signature := ""
@@ -270,6 +274,8 @@ func _physics_process(_delta: float) -> void:
 		return
 	if not _sliding.is_empty():
 		_slide_follow()
+	if not _selecting.is_empty():
+		_select_follow()
 	_stick_scroll(hit)
 	var length := LASER_LENGTH
 	if hit:
@@ -352,6 +358,7 @@ func on_action(action: String, down: bool) -> bool:
 				# This module took the press, so the release is its too.
 				if not _sliding.is_empty():
 					_end_slide()
+				_selecting = ""
 				_end_drag()
 				return true
 			return false
@@ -509,7 +516,8 @@ func _on_point_pressed() -> void:
 	if not _pointing.is_empty():
 		_focus_window(_pointing)
 	if not _hovered:
-		return  # the panel's background: the press is the panel's, and does nothing
+		_start_select()  # rows of a "select" text, if the pointer is on one
+		return  # otherwise the panel's background: the press is the panel's, and does nothing
 	var id_panel: String = _hovered.get_meta("panel")
 	var index := _index_of(id_panel)
 	if index == -1:
@@ -1440,7 +1448,7 @@ func _check_element(data: Dictionary, panel: Dictionary, check_actions: bool, de
 		"column": ["type", "id", "children", "gap"],
 		"grid": ["type", "id", "children", "gap", "columns"],
 	}
-	fields["text"].append_array(["scroll", "height"])
+	fields["text"].append_array(["scroll", "height", "select"])
 	fields["button"].append_array(["open", "image"])
 	for key in data:
 		if not key in fields[type] and not key in ["page", "grow"]:
@@ -1527,6 +1535,10 @@ func _check_element(data: Dictionary, panel: Dictionary, check_actions: bool, de
 				if typeof(data["scroll"]) != TYPE_BOOL:
 					return {"error": "\"scroll\" (keep the newest lines in view) must be true or false"}
 				element["scroll"] = data["scroll"]
+			if data.has("select"):
+				if typeof(data["select"]) != TYPE_BOOL:
+					return {"error": "\"select\" (rows can be picked to copy) must be true or false"}
+				element["select"] = data["select"]
 			if data.has("height"):
 				if typeof(data["height"]) not in [TYPE_INT, TYPE_FLOAT] or data["height"] < 0.01 or data["height"] > 3.0:
 					return {"error": "\"height\" must be 0.01 to 3 metres"}
@@ -2209,6 +2221,7 @@ func _set_label_text(id_panel: String, id_element: String, text: String) -> void
 	var label := _find_node(id_panel, id_element) as Label
 	if label and label.text != text:
 		label.text = text
+		_selection.erase(id_panel + "/" + id_element)  # its rows are other words now
 		_fit_scroll(id_panel, id_element)
 		_redraw(id_panel)
 
@@ -2229,6 +2242,7 @@ func _fit_scroll(id_panel: String, id_element: String) -> void:
 	_scroll[id_panel + "/" + id_element] = back
 	label.lines_skipped = maxi(0, lines - shown - back)
 	label.max_lines_visible = shown
+	_show_selection(id_panel, id_element)
 
 
 # Scrolls a text element with "scroll": `lines` more goes back (older), less
@@ -2341,6 +2355,139 @@ func _scroll_command(request: Dictionary) -> Dictionary:
 	if typeof(lines) not in [TYPE_INT, TYPE_FLOAT]:
 		return {"ok": false, "error": "ui_scroll needs \"lines\": more to go back, fewer to go forward, 0 for the newest"}
 	return {"ok": true, "back": scroll_text(id_panel, element["id"], int(lines))}
+
+
+# --- Picking rows of text, and the clipboard ------------------------------------
+
+# A text with "select" (the terminal's screen): pull the trigger on a row
+# and move along while holding it to pick more rows; the picked rows are lit.
+# Pulling it again on the one row picked lets it go. Text that changes (a new
+# line printed) drops what was picked, since its rows are other words then.
+# A keyboard module copies the picked rows (selected_text) to the app's own
+# clipboard (copy_text, clipboard), never Android's.
+func _start_select() -> void:
+	if not _views.has(_pointing) or _index_of(_pointing) == -1:
+		return
+	var point := _picture_point(_pointing, _ray.get_collision_point())
+	for element in _flat(panels[_index_of(_pointing)]["elements"]):
+		if element["type"] != "text" or not element.get("select", false):
+			continue
+		var label := _find_node(_pointing, element["id"]) as Label
+		if label == null or not label.is_visible_in_tree() or not label.get_global_rect().has_point(point):
+			continue
+		if label.text.is_empty():
+			return
+		var key: String = _pointing + "/" + element["id"]
+		var row := _row_at(label, point)
+		if _selection.get(key, []) == [row, row]:
+			_selection.erase(key)
+		else:
+			_selection[key] = [row, row]
+			_selecting = key
+		_pulse(0.2, 0.02)
+		_show_selection(_pointing, element["id"])
+		return
+
+
+# While the trigger is held, the other end of the picked rows follows the
+# pointer (even a little off the text).
+func _select_follow() -> void:
+	var parts := _selecting.split("/")
+	var label := _find_node(parts[0], parts[1]) as Label
+	if not _selection.has(_selecting) or label == null or not _holders.has(parts[0]):
+		_selecting = ""
+		return
+	var screen := _holders[parts[0]].get_node("Screen") as Node3D
+	var plane := Plane(screen.global_basis.z.normalized(), screen.global_position)
+	var hit = plane.intersects_ray(_right.global_position, -_right.global_basis.z)
+	if hit == null:
+		return
+	var row := _row_at(label, _picture_point(parts[0], hit))
+	if row != _selection[_selecting][1]:
+		_selection[_selecting][1] = row
+		_show_selection(parts[0], parts[1])
+
+
+# The row of a label's wrapped text at a point in its panel's picture (one of
+# the rows showing, counted from the top of the whole text).
+func _row_at(label: Label, point: Vector2) -> int:
+	var shown := label.max_lines_visible if label.max_lines_visible > 0 else label.get_line_count()
+	var row := clampi(int((point.y - label.get_global_rect().position.y) / _row_height(label)), 0, maxi(0, shown - 1))
+	return clampi(row + label.lines_skipped, 0, maxi(0, label.get_line_count() - 1))
+
+
+func _row_height(label: Label) -> float:
+	return maxf(label.get_line_height() + label.get_theme_constant("line_spacing"), 1.0)
+
+
+# The label's text broken into rows the way the label breaks it, to find
+# which characters a row holds.
+func _rows(label: Label) -> TextParagraph:
+	var rows := TextParagraph.new()
+	rows.break_flags = TextServer.BREAK_MANDATORY | TextServer.BREAK_WORD_BOUND | TextServer.BREAK_ADAPTIVE \
+		| TextServer.BREAK_TRIM_START_EDGE_SPACES | TextServer.BREAK_TRIM_END_EDGE_SPACES
+	rows.width = label.size.x
+	rows.add_string(label.text, label.get_theme_font("font"), label.get_theme_font_size("font_size"))
+	return rows
+
+
+# Lights the picked rows that are showing (behind the text).
+func _show_selection(id_panel: String, id_element: String) -> void:
+	var label := _find_node(id_panel, id_element) as Label
+	if label == null:
+		return
+	var mark := label.get_node_or_null("Selection") as ColorRect
+	var picked: Array = _selection.get(id_panel + "/" + id_element, [])
+	if picked.is_empty():
+		if mark and mark.visible:
+			mark.visible = false
+			_redraw(id_panel)
+		return
+	if mark == null:
+		mark = ColorRect.new()
+		mark.name = "Selection"
+		mark.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		mark.show_behind_parent = true
+		label.add_child(mark)
+	var shown := label.max_lines_visible if label.max_lines_visible > 0 else label.get_line_count()
+	var first := clampi(mini(picked[0], picked[1]) - label.lines_skipped, 0, shown)
+	var last := clampi(maxi(picked[0], picked[1]) - label.lines_skipped, -1, shown - 1)
+	mark.color = Color(_theme_color("accent"), 0.35)
+	mark.visible = last >= first
+	mark.position = Vector2(0, first * _row_height(label))
+	mark.size = Vector2(label.size.x, (last - first + 1) * _row_height(label))
+	_redraw(id_panel)
+
+
+# The rows picked in a panel's "select" text (or in the one named), or "".
+func selected_text(id_panel: String, id_element := "") -> String:
+	for key in _selection:
+		var parts: PackedStringArray = key.split("/")
+		if parts[0] != id_panel or (not id_element.is_empty() and parts[1] != id_element):
+			continue
+		var label := _find_node(parts[0], parts[1]) as Label
+		if label == null:
+			continue
+		var rows := _rows(label)
+		var last_row := rows.get_line_count() - 1
+		var picked: Array = _selection[key]
+		var from := rows.get_line_range(clampi(mini(picked[0], picked[1]), 0, last_row)).x
+		var to := rows.get_line_range(clampi(maxi(picked[0], picked[1]), 0, last_row)).y
+		return label.text.substr(from, to - from).strip_edges()
+	return ""
+
+
+func copy_text(text: String) -> void:
+	_clipboard = text.left(MAX_TEXT)
+
+
+func clipboard() -> String:
+	return _clipboard
+
+
+# What's typed in an input box ("panel/element"), for a keyboard module.
+func input_text(key: String) -> String:
+	return _inputs.get(key, "")
 
 
 func _show_toggle(control: Control, element: Dictionary) -> void:

@@ -14,6 +14,14 @@ extends SlopitectModule
 # chat goes through the terminal too. The layout follows where it sends:
 # the command symbols for the terminal's command line, ' ? ! for words.
 # Hide folds the keys away, leaving the display line, Keys and Send.
+# Editing, on the row over the letters: < and > move the cursor (with Sel
+# on they pick the letters they pass over), All picks the whole line, Cut,
+# Copy and Paste use the app's clipboard (vrui's), and Take brings in what's
+# in the focused window's box (or the terminal's line) to change and Send
+# back. With nothing picked on the line, Copy takes the rows picked on the
+# focused window's screen (pull the trigger on the terminal's screen and
+# move along), otherwise the whole line. Typing or Paste replaces what's
+# picked.
 # The terminal builds itself without keys while this is loaded (and with
 # them again when it's unloaded); the chat window's keys are taken off.
 # A Menu tile and a hand menu button open it, like the terminal's.
@@ -39,13 +47,16 @@ var _since := CHECK_SECONDS
 var _layout := ""  # "command" or "words": the keys the window was built with
 var _text := ""  # typed on the display line, not sent yet
 var _shift := false  # the next letter is a capital
+var _caret := 0  # where typing goes on the display line (letters before it)
+var _anchor := -1  # the other end of the letters picked on the line, or -1: none
+var _picking := false  # Sel: the cursor keys pick the letters they pass over
 var _collapsed := false  # the keys folded away: only the display line, Keys and Send
 var _built_collapsed := false
 
 
 func setup() -> String:
 	register("keyboard_type", _type_command, "type on the keyboard's display line: text")
-	register("keyboard_key", _key_command, "a key on the keyboard: key (shift, backspace, clear: on the display line; run: send it; collapse: hide or show the keys)")
+	register("keyboard_key", _key_command, "a key on the keyboard: key (shift, backspace, clear, left, right, select, all, cut, copy, paste, take: on the display line; run: send it; collapse: hide or show the keys)")
 	register("keyboard_status", _status, "what the keyboard types into now (terminal, an input box, or nothing) and its layout")
 	return ""
 
@@ -124,7 +135,7 @@ func _type_command(request: Dictionary) -> Dictionary:
 	if _shift and text.to_upper() != text.to_lower():
 		text = text.to_upper()
 		_shift = false
-	_text += text
+	_insert(text)
 	_show()
 	return {"ok": true}
 
@@ -135,9 +146,30 @@ func _key_command(request: Dictionary) -> Dictionary:
 		"shift":
 			_shift = not _shift
 		"backspace":
-			_text = _text.left(_text.length() - 1)
+			if _anchor == -1 and _caret > 0:
+				_anchor = _caret - 1
+			_insert("")
 		"clear":
-			_text = ""
+			_set_text("")
+		"left", "right":
+			_move(-1 if request["key"] == "left" else 1)
+		"select":
+			_picking = not _picking
+			if not _picking and _anchor == _caret:
+				_anchor = -1
+		"all":
+			_anchor = 0
+			_caret = _text.length()
+		"copy", "cut":
+			return _copy(request["key"] == "cut")
+		"paste":
+			var ui := _ui()
+			var text: String = ui.call("clipboard") if ui != null else ""
+			if text.is_empty():
+				return {"ok": false, "error": "nothing has been copied"}
+			_insert(text)
+		"take":
+			return _take()
 		"run":
 			return _send()
 		"collapse":
@@ -145,7 +177,7 @@ func _key_command(request: Dictionary) -> Dictionary:
 			_build(_layout, _shown().has(PANEL))
 			return {"ok": true, "collapsed": _collapsed}
 		_:
-			return {"ok": false, "error": "\"key\" must be shift, backspace, clear, run or collapse"}
+			return {"ok": false, "error": "\"key\" must be shift, backspace, clear, left, right, select, all, cut, copy, paste, take, run or collapse"}
 	_show()
 	return {"ok": true}
 
@@ -170,18 +202,105 @@ func _send() -> Dictionary:
 		if not reply.get("ok", false) and str(reply.get("error", "")).begins_with("no button"):
 			reply = {"ok": true, "typed_into": target}  # a window with no Send: the text in its box is the end of it
 	if reply.get("ok", false) or reply.get("wait") != null:
-		_text = ""
+		_set_text("")
 		_shift = false
 		_show()
 	return reply
 
 
-# What the display line says.
+# Puts text in place of what's picked on the line (or at the cursor).
+func _insert(text: String) -> void:
+	var from := _caret if _anchor == -1 else mini(_caret, _anchor)
+	var to := _caret if _anchor == -1 else maxi(_caret, _anchor)
+	_text = _text.left(from) + text + _text.substr(to)
+	_caret = from + text.length()
+	_anchor = -1
+
+
+func _set_text(text: String) -> void:
+	_text = text
+	_caret = text.length()
+	_anchor = -1
+	_picking = false
+
+
+# The cursor one letter left or right. With Sel on it picks as it goes;
+# without, a pick is let go (the cursor goes to its edge).
+func _move(step: int) -> void:
+	if _picking:
+		if _anchor == -1:
+			_anchor = _caret
+		_caret = clampi(_caret + step, 0, _text.length())
+		return
+	if _anchor != -1:
+		_caret = mini(_caret, _anchor) if step < 0 else maxi(_caret, _anchor)
+		_anchor = -1
+		return
+	_caret = clampi(_caret + step, 0, _text.length())
+
+
+# Copy (or Cut): the letters picked on the line; with none, the rows picked
+# on the focused window's screen (Copy only); otherwise the whole line.
+func _copy(cut: bool) -> Dictionary:
+	var ui := _ui()
+	if ui == null:
+		return {"ok": false, "error": "no vrui"}
+	var text := ""
+	if _anchor != -1 and _anchor != _caret:
+		text = _text.substr(mini(_caret, _anchor), absi(_caret - _anchor))
+		if cut:
+			_insert("")
+	else:
+		var window: String = ui.call("focused_window")
+		if not cut and not window.is_empty():
+			text = ui.call("selected_text", window)
+		if text.is_empty():
+			text = _text
+			if cut:
+				_set_text("")
+	if text.is_empty():
+		return {"ok": false, "error": "nothing to copy: pick letters or rows, or type something"}
+	ui.call("copy_text", text)
+	_show()
+	return {"ok": true, "copied": text.length()}
+
+
+# Brings in what's in the box the keyboard sends to (or the terminal's line),
+# to change it on the display line and Send it back.
+func _take() -> Dictionary:
+	var target := _target(_shown())
+	var ui := _ui()
+	if target.is_empty() or ui == null:
+		return {"ok": false, "error": "nothing to take from: open the terminal or pick an input box"}
+	var text: String
+	if target == TERMINAL:
+		text = str(_run({"cmd": "terminal_status"}).get("line", ""))
+	else:
+		text = ui.call("input_text", target)
+	_set_text(text)
+	_show()
+	return {"ok": true, "took": text.length()}
+
+
+# What the display line says: the cursor is |, the letters picked are
+# between ‹ and ›. A long line shows the part round the cursor.
 func _display() -> String:
-	var line := "> " + (_text if _text.length() <= SHOWN else "..." + _text.right(SHOWN))
 	if _text.is_empty():
-		line = "> type here"
-	return line + ("  [Shift]" if _shift else "")
+		return "> type here" + _flags()
+	var line := _text.left(_caret) + "|" + _text.substr(_caret)
+	if _anchor != -1:
+		var from := mini(_caret, _anchor)
+		var to := maxi(_caret, _anchor)
+		line = _text.left(from) + "‹" + _text.substr(from, to - from) + "›" + _text.substr(to)
+	var at := _caret + 1  # where the cursor is in `line`
+	if line.length() > SHOWN:
+		var start := clampi(at - SHOWN / 2, 0, line.length() - SHOWN)
+		line = ("..." if start > 0 else "") + line.substr(start, SHOWN) + ("..." if start + SHOWN < line.length() else "")
+	return "> " + line + _flags()
+
+
+func _flags() -> String:
+	return ("  [Shift]" if _shift else "") + ("  [Sel]" if _picking else "")
 
 
 # Changes only the display line, without building the window again.
@@ -192,7 +311,8 @@ func _show() -> void:
 
 
 func _status(_request: Dictionary) -> Dictionary:
-	return {"ok": true, "typing_into": _target(_shown()), "layout": _layout, "text": _text, "shift": _shift, "collapsed": _collapsed}
+	return {"ok": true, "typing_into": _target(_shown()), "layout": _layout, "text": _text, "shift": _shift, "collapsed": _collapsed,
+		"caret": _caret, "picked": "" if _anchor == -1 else _text.substr(mini(_caret, _anchor), absi(_caret - _anchor))}
 
 
 # Takes the keys off the chat window. The shift key is there whenever the window
@@ -207,15 +327,15 @@ func _strip(id_panel: String) -> void:
 			_run({"cmd": "ui_element_remove", "id_panel": id_panel, "id_element": "key_%d_%d" % [r, c]})
 
 
-# The window's keys: letters and figures, then Shift, Space, Del, Clr and
-# Run (Send for words). Hide, beside the display line, folds the keys away;
+# The window's keys: the editing row, letters and figures, then Shift,
+# Space, Del, Clr and Run (Send for words). Hide, beside the display line, folds the keys away;
 # folded, the line has Keys (to unfold them) and Send beside it.
 func _build(layout: String, exists: bool) -> void:
 	var words := layout == "words"
 	var keys: Array = WORD_KEYS if words else COMMAND_KEYS
 	var width := COLS * UNIT - GAP
 	var left := -width / 2.0
-	var line_y := ROW_Y + KEY / 2.0 + 0.03
+	var line_y := ROW_Y + KEY / 2.0 + 0.03 + (0.0 if _collapsed else UNIT)
 	var toggle_w := 2 * UNIT - GAP
 	var beside := 2 * UNIT * (2 if _collapsed else 1)  # room for Keys and Send, or Hide
 	var elements := [{"type": "text", "id": DISPLAY, "text": _display(), "at": [-beside / 2.0, line_y + 0.012], "width": width - beside, "font_size": 28},
@@ -235,6 +355,16 @@ func _build(layout: String, exists: bool) -> void:
 			elements.append({"type": "button", "id": "key_%d_%d" % [r, c], "label": ch,
 				"at": [left + KEY / 2.0 + c * UNIT, ROW_Y - r * UNIT], "size": [KEY, KEY],
 				"action": {"cmd": "keyboard_type", "text": ch}})
+	var edit_row := [
+		["left", "<", 1.0], ["right", ">", 1.0], ["select", "Sel", 1.5], ["all", "All", 1.5],
+		["cut", "Cut", 1.5], ["copy", "Copy", 1.5], ["paste", "Paste", 1.5], ["take", "Take", 1.5]]
+	if not _collapsed:
+		var edit_x := left
+		for key in edit_row:
+			var w: float = key[2] * UNIT - GAP
+			elements.append({"type": "button", "id": "edit_" + key[0], "label": key[1],
+				"at": [edit_x + w / 2.0, ROW_Y + UNIT], "size": [w, KEY], "action": {"cmd": "keyboard_key", "key": key[0]}})
+			edit_x += key[2] * UNIT
 	var bottom := ROW_Y - keys.size() * UNIT
 	var bottom_row := [
 		["shift", "Shift", 2, {"cmd": "keyboard_key", "key": "shift"}],
