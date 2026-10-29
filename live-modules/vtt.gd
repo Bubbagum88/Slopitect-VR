@@ -37,7 +37,6 @@ const LOCAL_CLASS := "SpeechToText"  # from the godot-whisper plugin
 const LOCAL_LANGUAGES := {"": 0, "en": 1}  # its Language enum: 0 Auto, 1 English
 const SHERPA_PACKAGE := "com.k2fsa.sherpa.onnx."  # the sherpa-onnx library's Java classes, built into the APK
 const SHERPA_THREADS := 2  # of the Quest 1's four fast cores; the game keeps the rest
-const SHERPA_RATE := 16000  # the rate its models hear at, for the quiet added at the end
 const SHERPA_TAIL_SECONDS := 0.5  # quiet added after the last word, so it is worked out too
 const TRIM_FRAME := 320  # 20 ms at 16 kHz, the steps quiet is measured in
 const TRIM_RELATIVE := 0.1  # quieter than a tenth of the loudest 20 ms counts as quiet
@@ -496,7 +495,8 @@ func _sherpa_end(dropped: bool) -> void:
 	_sherpa_wake.post()
 
 
-# Runs on the thread: touches only _sherpa, _sherpa_model and the guarded values.
+# Runs on the thread: touches only _sherpa, _sherpa_model and the guarded
+# values, and calls only what reaches no Java class by name.
 func _sherpa_work(folder: String, rate: int) -> void:
 	var report := {"engine": "sherpa", "model": folder, "mix_rate": rate, "threads": SHERPA_THREADS}
 	if folder != _sherpa_model:
@@ -506,7 +506,7 @@ func _sherpa_work(folder: String, rate: int) -> void:
 		if not problem.is_empty():
 			report["error"] = problem
 			_sherpa_wait_end()
-			call_deferred("_sherpa_done", report, "")
+			call_deferred("_sherpa_done", report, null)
 			return
 	var stream = _sherpa.createStream("")
 	var heard := 0
@@ -533,8 +533,10 @@ func _sherpa_work(folder: String, rate: int) -> void:
 			stream.acceptWaveform(sound, rate)
 		if ending:
 			var tail := PackedFloat32Array()
-			tail.resize(int(SHERPA_TAIL_SECONDS * SHERPA_RATE))
-			stream.acceptWaveform(tail, SHERPA_RATE)
+			tail.resize(int(SHERPA_TAIL_SECONDS * rate))
+			# At the same rate as the rest: a stream that is given another
+			# rate stops the whole app (sherpa-onnx calls exit()).
+			stream.acceptWaveform(tail, rate)
 			stream.inputFinished()
 		var started := Time.get_ticks_msec()
 		while _sherpa.isReady(stream):
@@ -542,10 +544,6 @@ func _sherpa_work(folder: String, rate: int) -> void:
 		decode_ms += Time.get_ticks_msec() - started
 		if ending:
 			break
-	var words := ""
-	if not dropped:
-		words = String(_sherpa.getResult(stream).getText())
-	stream.release()
 	report["heard_s"] = snappedf(heard / float(maxi(rate, 1)), 0.01)
 	report["peak"] = snappedf(peak, 0.001)  # how loud it got (0 to 1): near 0 means the microphone gave silence
 	report["decode_ms"] = decode_ms
@@ -554,7 +552,10 @@ func _sherpa_work(folder: String, rate: int) -> void:
 	if ended_at > 0:
 		report["after_letting_go_ms"] = Time.get_ticks_msec() - ended_at  # how long the words took once you let go
 	report["dropped"] = dropped
-	call_deferred("_sherpa_done", report, words)
+	# The words are read on the main thread: sherpa-onnx makes its result
+	# object with JNI's FindClass, which on a thread Java didn't start
+	# can't see the app's classes, and the app crashes.
+	call_deferred("_sherpa_done", report, stream)
 
 
 # Runs on the thread: makes the recognizer for the model in folder; "" when
@@ -605,10 +606,15 @@ func _java_error(wrapper) -> String:
 	return "no Java exception" if e == null else String(e.toString())
 
 
-func _sherpa_done(report: Dictionary, words: String) -> void:
+func _sherpa_done(report: Dictionary, stream) -> void:
 	_sherpa_thread.wait_to_finish()
 	_sherpa_thread = null
 	_busy = false
+	var words := ""
+	if stream != null:
+		if not report["dropped"]:
+			words = String(_sherpa.getResult(stream).getText())
+		stream.release()
 	print("Slopitect vtt: on-headset speech-to-text: ", JSON.stringify(report))
 	if report.has("error"):
 		_note("on-headset speech-to-text (sherpa) failed: " + String(report["error"]))
