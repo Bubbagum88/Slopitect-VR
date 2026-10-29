@@ -15,7 +15,8 @@
 | Speech out | `tts_set` (comfort: speed, pitch, volume, voice), also in the Settings window | Yes, `user://tts.json` |
 | Hold-to-talk | `vtt_config` from the PC (engine, service, key); `send_to_agent` with `vtt_set` too | Yes, `user://vtt.json` |
 | Personal folders the agent may reach | `files_config` from the PC (`unblock`, `block`) | Yes, `user://files.json` |
-| The agent's skills | `SKILL.md` files in `user://skills/<name>/` (replace a shipped skill of the same name) | Yes |
+| The agent's skills | `SKILL.md` files in `user://skills/<name>/` or, from the PC, `modules/agent_skills/<name>/` in the Slopitect folder (replace a shipped skill of the same name); which are always followed: `ALWAYS` in `agent_tuning.gd` | Yes |
+| The agent's instructions and budget policy (when a conversation starts over, the warning near the cap) | `agent_tuning.gd`, a live module put on the headset from the PC; the APK's safety rules and hard token caps stay | Yes |
 
 Live modules work like the built-in ones and can do anything they can, so
 most new features no longer need an APK.
@@ -39,7 +40,9 @@ one doesn't grant it: Android asks you the first time a feature needs it
 the first time you hold to talk).
 
 A new APK installs over the old one (same signing key) and keeps the
-settings, panels, approvals and skills.
+settings, panels, approvals and skills. Uninstalling wipes them; the agent's
+settings then come back from `modules/agent_config.json` in the Slopitect
+folder, a copy kept without the key (set the key again).
 
 ## How the agent is kept safe
 
@@ -56,6 +59,11 @@ In place:
   can't change its key, its provider, its permissions, which folders are
   blocked, or where your voice goes. The check also covers commands run
   indirectly, like a button the agent presses.
+- **The agent's own modules are off limits to it:** no `files_*` command
+  writes, moves or deletes a `modules/agent_*` file (`agent_tuning.gd`,
+  `agent_settings.gd`, `agent_config.json`, `agent_skills/`), and the agent
+  can't `code_load`, `code_unload` or `code_forget` one. They go on the
+  headset from the PC.
 - **Buttons can't run `*_config` commands;** settings change from the PC.
 - **Your Yes in the headset** for anything risky. A yellow-edged window
   asks; only pointing at Yes or No and pulling the right trigger answers

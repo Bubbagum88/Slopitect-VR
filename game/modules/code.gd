@@ -14,6 +14,10 @@ extends SlopitectModule
 # new Yes. Nothing in a file is compiled before its Yes, since compiling a
 # script already runs some of it. If it then doesn't compile, the error goes
 # back to whoever wrote it, and the fixed file needs a new Yes.
+#
+# Modules named agent_* tune the agent itself (agent_tuning, agent_settings),
+# so the agent can't load, unload or forget them; files.gd doesn't let it
+# write them either. You load them from the PC or the headset.
 
 const SETTINGS_PATH := "user://code.json"
 const MAX_SOURCE := 200000
@@ -137,6 +141,8 @@ func _list(_request: Dictionary) -> Dictionary:
 
 
 func _load_command(request: Dictionary) -> Dictionary:
+	if _agents_own(request.get("name")):
+		return {"ok": false, "error": "modules named agent_* tune the agent, so the agent can't load them; the person does that"}
 	var read := _read(request.get("name"))
 	if read.has("error"):
 		return {"ok": false, "error": read["error"]}
@@ -161,6 +167,8 @@ func _load_command(request: Dictionary) -> Dictionary:
 
 
 func _unload_command(request: Dictionary) -> Dictionary:
+	if _agents_own(request.get("name")):
+		return {"ok": false, "error": "modules named agent_* tune the agent, so the agent can't unload them; the person does that"}
 	var module_name = request.get("name")
 	if typeof(module_name) != TYPE_STRING or not _approved.has(module_name):
 		return {"ok": false, "error": "\"name\" must be a live module (code_list shows them); built-in modules can't be taken out"}
@@ -172,6 +180,8 @@ func _unload_command(request: Dictionary) -> Dictionary:
 
 
 func _forget_command(request: Dictionary) -> Dictionary:
+	if _agents_own(request.get("name")):
+		return {"ok": false, "error": "modules named agent_* tune the agent, so the agent can't forget them; the person does that"}
 	var module_name = request.get("name")
 	if typeof(module_name) != TYPE_STRING or not _approved.has(module_name):
 		return {"ok": false, "error": "\"%s\" has no approval to withdraw" % str(module_name)}
@@ -180,6 +190,11 @@ func _forget_command(request: Dictionary) -> Dictionary:
 	_approved.erase(module_name)
 	_save_settings()
 	return {"ok": true, "forgotten": module_name}
+
+
+# A module the agent may not load or unload: one that tunes the agent.
+func _agents_own(module_name) -> bool:
+	return typeof(module_name) == TYPE_STRING and module_name.to_lower().begins_with("agent_") and ctx["server"].for_agent()
 
 
 # --- Loading --------------------------------------------------------------------
