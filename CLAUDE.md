@@ -35,6 +35,13 @@ module work, [docs/MODULE-FRAMEWORK.md](docs/MODULE-FRAMEWORK.md) and
   narrow commands usable in the headset (and so by the agent):
   `move_comfort`, `ui_text_size`, `hands_colours`. Anything touching keys,
   the agent, the network, files, pairing or code stays PC only.
+  Exception (the owner's choice, 2026-10-29): the agent's budget and model
+  change in the headset through `agent_budget` (the Settings window's Agent
+  budget section, `agent_settings.gd`): `max_request_tokens`,
+  `max_context_tokens`, `max_tokens_per_ask` and `max_tool_rounds` in
+  narrow ranges, and the model from a fixed Claude list. The agent itself
+  can never use it (`agent_` commands are behind its firewall). The key,
+  provider, address and allowed tools stay PC only.
 - Assets ripped from games on the headset stay local: never in the repo,
   GitHub or a backup.
 

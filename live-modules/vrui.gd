@@ -113,6 +113,8 @@ const HOME_PLACES := ["front", "world", "follow", "hand"]
 const DOCK_DISTANCE := 0.12  # metres from its spot on the hand that a carried hand panel snaps back
 const DOCK_ALPHA := 0.25  # the outline of where it will snap
 const PRESS_SECONDS := 0.12
+const STICK_LINES := 16.0  # lines a second a scrolling text moves with the thumbstick pushed all the way
+const STICK_DEAD := 0.2  # thumbstick travel ignored around the middle
 const FOLLOW_ANGLE := 35.0  # degrees you turn away before a follow panel catches up
 const FOLLOW_DISTANCE := 0.5  # or metres you walk
 const FOLLOW_SPEED := 4.0
@@ -147,6 +149,8 @@ var _pointing := ""  # the panel the pointer is on
 var _hovered: Control  # the element (or title bar, tab, tile) the pointer is on
 var _openers := {}  # id_panel -> the panel whose "open" button opened it (for its back arrow)
 var _scroll := {}  # "panel/element" -> lines scrolled back from the newest
+var _stick_lines := 0.0  # lines the thumbstick has moved a scrolling text but not yet sent
+var _pointed := []  # the panels pointed at most recently, newest first (see last_pointed)
 var _dragging := ""  # id_panel being carried, by the grip or by its title bar
 var _drag_offset: Transform3D
 var _sliding := ""  # "panel/element" of the slider the trigger is holding
@@ -248,6 +252,10 @@ func _physics_process(_delta: float) -> void:
 	_ray.enabled = not blocked
 	var hit: StaticBody3D = _ray.get_collider() as StaticBody3D if _ray.enabled and _ray.is_colliding() else null
 	_pointing = String(hit.get_meta("panel", "")) if hit else ""
+	if not _pointing.is_empty() and (_pointed.is_empty() or _pointed[0] != _pointing):
+		_pointed.erase(_pointing)
+		_pointed.push_front(_pointing)
+		_pointed.resize(mini(_pointed.size(), 4))
 	var control: Control = null
 	if not _pointing.is_empty() and _views.has(_pointing):
 		control = _control_at(_pointing, _picture_point(_pointing, _ray.get_collision_point()))
@@ -261,6 +269,7 @@ func _physics_process(_delta: float) -> void:
 		return
 	if not _sliding.is_empty():
 		_slide_follow()
+	_stick_scroll(hit)
 	var length := LASER_LENGTH
 	if hit:
 		var point := _ray.get_collision_point()
@@ -2203,6 +2212,56 @@ func _fit_scroll(id_panel: String, id_element: String) -> void:
 
 # Scrolls a text element with "scroll": `lines` more goes back (older), less
 # goes forward, 0 returns to the newest. Returns how far back it now is.
+# Pointing at a window, the "turn" thumbstick's up and down scroll its text
+# (up goes back to older lines): the text with "scroll" under the pointer,
+# or the window's only one. Its left and right still turn you.
+func _stick_scroll(hit: StaticBody3D) -> void:
+	var controls: SlopitectModule = ctx["modules"].module("controls")
+	var target := _scroll_target(hit) if controls and controls.has_method("stick") else ""
+	var y: float = controls.call("stick", "turn").y if not target.is_empty() else 0.0
+	if absf(y) < STICK_DEAD:
+		_stick_lines = 0.0
+		return
+	_stick_lines += (absf(y) - STICK_DEAD) / (1.0 - STICK_DEAD) * signf(y) * get_physics_process_delta_time() * STICK_LINES
+	var lines := int(_stick_lines)  # whole lines; the rest waits for the next frame
+	if lines == 0:
+		return
+	_stick_lines -= lines
+	scroll_text(_pointing, target, lines)
+
+
+# The scrolling text the pointer is on, or the window's only one, or "".
+func _scroll_target(hit: StaticBody3D) -> String:
+	if hit == null or not _views.has(_pointing) or _index_of(_pointing) == -1:
+		return ""
+	var panel: Dictionary = panels[_index_of(_pointing)]
+	var point := _picture_point(_pointing, _ray.get_collision_point())
+	var found := []
+	for element in _flat(panel["elements"]):
+		if element["type"] != "text" or not element.get("scroll", false):
+			continue
+		var node := _find_node(_pointing, element["id"]) as Control
+		if node == null or not node.is_visible_in_tree():
+			continue  # on another tab
+		if node.get_global_rect().has_point(point):
+			return element["id"]
+		found.append(element["id"])
+	return found[0] if found.size() == 1 else ""
+
+
+# For a keyboard module: the input box typing goes to ("panel/element", or
+# ""), and the panel pointed at most recently other than `except`.
+func focus() -> String:
+	return _focus
+
+
+func last_pointed(except := "") -> String:
+	for id_panel in _pointed:
+		if id_panel != except:
+			return id_panel
+	return ""
+
+
 func scroll_text(id_panel: String, id_element: String, lines: int) -> int:
 	var key := id_panel + "/" + id_element
 	_scroll[key] = 0 if lines == 0 else maxi(0, _scroll.get(key, 0) + lines)

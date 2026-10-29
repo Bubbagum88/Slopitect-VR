@@ -29,12 +29,18 @@ extends SlopitectModule
 # NAME_config or code_ command: those change only from the PC (CLAUDE.md),
 # so only the comfort commands belong here. Each module keeps its own
 # settings across restarts (user://NAME.json); this keeps nothing.
+#
+# The window has tabs (pages), so it's short: each module's section sits
+# on the tab PAGE_OF gives it (PAGE_OTHER if none).
 
 const PANEL := "settings"
 const WIDTH := 0.42
 const FULL := [0.42, 0.055]
 const SCAN_SECONDS := 1.0  # while the window is open: redraw if a module or a value changed
 const KINDS := ["choice", "slider", "toggle", "button"]
+const PAGES := ["Move", "Look", "Other", "Speech"]
+const PAGE_OF := {"move": "Move", "vrui": "Look", "hands": "Look", "avatar": "Look", "tts": "Speech", "vtt": "Speech"}
+const PAGE_OTHER := "Other"
 
 var _signature := ""  # what the window was last drawn from
 var _since_scan := 0.0
@@ -279,11 +285,11 @@ func _build() -> String:
 	var elements := _elements(sections)
 	var reply: Dictionary
 	if exists:
-		# Only the elements: where you put it stays.
-		reply = _run({"cmd": "ui_update", "id_panel": PANEL, "elements": elements})
+		# Only the elements and tabs: where you put it stays.
+		reply = _run({"cmd": "ui_update", "id_panel": PANEL, "elements": elements, "pages": PAGES})
 	else:
 		reply = _run({"cmd": "ui_add", "id_panel": PANEL, "title": "Settings", "place": "front", "distance": 0.55, "height": -0.2,
-			"chrome": true, "layout": "column", "visible": false, "elements": elements})
+			"chrome": true, "layout": "column", "visible": false, "pages": PAGES, "page": PAGES[0], "elements": elements})
 	if not reply.get("ok", false):
 		return "%s: %s" % [PANEL, reply.get("error", "?")]
 	_signature = signature
@@ -294,15 +300,23 @@ func _elements(sections: Array) -> Array:
 	var out := []
 	for section in sections:
 		var prefix := "%s_" % section["module"]
-		out.append(_text(prefix + "title", section["title"], "accent"))
+		var page: String = PAGE_OF.get(section["module"], PAGE_OTHER)
+		var part := [_text(prefix + "title", section["title"], "accent")]
 		if section.has("problem"):
-			out.append(_text(prefix + "problem", "Its settings_info() %s." % section["problem"], "muted", 24))
-			continue
-		for setting in section["settings"]:
-			out.append_array(_setting_elements(section["module"], prefix + setting["id"], setting))
+			part.append(_text(prefix + "problem", "Its settings_info() %s." % section["problem"], "muted", 24))
+		else:
+			for setting in section["settings"]:
+				part.append_array(_setting_elements(section["module"], prefix + setting["id"], setting))
+		for element in part:
+			element["page"] = page
+			out.append(element)
 	if sections.is_empty():
-		out.append(_text("none", "No loaded module has settings.", "muted", 26))
-	out.append(_text("pc_only", "Keys, services and the rest change from the PC (the *_config commands).", "muted", 24))
+		var none := _text("none", "No loaded module has settings.", "muted", 26)
+		none["page"] = PAGE_OTHER
+		out.append(none)
+	var pc_only := _text("pc_only", "Keys, services and the rest change from the PC (the *_config commands).", "muted", 24)
+	pc_only["page"] = PAGE_OTHER
+	out.append(pc_only)
 	return out
 
 
