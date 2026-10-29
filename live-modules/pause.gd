@@ -1,32 +1,42 @@
 extends SlopitectModule
 
 # Slopitect live module: pause.
-# The pause menu, from its tile on the Menu (first in the row), or from any
-# button bound to it on the PC:
-#   .\slopi.ps1 '{"cmd":"controls_config","buttons":{"left/menu_button":{"panel":"pause"}}}'
+# The pause menu, on the left home button (the "left_menu" action; this
+# module takes it before the windows do), or its tile on the Menu.
 # It doesn't stop the world; it's the one place for the world and the
 # settings:
 # - Resume closes it.
 # - Save world keeps the whole world as a checkpoint (save.gd).
-# - Load world opens a list of the worlds (projects.gd) and the newest
-#   checkpoints to go back to, with a back arrow.
+# - Load lists the newest checkpoints to go back to, and Worlds lists the
+#   saved worlds (projects.gd) to open, each with a back arrow.
 # - Settings: the comfort settings, which change here in the headset
 #   (turning, walk speed, text size, hand colours, the avatar's outfit), a
 #   new conversation and stop speaking. Everything else changes from the PC
 #   only (NAME_config).
-# - Worlds window opens worlds.gd's window, when it's loaded.
-# Each menu is a ui panel ("pause", "pause_load", "pause_settings"), kept by
-# ui.gd like every panel; this fills them again each time the menu opens.
+# - All windows opens the Menu bar (every window's tile, and the shapes).
+# - Hand menu shows or hides the hand menu.
+# - Files & modules opens worlds.gd's window, when it's loaded.
+# The hand menu sits above the left controller: Home (this menu), Save,
+# Load, Worlds, and Undo / Redo (tools.gd's one list for every change).
+# Each menu is a ui panel ("pause", "pause_load", "pause_worlds",
+# "pause_settings", "hand_menu"), kept by the window module like every
+# panel; this fills them again each time the menu opens.
 # A part whose module isn't loaded says so.
 
 const PANEL := "pause"
 const LOAD_PANEL := "pause_load"
+const WORLDS_PANEL := "pause_worlds"
+const HAND_PANEL := "hand_menu"
+const MENUS := [PANEL, LOAD_PANEL, "pause_worlds", "pause_settings"]
+const PAGES := {"main": PANEL, "load": LOAD_PANEL, "worlds": "pause_worlds", "settings": "pause_settings"}
+const HAND_BUTTON := [0.16, 0.07]
+const CHECK_SECONDS := 1.0
 const SETTINGS_PANEL := "pause_settings"
 const WIDTH := 0.42
 const BUTTON := [0.42, 0.06]
 const HALF := [0.205, 0.055]
 const MAX_WORLDS := 6
-const MAX_CHECKPOINTS := 4
+const MAX_CHECKPOINTS := 6
 const MAX_OUTFITS := 6
 const THIRD := [0.133, 0.055]
 # The settings a Settings button may change: the comfort settings isaac chose
@@ -38,7 +48,7 @@ const NAILS := {"Pink": "#ff3b7a", "Red": "#d1263b", "Blue": "#3b6bff", "Black":
 
 
 func setup() -> String:
-	register("pause_do", _do, "the pause menu: act = toggle, show, hide, refresh, save (optional label), open_world (name), restore (checkpoint), setting (run: a comfort setting command), new_conversation")
+	register("pause_do", _do, "the pause menu: act = toggle, show (optional page: main, load, worlds, settings), hide, hand_menu (show or hide it), refresh, save (optional label), open_world (name), restore (checkpoint), setting (run: a comfort setting command), new_conversation")
 	register("pause_status", _status, "the world you're in and what the pause menu can reach, one line")
 	return ""
 
@@ -46,8 +56,43 @@ func setup() -> String:
 func _exit_tree() -> void:
 	if ctx["modules"].module(name) != null:
 		return  # the app is closing, not unloading this: the menus stay for next time
-	for id_panel in [PANEL, LOAD_PANEL, SETTINGS_PANEL]:
+	for id_panel in MENUS + [HAND_PANEL]:
 		ctx["server"].run({"cmd": "ui_remove", "id_panel": id_panel})
+
+
+var _hand_signature := ""  # what the hand menu was last built from
+var _since_check := CHECK_SECONDS
+
+
+func _process(delta: float) -> void:
+	_since_check += delta
+	if _since_check < CHECK_SECONDS:
+		return
+	_since_check = 0.0
+	# The hand menu is built on whichever window module is there, again
+	# when it's reloaded or the panel is gone, and when tools.gd (Undo /
+	# Redo) or save.gd comes or goes.
+	var ui := _ui()
+	if ui == null:
+		return
+	var signature := "%d %s %s" % [ui.get_instance_id(), _has("tools"), _has("save")]
+	if signature != _hand_signature or not _run({"cmd": "ui_get", "id_panel": HAND_PANEL}).get("ok", false):
+		_hand_signature = signature
+		_build_hand()
+
+
+# The left home button opens and closes the pause menu. This module asks
+# before the windows (0), so the Menu bar is reached from here (All windows).
+func action_order() -> int:
+	return -10
+
+
+func on_action(action: String, down: bool) -> bool:
+	if action != "left_menu" or _ui() == null:
+		return false
+	if down:
+		_do({"act": "toggle"})
+	return true
 
 
 func menu_info() -> Dictionary:
@@ -73,11 +118,16 @@ func _ui() -> SlopitectModule:
 func _do(request: Dictionary) -> Dictionary:
 	match request.get("act"):
 		"toggle":
-			if _shown(PANEL) or _shown(LOAD_PANEL) or _shown(SETTINGS_PANEL):
+			if MENUS.any(_shown):
 				return _hide_all()
-			return _open()
+			return _open("main")
 		"show":
-			return _open()
+			var page = request.get("page", "main")
+			if not page in PAGES:
+				return {"ok": false, "error": "\"page\" must be one of %s" % [PAGES.keys()]}
+			return _open(page)
+		"hand_menu":
+			return _run({"cmd": "ui_show", "id_panel": HAND_PANEL, "visible": not _shown(HAND_PANEL)})
 		"hide":
 			return _hide_all()
 		"refresh":
@@ -111,7 +161,7 @@ func _do(request: Dictionary) -> Dictionary:
 			return reply
 		"new_conversation":
 			return _run({"cmd": "agent_reset"})
-	return {"ok": false, "error": "\"act\" must be toggle, show, hide, refresh, save, open_world, restore, setting or new_conversation"}
+	return {"ok": false, "error": "\"act\" must be toggle, show, hide, hand_menu, refresh, save, open_world, restore, setting or new_conversation"}
 
 
 func _status(_request: Dictionary) -> Dictionary:
@@ -123,17 +173,19 @@ func _status(_request: Dictionary) -> Dictionary:
 	return {"ok": true, "world": world, "line": line}
 
 
-func _open() -> Dictionary:
+# Shows one of the menus (page) in front of you, and hides the others.
+func _open(page: String) -> Dictionary:
 	var problem := _build_all()
 	if not problem.is_empty():
 		return {"ok": false, "error": problem}
-	for id_panel in [LOAD_PANEL, SETTINGS_PANEL]:
-		_run({"cmd": "ui_show", "id_panel": id_panel, "visible": false})
-	return _run({"cmd": "ui_show", "id_panel": PANEL, "visible": true})
+	for id_panel in MENUS:
+		if id_panel != PAGES[page]:
+			_run({"cmd": "ui_show", "id_panel": id_panel, "visible": false})
+	return _run({"cmd": "ui_show", "id_panel": PAGES[page], "visible": true})
 
 
 func _hide_all() -> Dictionary:
-	for id_panel in [PANEL, LOAD_PANEL, SETTINGS_PANEL]:
+	for id_panel in MENUS:
 		if _shown(id_panel):
 			_run({"cmd": "ui_show", "id_panel": id_panel, "visible": false})
 	return {"ok": true}
@@ -154,7 +206,8 @@ func _build_all() -> String:
 	if _ui() == null:
 		return "the pause menu needs the ui module"
 	# The sub-menus first: the main menu's "open" buttons name them.
-	for built in [[LOAD_PANEL, "Load world", _load_elements()], [SETTINGS_PANEL, "Settings", _settings_elements()], [PANEL, "Paused", _main_elements()]]:
+	for built in [[LOAD_PANEL, "Load", _load_elements()], [WORLDS_PANEL, "Worlds", _worlds_elements()],
+			[SETTINGS_PANEL, "Settings", _settings_elements()], [PANEL, "Paused", _main_elements()]]:
 		var problem := _put(built[0], built[1], built[2])
 		if not problem.is_empty():
 			return problem
@@ -189,32 +242,61 @@ func _main_elements() -> Array:
 		{"type": "text", "id": "where", "width": WIDTH, "font_size": 26, "color": "muted", "source": {"cmd": "pause_status", "field": "line"}},
 		_button("resume", "Resume", {"cmd": "pause_do", "act": "hide"}, "accent"),
 		_button("save", "Save world", {"cmd": "pause_do", "act": "save"}, "ok") if _has("save") else _text("save_missing", "Load save.gd to save the world.", "muted", 26),
-		_opener("load", "Load world", LOAD_PANEL),
+		_opener("load", "Load", LOAD_PANEL),
+		_opener("worlds_list", "Worlds", WORLDS_PANEL),
 		_opener("settings", "Settings", SETTINGS_PANEL),
+		_opener("windows", "All windows", "bar"),
+		_button("hand", "Hand menu", {"cmd": "pause_do", "act": "hand_menu"}),
 	]
 	if _has("worlds"):
 		# Opens in this menu's place, with a back arrow to it.
-		var worlds := _button("worlds", "Worlds window", {"cmd": "worlds_do", "act": "show"})
+		var worlds := _button("worlds", "Files & modules", {"cmd": "worlds_do", "act": "show"})
 		worlds["open"] = "worlds"
 		out.append(worlds)
 	return out
 
 
+func _worlds_elements() -> Array:
+	var out := []
+	if not _has("projects"):
+		return [_text("worlds_missing", "Load projects.gd to switch worlds.", "muted", 26)]
+	var projects: Array = _run({"cmd": "projects_list"}).get("projects", [])
+	for i in mini(projects.size(), MAX_WORLDS):
+		var project: Dictionary = projects[i]
+		if project.get("current", false):
+			out.append(_text("w%d" % i, "> %s (you're here)" % project["name"], "accent", 28))
+		else:
+			out.append(_button("w%d" % i, project["name"], {"cmd": "pause_do", "act": "open_world", "name": project["name"]}))
+	if projects.size() > MAX_WORLDS:
+		out.append(_text("worlds_more", "and %d more in Files & modules" % (projects.size() - MAX_WORLDS), "muted", 26))
+	return out
+
+
+# The hand menu: a few big buttons above the left controller, at the hand
+# window's half scale. Only the elements change after it's first added, so
+# a hand menu you carried off stays where you put it.
+func _build_hand() -> void:
+	var buttons := [_button("home", "Home", {"cmd": "pause_do", "act": "toggle"}, "accent", HAND_BUTTON)]
+	if _has("save"):
+		buttons.append(_button("save", "Save", {"cmd": "pause_do", "act": "save"}, "ok", HAND_BUTTON))
+		buttons.append(_button("load", "Load", {"cmd": "pause_do", "act": "show", "page": "load"}, "button", HAND_BUTTON))
+	buttons.append(_button("worlds", "Worlds", {"cmd": "pause_do", "act": "show", "page": "worlds"}, "button", HAND_BUTTON))
+	if _has("tools"):
+		buttons.append(_button("undo", "Undo", {"cmd": "tools_undo"}, "button", HAND_BUTTON))
+		buttons.append(_button("redo", "Redo", {"cmd": "tools_redo"}, "button", HAND_BUTTON))
+	var elements := [{"type": "grid", "id": "buttons", "columns": 2, "children": buttons}]
+	var reply: Dictionary
+	if _run({"cmd": "ui_get", "id_panel": HAND_PANEL}).get("ok", false):
+		reply = _run({"cmd": "ui_update", "id_panel": HAND_PANEL, "elements": elements})
+	else:
+		reply = _run({"cmd": "ui_add", "id_panel": HAND_PANEL, "title": "Menu", "place": "hand", "hand": "left",
+			"chrome": true, "layout": "column", "visible": true, "elements": elements})
+	if not reply.get("ok", false):
+		push_error("Slopitect pause: the hand menu could not be built: %s" % reply.get("error", "?"))
+
+
 func _load_elements() -> Array:
 	var out := []
-	out.append(_text("worlds_title", "Worlds", "accent"))
-	if not _has("projects"):
-		out.append(_text("worlds_missing", "Load projects.gd to switch worlds.", "muted", 26))
-	else:
-		var projects: Array = _run({"cmd": "projects_list"}).get("projects", [])
-		for i in mini(projects.size(), MAX_WORLDS):
-			var project: Dictionary = projects[i]
-			if project.get("current", false):
-				out.append(_text("w%d" % i, "> %s (you're here)" % project["name"], "accent", 28))
-			else:
-				out.append(_button("w%d" % i, project["name"], {"cmd": "pause_do", "act": "open_world", "name": project["name"]}))
-		if projects.size() > MAX_WORLDS:
-			out.append(_text("worlds_more", "and %d more in the Worlds window" % (projects.size() - MAX_WORLDS), "muted", 26))
 	out.append(_text("checkpoints_title", "Go back to a checkpoint", "accent"))
 	if not _has("save"):
 		out.append(_text("checkpoints_missing", "Load save.gd for checkpoints.", "muted", 26))
