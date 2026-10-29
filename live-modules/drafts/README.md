@@ -10,13 +10,14 @@ Do not `code_load` them on the headset as they are:
 
 | Draft | What it does | Why it waits |
 | --- | --- | --- |
-| `aimsg.gd` | Formats the chat log; drives the avatar from the agent's state | Fights `avatar.gd` over the avatar; writes a debug file; guesses status fields |
 | `jelly.gd` | Squash and stretch on the avatar | Guesses where the avatar's body is; settings not saved |
 | `vrui.gd` | Real Godot buttons and sliders on a panel (idea from MT-ZD/Godot-3D-VR-UI, MIT) | Reads the trigger itself, so it can be pressed while a Yes/No question is open; redraws every frame |
-| `web.gd` | Downloads any URL into `assets/` | No list of allowed sites |
 | `world.gd` | Named worlds, plus Worlds, Files and Modules windows | Its own save format leaves out models and switches; duplicates `save.gd`/`projects.gd` |
 
 Already reworked or dropped: `hands.gd` moved up into `live-modules/`;
+`aimsg.gd` became `live-modules/aimsg.gd` (the chat formatting only; the
+avatar already shows the agent's state); `web.gd` became
+`live-modules/net.gd` (only hosts allowed on the PC);
 `controller.gd`'s "button runs a command" is now a binding kind in
 `controls_config`, and right-stick walking is
 `{"sticks": {"right": "walk", "left": "turn"}}` there, so `controller.gd` and
