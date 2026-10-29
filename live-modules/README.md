@@ -32,7 +32,8 @@ unless its file has changed since.
 | `assets.gd` | 3D models from [Poly Haven](https://polyhaven.com) (all CC0): search, download to the headset, place in the world. Powered by Poly Haven |
 | `memory.gd` | The agent's memory between conversations: notes it keeps (facts, decisions, troubleshooting, coding techniques), each question you asked in a world with its answer, tools and errors, older ones folded into digests, and each tool's failures. One memory per world (project) plus a global one. Keys and personal info are cleaned out before anything is kept |
 | `tts.gd` | Speech out (it used to be the APK's voice module): the agent's replies read aloud by the headset's speech engine (an app such as SherpaTTS), and `tts_say` for anything else. Speed, pitch, volume, voice and reading replies on or off are comfort settings, in the Settings window or with `tts_set`. On the headset Slopitect plays the speech itself (the engine writes each sentence to a sound file), because the Quest 1 played nothing you could hear from the engine's own sound while Slopitect was in front; elsewhere the engine speaks for itself. Speech the engine never finishes is skipped so the next can play. Other modules use `speak()` and `speaking()` |
-| `vtt.gd` | Hold-to-talk (it used to be the APK's voice module): hold the talk button (the left trigger), talk, let go (a press shorter than `min_hold`, 0.6 s by default and set in the Settings window, is ignored as an accident), and the words land in the chat window's input box for you to check and Send, or go straight to the agent (`send_to_agent`, in the Settings window or with `vtt_set`). On the headset with whisper.cpp (the APK's godot-whisper plugin and a model in `models/`), or a service at `vtt_url`; the engine, service and key change only from the PC (`vtt_config`). A red dot on your left hand shows it's listening |
+| `vtt.gd` | Hold-to-talk (it used to be the APK's voice module): hold the talk button (the left trigger), talk, let go, and the words land in the chat window's input box for you to check and Send, or go straight to the agent (`send_to_agent`, in the Settings window or with `vtt_set`). On the headset with whisper.cpp (the APK's godot-whisper plugin and a model in `models/`), or a service at `vtt_url`; the engine, service and key change only from the PC (`vtt_config`). A red dot on your left hand shows it's listening |
+| `library.gd` | The Library window (its tile on the Menu, or Textures / Assets / Prefabs on the hand menu): three tabs of pictures, 12 to a page with Prev / Next and a category button. Textures: Poly Haven's textures; pick a shape with the Inspect tool, then press one to download it and put it on that shape (textures.gd). Assets: Poly Haven's models, lightest first; press one to download it (assets.gd) and place it in front of you. Prefabs: the sets saved with `prefabs_save` (prefabs.gd), each with a picture drawn once from what it holds; press one to place a copy. The pictures are Poly Haven's 128 px thumbnails, kept in `library/`; they need `cdn.polyhaven.com` allowed on the PC (`net_config`). Needs vrui.gd and net.gd |
 
 A tool is any module with a `tool_info()` function, so a new tool is a new
 file; `tools.gd` explains what a tool gets. Tools work without the tools
@@ -68,6 +69,7 @@ From the platform-tools folder:
 .\adb push "C:\path\to\live-modules\chat.gd" /sdcard/Slopitect/modules/
 .\adb push "C:\path\to\live-modules\tts.gd" /sdcard/Slopitect/modules/
 .\adb push "C:\path\to\live-modules\vtt.gd" /sdcard/Slopitect/modules/
+.\adb push "C:\path\to\live-modules\library.gd" /sdcard/Slopitect/modules/
 .\slopi.ps1 '{"cmd":"code_load","name":"controls"}'
 .\slopi.ps1 '{"cmd":"code_load","name":"ui"}'
 .\slopi.ps1 '{"cmd":"code_load","name":"tools"}'
@@ -92,6 +94,7 @@ From the platform-tools folder:
 .\slopi.ps1 '{"cmd":"code_load","name":"chat"}'
 .\slopi.ps1 '{"cmd":"code_load","name":"tts"}'
 .\slopi.ps1 '{"cmd":"code_load","name":"vtt"}'
+.\slopi.ps1 '{"cmd":"code_load","name":"library"}'
 ```
 
 Each `code_load` shows the code in the headset and waits for your Yes

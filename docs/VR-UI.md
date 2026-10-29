@@ -79,6 +79,12 @@ controls.gd ── actions ("point", "grab_right", toggles) ──► vrui.gd �
   its newest lines in view, like a terminal. `height` (metres) sets how
   tall the box is. `ui_scroll` with `lines` moves it back (0 is the
   newest); a module can call `ui.scroll_text(id_panel, id_element, lines)`.
+- **button `image`**: a picture file (.png, .jpg or .webp) in the
+  Slopitect folder or `user://`, shown over the label, which gets small:
+  a tile in a browser (library.gd's thumbnails). Pictures are shrunk to
+  160 px and kept loaded until their file changes; until the file is there
+  the space stays empty. A module that just wrote one calls
+  `ui.reload_image(path)` to show it without rebuilding the window.
 - **button `open`**: names another panel. A press hides this one and shows
   that one in the same place, with a back arrow in its title bar that comes
   back (`ui_back` does the same). A button can have `open`, an `action`, or
