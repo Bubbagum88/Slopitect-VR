@@ -37,6 +37,9 @@ const DEFAULTS := {
 	# the AI company bills: the prompt (everything sent, every round) and the
 	# reply (with its thinking).
 	"max_tokens_per_ask": 300000,  # one question, all its rounds together; it stops there
+	# One request (one round): the whole prompt sent. Claude Haiku 5.5 costs
+	# five times as much for a prompt over 100,000 tokens, so it stops short.
+	"max_request_tokens": 100000,
 	"max_context_tokens": 80000,  # a conversation this big starts over at the next question
 	"max_tool_result_chars": 8000,  # a longer tool reply is cut, and the agent is told
 	# Ask the AI for a short summary of its thinking, shown in the chat window
@@ -58,6 +61,20 @@ const OLD_DEFAULT_TOOLS := [
 	["list", "spawn", "move", "color", "delete", "ui_*", "modules", "avatar_*", "files_*", "confirm_status", "voice_*", "code_*", "view_*", "errors_*"],
 	["list", "spawn", "move", "color", "delete", "ui_*", "modules", "avatar_*", "files_*", "confirm_status", "tts_*", "stt_*", "code_*", "view_*", "errors_*"],
 ]
+
+# What agent_budget may set (the Settings window), and in what range;
+# agent_config, from the PC, takes any value.
+const BUDGET := {
+	"max_request_tokens": [20000, 100000],
+	"max_context_tokens": [20000, 90000],
+	"max_tokens_per_ask": [50000, 1000000],
+	"max_tool_rounds": [5, 40],
+}
+# A tool reply's size in tokens is guessed from its length; JSON runs about
+# three and a half characters a token, so three is on the safe side.
+const CHARS_PER_TOKEN := 3.0
+# Past this share of max_request_tokens, the agent is told to finish up.
+const BUDGET_WARNING := 0.8
 
 const SYSTEM_PROMPT := """You are the AI agent inside Slopitect, a VR sandbox running on an Oculus Quest 1. The person you work with is standing in the world wearing the headset, and you build it with them, live.
 
@@ -97,6 +114,7 @@ var _conv_system := ""
 var _announced := {}  # new tools the agent has been told about, this conversation
 var _restart_note = null  # new_conversation's note, until the next round starts it
 var _last_prompt := ""  # the person's last message, carried into a new conversation
+var _start_over := false  # the last question stopped at max_request_tokens: the next one starts a new conversation
 
 signal _reply_ready(result: Array)
 
@@ -127,6 +145,9 @@ func setup() -> String:
 	register("agent_stop", _stop, "stop the agent: the request in flight is dropped and no more tools run")
 	register("agent_reset", _reset, "forget the conversation and start a new one")
 	register("agent_skills", _list_skills, "list the agent's skills (reloads them from disk)")
+	# The agent never gets an agent_ command (_allowed_tool), even through
+	# another command such as settings_set, so it can't raise its own budget.
+	register("agent_budget", _budget, "the person's token budget, also from the headset: any of %s, in the ranges %s" % [", ".join(BUDGET.keys()), JSON.stringify(BUDGET)])
 	return ""
 
 
@@ -153,8 +174,15 @@ func _ask(request: Dictionary) -> Dictionary:
 	if _context_tokens > int(settings["max_context_tokens"]) and not _history.is_empty():
 		_note("started a new conversation: the last one had grown to %d tokens (max_context_tokens %d)" % [_context_tokens, settings["max_context_tokens"]])
 		_clear_conversation()
+	var carried := ""
+	if not _history.is_empty() and (_start_over or _context_tokens + _guess_tokens(prompt) > int(settings["max_request_tokens"])):
+		_note("started a new conversation: the last one was at max_request_tokens (%d)" % settings["max_request_tokens"])
+		_clear_conversation()
+		# What the new conversation needs to carry on from where it stopped.
+		carried = "(Your last conversation reached max_request_tokens and was cleared. The person's message before this one was: \"%s\". Your last words then: \"%s\")\n" % [_last_prompt.left(1000), _last_reply.left(1000)]
+	_start_over = false
 	_last_prompt = prompt
-	var sent: String = prompt + _new_tools_note() + _new_errors_note()
+	var sent: String = carried + prompt + _new_tools_note() + _new_errors_note()
 	# After a run that stopped mid-way, the conversation ends with tool
 	# results; the new message goes in the same turn, after them.
 	if not _history.is_empty() and _history[-1]["role"] == "tool_results":
@@ -223,6 +251,35 @@ func _config(request: Dictionary) -> Dictionary:
 		shown["api_key"] = "(set)" if not String(shown["api_key"]).is_empty() else "(cleared)"
 	_note("settings changed: " + JSON.stringify(shown))
 	return {"ok": true, "settings": _shown_settings()}
+
+
+func _budget(request: Dictionary) -> Dictionary:
+	var changes := {}
+	for key in request:
+		if key in ["cmd", "id"]:
+			continue
+		if not BUDGET.has(key):
+			return {"ok": false, "error": "agent_budget changes %s (the rest is agent_config, from the PC)" % ", ".join(BUDGET.keys())}
+		var value = request[key]
+		if typeof(value) not in [TYPE_INT, TYPE_FLOAT] or value != floorf(value) or value < BUDGET[key][0] or value > BUDGET[key][1]:
+			return {"ok": false, "error": "\"%s\" must be a whole number from %d to %d" % [key, BUDGET[key][0], BUDGET[key][1]]}
+		changes[key] = int(value)
+	if changes.is_empty():
+		return {"ok": true, "budget": budget()}
+	if _busy:
+		return {"ok": false, "error": "wait for the agent to finish before changing its budget"}
+	settings.merge(changes, true)
+	_save_settings()
+	_note("budget changed: " + JSON.stringify(changes))
+	return {"ok": true, "budget": budget()}
+
+
+# The budget settings now, for the Settings window (agent_settings.gd).
+func budget() -> Dictionary:
+	var out := {}
+	for key in BUDGET:
+		out[key] = settings[key]
+	return out
 
 
 func _stop(_request: Dictionary) -> Dictionary:
@@ -326,9 +383,20 @@ func _run_conversation() -> void:
 		if reply["stop"] == "tool_use" and not reply["tool_calls"].is_empty():
 			var results := await _run_tools(reply["tool_calls"])
 			results[-1]["content"] += _new_tools_note() + _new_errors_note()
+			# The next request is this one, the reply, and these results.
+			# Earlier turns are never cut down to fit: Claude refuses a
+			# conversation whose history changed (its thinking is tied to it).
+			var next := _context_tokens + _results_tokens(results)
+			var cap := int(settings["max_request_tokens"])
+			if next > cap * BUDGET_WARNING and next <= cap and _restart_note == null:
+				results[-1]["content"] += "\n[This conversation is at about %d tokens; max_request_tokens is %d. Finish now, or call new_conversation with a note of what's left.]" % [next, cap]
 			_history.append({"role": "tool_results", "results": results})
 			if _stop_requested:
 				_note("stopped")
+				break
+			if next > cap and _restart_note == null:
+				_start_over = true
+				_fail("stopped: the next round would send about %d tokens (max_request_tokens %d); ask again and a new conversation carries on" % [next, cap])
 				break
 			if _restart_note != null:
 				var note: String = _restart_note
@@ -408,7 +476,9 @@ func _run_tools(calls: Array) -> Array:
 				_waiting_on = null
 			# A picture (view_look) goes to the model as an image, not as text.
 			if typeof(outcome.get("image")) == TYPE_DICTIONARY:
-				image = outcome["image"]
+				image = outcome["image"].duplicate()
+				image["width"] = int(outcome.get("width", 1000))
+				image["height"] = int(outcome.get("height", 1000))
 				outcome = outcome.duplicate()
 				outcome["image"] = "(attached)"
 			content = JSON.stringify(outcome)
@@ -424,6 +494,21 @@ func _run_tools(calls: Array) -> Array:
 			result["image"] = image
 		results.append(result)
 	return results
+
+
+# About how many tokens the tool results add to the next request.
+func _results_tokens(results: Array) -> int:
+	var tokens := 0
+	for result in results:
+		tokens += _guess_tokens(result["content"]) + 20
+		if result.has("image"):
+			# Claude counts a picture as its width times height over 750.
+			tokens += int(result["image"].get("width", 1000) * result["image"].get("height", 1000) / 750.0)
+	return tokens
+
+
+func _guess_tokens(text: String) -> int:
+	return int(ceil(text.length() / CHARS_PER_TOKEN))
 
 
 func _allowed_tool(cmd: String) -> bool:
@@ -589,7 +674,7 @@ func _check_setting(key: String, value: Variant) -> Array:
 				if typeof(item) != TYPE_STRING or item.is_empty() or item == "*" or item.begins_with("agent_"):
 					return ["\"allowed_tools\" entries must be command names (a trailing * is allowed, a lone * and agent_ commands are not): %s" % JSON.stringify(item), null]
 			return ["", value.duplicate()]
-		"max_tokens_per_ask", "max_context_tokens", "max_tool_result_chars":
+		"max_tokens_per_ask", "max_context_tokens", "max_request_tokens", "max_tool_result_chars":
 			if typeof(value) not in [TYPE_INT, TYPE_FLOAT] or value != floorf(value) or value < 1000 or value > 10000000:
 				return ["\"%s\" must be a whole number from 1000 to 10000000" % key, null]
 			return ["", int(value)]
