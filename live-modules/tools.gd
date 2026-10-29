@@ -146,6 +146,11 @@ func _list(_request: Dictionary) -> Dictionary:
 	return {"ok": true, "tools": listed, "chosen": _active}
 
 
+# A button on the hand menu (pause.gd).
+func hand_info() -> Dictionary:
+	return {"id": "tools", "label": "Tools", "order": 10, "panel": PANEL}
+
+
 func _status(_request: Dictionary) -> Dictionary:
 	var line := "Tool: %s" % (_active if not _active.is_empty() else "none")
 	if _tools.has(_active):

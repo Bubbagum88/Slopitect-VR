@@ -16,8 +16,9 @@ extends SlopitectModule
 # - All windows opens the Menu bar (every window's tile, and the shapes).
 # - Hand menu shows or hides the hand menu.
 # - Files & modules opens worlds.gd's window, when it's loaded.
-# The hand menu sits above the left controller: Home (this menu), Save,
-# Load, Worlds, Settings, and Undo / Redo (tools.gd's one list for every change).
+# The hand menu sits above the left controller: Home (this menu), Settings,
+# Undo / Redo (tools.gd's one list for every change), and a button for each
+# module with hand_info() (see _hand_items).
 # Each menu is a ui panel ("pause", "pause_load", "pause_worlds",
 # "pause_settings", "hand_menu"), kept by the window module like every
 # panel; this fills them again each time the menu opens.
@@ -48,7 +49,7 @@ const NAILS := {"Pink": "#ff3b7a", "Red": "#d1263b", "Blue": "#3b6bff", "Black":
 
 
 func setup() -> String:
-	register("pause_do", _do, "the pause menu: act = toggle, show (optional page: main, load, worlds, settings), hide, hand_menu (show or hide it), refresh, save (optional label), open_world (name), restore (checkpoint), setting (run: a comfort setting command), new_conversation")
+	register("pause_do", _do, "the pause menu: act = toggle, show (optional page: main, load, worlds, settings), hide, hand_menu (show or hide it), toggle_panel (panel), refresh, save (optional label), open_world (name), restore (checkpoint), setting (run: a comfort setting command), new_conversation")
 	register("pause_status", _status, "the world you're in and what the pause menu can reach, one line")
 	return ""
 
@@ -75,7 +76,7 @@ func _process(delta: float) -> void:
 	var ui := _ui()
 	if ui == null:
 		return
-	var signature := "%d %s %s" % [ui.get_instance_id(), _has("tools"), _has("save")]
+	var signature := JSON.stringify([ui.get_instance_id(), _has("tools"), _hand_items()])
 	if signature != _hand_signature or not _run({"cmd": "ui_get", "id_panel": HAND_PANEL}).get("ok", false):
 		_hand_signature = signature
 		_build_hand()
@@ -128,6 +129,11 @@ func _do(request: Dictionary) -> Dictionary:
 			return _open(page)
 		"hand_menu":
 			return _run({"cmd": "ui_show", "id_panel": HAND_PANEL, "visible": not _shown(HAND_PANEL)})
+		"toggle_panel":
+			var id_panel = request.get("panel")
+			if typeof(id_panel) != TYPE_STRING or not _run({"cmd": "ui_get", "id_panel": id_panel}).get("ok", false):
+				return {"ok": false, "error": "\"panel\" must be a window's id_panel (ui_list shows them)"}
+			return _run({"cmd": "ui_show", "id_panel": id_panel, "visible": not _shown(id_panel)})
 		"hide":
 			return _hide_all()
 		"refresh":
@@ -161,7 +167,7 @@ func _do(request: Dictionary) -> Dictionary:
 			return reply
 		"new_conversation":
 			return _run({"cmd": "agent_reset"})
-	return {"ok": false, "error": "\"act\" must be toggle, show, hide, hand_menu, refresh, save, open_world, restore, setting or new_conversation"}
+	return {"ok": false, "error": "\"act\" must be toggle, show, hide, hand_menu, toggle_panel, refresh, save, open_world, restore, setting or new_conversation"}
 
 
 func _status(_request: Dictionary) -> Dictionary:
@@ -273,18 +279,38 @@ func _worlds_elements() -> Array:
 
 
 # The hand menu: a few big buttons above the left controller, at the hand
-# window's half scale. Only the elements change after it's first added, so
-# a hand menu you carried off stays where you put it.
+# window's half scale: Home, Settings, Undo / Redo, then a button for each
+# loaded module with hand_info() (the terminal, the Tools menu; later
+# textures, assets...). hand_info() returns {"id", "label", "order"
+# (optional, lower first), and "panel": an id_panel it shows and hides, or
+# "action": a command}. Only the elements change after the menu is first
+# added, so a hand menu you carried off stays where you put it.
+func _hand_items() -> Array:
+	var items := []
+	for child in ctx["modules"].get_children():
+		if child == self or not child.has_method("hand_info"):
+			continue
+		var info = child.call("hand_info")
+		if typeof(info) != TYPE_DICTIONARY or typeof(info.get("id")) != TYPE_STRING or typeof(info.get("label")) != TYPE_STRING \
+				or not (typeof(info.get("panel")) == TYPE_STRING or typeof(info.get("action")) == TYPE_DICTIONARY):
+			push_error("Slopitect pause: %s's hand_info() needs id, label, and panel or action" % child.name)
+			continue
+		items.append(info)
+	items.sort_custom(func(a, b): return [a.get("order", 100), a["id"]] < [b.get("order", 100), b["id"]])
+	return items
+
+
 func _build_hand() -> void:
-	var buttons := [_button("home", "Home", {"cmd": "pause_do", "act": "toggle"}, "accent", HAND_BUTTON)]
-	if _has("save"):
-		buttons.append(_button("save", "Save", {"cmd": "pause_do", "act": "save"}, "ok", HAND_BUTTON))
-		buttons.append(_button("load", "Load", {"cmd": "pause_do", "act": "show", "page": "load"}, "button", HAND_BUTTON))
-	buttons.append(_button("worlds", "Worlds", {"cmd": "pause_do", "act": "show", "page": "worlds"}, "button", HAND_BUTTON))
-	buttons.append(_button("settings", "Settings", {"cmd": "pause_do", "act": "show", "page": "settings"}, "button", HAND_BUTTON))
+	var buttons := [
+		_button("home", "Home", {"cmd": "pause_do", "act": "toggle"}, "accent", HAND_BUTTON),
+		_button("settings", "Settings", {"cmd": "pause_do", "act": "show", "page": "settings"}, "button", HAND_BUTTON),
+	]
 	if _has("tools"):
 		buttons.append(_button("undo", "Undo", {"cmd": "tools_undo"}, "button", HAND_BUTTON))
 		buttons.append(_button("redo", "Redo", {"cmd": "tools_redo"}, "button", HAND_BUTTON))
+	for info in _hand_items():
+		var action: Dictionary = info["action"] if info.has("action") else {"cmd": "pause_do", "act": "toggle_panel", "panel": info["panel"]}
+		buttons.append(_button("m_" + str(info["id"]).left(30), str(info["label"]), action, "button", HAND_BUTTON))
 	var elements := [{"type": "grid", "id": "buttons", "columns": 2, "children": buttons}]
 	var reply: Dictionary
 	if _run({"cmd": "ui_get", "id_panel": HAND_PANEL}).get("ok", false):
