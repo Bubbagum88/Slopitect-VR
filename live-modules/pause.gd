@@ -10,9 +10,10 @@ extends SlopitectModule
 # - Save world keeps the whole world as a checkpoint (save.gd).
 # - Load world opens a list of the worlds (projects.gd) and the newest
 #   checkpoints to go back to, with a back arrow.
-# - Settings opens what each setting is now and the few things you can
-#   change in the headset (the avatar's outfit, a new conversation, stop
-#   speaking). The rest change from the PC only (NAME_config).
+# - Settings: the comfort settings, which change here in the headset
+#   (turning, walk speed, text size, hand colours, the avatar's outfit), a
+#   new conversation and stop speaking. Everything else changes from the PC
+#   only (NAME_config).
 # - Worlds window opens worlds.gd's window, when it's loaded.
 # Each menu is a ui panel ("pause", "pause_load", "pause_settings"), kept by
 # ui.gd like every panel; this fills them again each time the menu opens.
@@ -27,10 +28,17 @@ const HALF := [0.205, 0.055]
 const MAX_WORLDS := 6
 const MAX_CHECKPOINTS := 4
 const MAX_OUTFITS := 6
+const THIRD := [0.133, 0.055]
+# The settings a Settings button may change: the comfort settings isaac chose
+# to have in the headset (2026-10-29). Everything else stays PC only.
+const SETTINGS_COMMANDS := ["move_comfort", "ui_text_size", "hands_colours", "avatar_outfit"]
+const TEXT_SIZES := {"small": 30, "medium": 36, "large": 44}  # ui_text_size's body text
+const SKINS := {"Light": "#f1c9a5", "Tan": "#e0ac80", "Brown": "#a86b45", "Dark": "#5c3a24", "Blue": "#5b7bd6"}
+const NAILS := {"Pink": "#ff3b7a", "Red": "#d1263b", "Blue": "#3b6bff", "Black": "#16161c", "Clear": "#f4e6e0"}
 
 
 func setup() -> String:
-	register("pause_do", _do, "the pause menu: act = toggle, show, hide, refresh, save (optional label), open_world (name), restore (checkpoint), outfit (name), new_conversation")
+	register("pause_do", _do, "the pause menu: act = toggle, show, hide, refresh, save (optional label), open_world (name), restore (checkpoint), setting (run: a comfort setting command), new_conversation")
 	register("pause_status", _status, "the world you're in and what the pause menu can reach, one line")
 	return ""
 
@@ -94,13 +102,16 @@ func _do(request: Dictionary) -> Dictionary:
 			if reply.get("ok", false):
 				_hide_all()
 			return reply
-		"outfit":
-			var reply := _run({"cmd": "avatar_outfit", "name": request.get("name")})
+		"setting":
+			var run = request.get("run")
+			if typeof(run) != TYPE_DICTIONARY or not run.get("cmd") in SETTINGS_COMMANDS:
+				return {"ok": false, "error": "\"run\" must be one of %s with its fields" % [SETTINGS_COMMANDS]}
+			var reply := _run(run)
 			_build_all()
 			return reply
 		"new_conversation":
 			return _run({"cmd": "agent_reset"})
-	return {"ok": false, "error": "\"act\" must be toggle, show, hide, refresh, save, open_world, restore, outfit or new_conversation"}
+	return {"ok": false, "error": "\"act\" must be toggle, show, hide, refresh, save, open_world, restore, setting or new_conversation"}
 
 
 func _status(_request: Dictionary) -> Dictionary:
@@ -221,35 +232,63 @@ func _load_elements() -> Array:
 
 
 func _settings_elements() -> Array:
-	var out := [_text("now_title", "Settings now", "accent")]
-	var lines := PackedStringArray()
+	var out := []
 	if _has("move"):
 		var move: Dictionary = _run({"cmd": "move_status"}).get("settings", {})
-		var turn := "snap %d°" % int(move.get("snap_degrees", 0)) if move.get("turn") == "snap" else "smooth %d°/s" % int(move.get("smooth_degrees", 0))
-		lines.append("Moving: %s m/s, turning %s" % [move.get("speed", "?"), turn])
+		var snap: bool = move.get("turn") == "snap"
+		out.append(_text("move_title", "Moving", "accent"))
+		out.append({"type": "row", "id": "turn_row", "children": [
+			_choice("turn_snap", "Snap turn", snap, {"cmd": "move_comfort", "turn": "snap"}),
+			_choice("turn_smooth", "Smooth turn", not snap, {"cmd": "move_comfort", "turn": "smooth"}),
+		]})
+		out.append(_slider("speed", "Walk speed (m/s)", 0.5, 3.0, 0.25, move.get("speed", 1.5), {"cmd": "move_comfort", "speed": "{value}"}))
+		if snap:
+			out.append(_slider("snap", "Snap angle (°)", 15, 90, 15, move.get("snap_degrees", 30), {"cmd": "move_comfort", "snap_degrees": "{value}"}))
+		else:
+			out.append(_slider("smooth", "Turn speed (°/s)", 30, 180, 15, move.get("smooth_degrees", 90), {"cmd": "move_comfort", "smooth_degrees": "{value}"}))
 	var theme: Dictionary = _run({"cmd": "ui_theme_status"}).get("theme", {})
 	if not theme.is_empty():
-		lines.append("Text size: %s (titles %s)" % [theme.get("font_body", "?"), theme.get("font_title", "?")])
+		out.append(_text("text_title", "Text size", "accent"))
+		var sizes := []
+		for size in TEXT_SIZES:
+			sizes.append(_choice("text_" + size, size.capitalize(), int(theme.get("font_body", 0)) == TEXT_SIZES[size], {"cmd": "ui_text_size", "size": size}, THIRD))
+		out.append({"type": "row", "id": "text_row", "children": sizes})
 	if _has("hands"):
 		var hands: Dictionary = _run({"cmd": "hands_status"}).get("settings", {})
-		lines.append("Hands: skin %s" % hands.get("skin", "?"))
-	var voice := _run({"cmd": "voice_status"})
-	if voice.get("ok", false):
-		lines.append("Speech: %s; talk: %s" % ["on" if voice.get("speech_out", false) else "off", voice.get("hold_to_talk", "?")])
-	out.append(_text("now", "\n".join(lines), "text", 26))
-	out.append(_text("pc_only", "These change from the PC (move_config, ui_config, hands_config, voice_config).", "muted", 24))
+		out.append(_text("hands_title", "Hands", "accent"))
+		for part in [["skin", SKINS, str(hands.get("skin", ""))], ["nails", NAILS, str(hands.get("nails_left", [""])[0])]]:
+			var swatches := []
+			for colour_name in part[1]:
+				var colour: String = part[1][colour_name]
+				var on: bool = colour.to_lower() == part[2].to_lower()
+				# The swatch is the colour itself; the chosen one says so.
+				swatches.append(_button("%s_%s" % [part[0], colour_name.to_lower()], ("✓ " if on else "") + colour_name,
+					{"cmd": "pause_do", "act": "setting", "run": {"cmd": "hands_colours", part[0]: colour}}, colour, THIRD))
+			out.append(_text(part[0] + "_label", part[0].capitalize(), "muted", 24))
+			out.append({"type": "grid", "id": part[0] + "_grid", "columns": 3, "children": swatches})
 	if _has("avatar"):
 		out.append(_text("outfit_title", "The avatar's outfit", "accent"))
 		var outfits := _run({"cmd": "avatar_outfits"})
-		var row := {"type": "grid", "id": "outfits", "columns": 2, "children": []}
+		var grid := {"type": "grid", "id": "outfits", "columns": 2, "children": []}
 		var names: Array = Array(outfits.get("outfits", []))
 		for i in mini(names.size(), MAX_OUTFITS):
-			var wearing: bool = names[i] == outfits.get("wearing", "")
-			row["children"].append(_button("o%d" % i, ("> " if wearing else "") + names[i], {"cmd": "pause_do", "act": "outfit", "name": names[i]}, "accent" if wearing else "button", HALF))
-		out.append(row)
+			grid["children"].append(_choice("o%d" % i, names[i], names[i] == outfits.get("wearing", ""), {"cmd": "avatar_outfit", "name": names[i]}))
+		out.append(grid)
 	out.append(_text("agent_title", "The agent", "accent"))
 	out.append({"type": "row", "id": "agent_row", "children": [
 		_button("new_chat", "New conversation", {"cmd": "pause_do", "act": "new_conversation"}, "button", HALF),
 		_button("hush", "Stop speaking", {"cmd": "voice_stop"}, "button", HALF),
 	]})
+	out.append(_text("pc_only", "Voice speed and the rest change from the PC (voice_config and the other *_config).", "muted", 24))
 	return out
+
+
+# A button that is one of a set: lit when it's the one chosen. Pressing it
+# changes the setting and fills the menu again to show it.
+func _choice(id: String, label: String, on: bool, run: Dictionary, size := HALF) -> Dictionary:
+	return _button(id, label, {"cmd": "pause_do", "act": "setting", "run": run}, "accent" if on else "button", size)
+
+
+func _slider(id: String, label: String, lo: float, hi: float, step: float, value, action: Dictionary) -> Dictionary:
+	return {"type": "slider", "id": id, "label": label, "min": lo, "max": hi, "step": step,
+		"value": clampf(float(value), lo, hi), "size": [WIDTH, 0.07], "action": action}
