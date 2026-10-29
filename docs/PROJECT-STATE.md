@@ -14,7 +14,7 @@ Three levels of "works" are used, and kept apart on purpose:
 
 A VR sandbox for the Oculus Quest 1 that an AI agent changes while you
 stand in it. The APK is a small skeleton (command server, module loader,
-safety window, agent, voice, avatar). Everything else is a **live module**:
+safety window, agent, voice). Everything else is a **live module**:
 a GDScript file pushed to the headset and loaded while the app runs, after
 a Yes in the headset. Modules stay separate and swappable.
 
@@ -35,7 +35,6 @@ a Yes in the headset. Modules stay separate and swappable.
 | Modules | `game/modules.json`; a module that fails is logged and skipped | Headset |
 | Agent | Claude (Anthropic) and OpenAI-style providers; tools are the app's commands; skills are `SKILL.md` files; `allowed_tools` firewall; prompt caching and token limits; short replies (caveman skill) | Headset with a real key (needs a workspace-scoped key) |
 | Chat window | Y opens a terminal-style window with keyboard, Send and STOP; left X always stops the agent | Headset (typing) |
-| Avatar | Red cube with a face and sphere hands; follows the agent's state and shows replies | Headset (agent drove it); look in VR not confirmed |
 | Files | The agent's own `/sdcard/Slopitect` folder freely; anything else needs your Yes each time | Headset (`files_status`) |
 | Voice | Speech out through Android TTS; hold-to-talk speech to text on the headset (godot-whisper) | TTS returns ok with SherpaTTS; audible not confirmed; STT not working yet (needs the startup log) |
 | Live code | `code_load` loads a module after your Yes; `code_unload` turns it off | PC |
@@ -66,6 +65,7 @@ All PC-tested, none yet on the headset. See
 | grab | Pick things up with the grip |
 | physics | Static or dynamic bodies |
 | inspect | Point at a thing to switch its physics, grabbing and hiding, or delete it |
+| avatar | The agent's avatar, moved out of the APK: animations, emotions, a mouth that follows speech, a paged speech bubble that docks at the edge of view, outfits; `body()` for other modules (jelly). The APK avatar it replaces was seen on the headset; this one is PC-tested only |
 
 Drafts waiting to be reworked: [live-modules/drafts/](../live-modules/drafts/)
 (aimsg, controller, hands, jelly, stick_move, vrui, web, world). The plan for
