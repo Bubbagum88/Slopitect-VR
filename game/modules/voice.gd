@@ -4,11 +4,14 @@ extends SlopitectModule
 # Speech out: the agent's replies are read aloud by the headset's own
 # text-to-speech engine (if it has one: voice_status says), and anything can
 # speak with voice_say.
-# Speech in: hold the left trigger and talk; let go and the recording is
-# turned into text, and the words land in the chat window's input box (or
-# go straight to the agent, if you turn that on). The microphone records
-# only while the trigger is held, a red dot on your left hand shows it, and
-# nothing can turn it on by command: not the agent, not a button.
+# Speech in: hold the "talk" button (the left trigger, with the controls
+# module's default bindings) and talk; let go and the recording is turned
+# into text, and the words land in the chat window's input box (or go
+# straight to the agent, if you turn that on). The microphone records only
+# while the button is held, and a red dot on your left hand shows it. No
+# command turns it on, not the agent's, not a panel button's; only the
+# controls module does, and that is code you said Yes to (like any live
+# module, which could use the microphone itself).
 #
 # Two ways to turn speech into text (stt_engine, set with voice_config from
 # the PC):
@@ -103,8 +106,6 @@ func setup() -> String:
 	_dot.position = Vector3(0, 0.03, -0.02)
 	_dot.visible = false
 	ctx["left"].add_child(_dot)
-	ctx["left"].button_pressed.connect(func(button): if button == "trigger_click": _start_listening())
-	ctx["left"].button_released.connect(func(button): if button == "trigger_click": _stop_listening())
 
 	register("voice_say", _say, "say something aloud through the headset's speech engine: text, optional voice, rate, pitch")
 	register("voice_stop", _stop_speaking, "stop speaking")
@@ -214,6 +215,17 @@ func _local_model_path() -> String:
 	if home.is_empty():
 		home = "/sdcard/Slopitect" if OS.get_name() == "Android" else OS.get_user_data_dir() + "/files_home"
 	return home.path_join(settings["stt_local_model"])
+
+
+# The controls module's "talk" action: held, it records.
+func on_action(action: String, down: bool) -> bool:
+	if action != "talk":
+		return false
+	if down:
+		_start_listening()
+	else:
+		_stop_listening()
+	return true
 
 
 func _start_listening() -> void:

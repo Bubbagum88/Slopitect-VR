@@ -24,7 +24,9 @@ Working now:
 - **Every window is data** *(built, waiting on a headset test)*: the menu
   bar, the wrist panel and the chat window are panels of text, buttons and
   input boxes that you or the agent can change, add, move and remove while
-  the app runs. Grab a panel with the grip to move it.
+  the app runs. Grab a panel with the grip to move it. The panels and the
+  controllers are live modules (`live-modules/ui.gd`, `controls.gd`), not
+  part of the APK, so they can be swapped and rewritten.
 - **A chat window in the headset**: press Y to open a terminal-style window
   that shows each step the agent takes and a summary of its thinking, with
   a keyboard, Send and STOP. X on the left controller always stops the agent.
@@ -185,8 +187,8 @@ Windows (panels):
 Elements are `text` (optionally a live `source`: a read-only command's
 reply), `button` (its `action` is any command), `input` and `box`; the
 agent's [UI skill](game/skills/slopitect-ui/SKILL.md) lists their fields.
-In the headset, press the left controller's menu button (≡) for the bar
-and Y for the chat. Point with the right controller and pull the trigger to
+With the controls module's default bindings, press the left controller's
+menu button (≡) for the bar and Y for the chat. Point with the right controller and pull the trigger to
 press a button; hold the right grip to move a panel. A button's action can
 use `"position":"in_front"` for 1 m in front of you and `"{input:ID}"` for
 what's typed in a box. Panels are saved on the headset; menu buttons from

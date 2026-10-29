@@ -1,10 +1,11 @@
 extends SlopitectModule
 
 # Slopitect live module: move.
-# Walking with the left stick (the way you look), turning with the right
-# stick (in steps, or smoothly). With the landscape module loaded, you stand
-# on its ground; elsewhere on the floor. Unload it and the sticks do nothing
-# again. Its settings change from the PC only (move_config) and are kept in
+# Walking with the "walk" stick (the way you look), turning with the "turn"
+# stick (in steps, or smoothly). The controls module says which thumbstick
+# is which (by default left walks, right turns); without it, nothing moves.
+# With the landscape module loaded, you stand on its ground; elsewhere on
+# the floor. Unload it and the sticks do nothing again. Its settings change from the PC only (move_config) and are kept in
 # the app's own storage (user://move.json).
 
 const SETTINGS_PATH := "user://move.json"
@@ -30,11 +31,9 @@ func setup() -> String:
 
 
 func _physics_process(delta: float) -> void:
-	var left: XRController3D = ctx["left"]
-	var right: XRController3D = ctx["right"]
+	var controls: SlopitectModule = ctx["modules"].module("controls")
 	var camera: Node3D = ctx["camera"]
-
-	var stick := left.get_vector2("primary")
+	var stick: Vector2 = controls.call("stick", "walk") if controls else Vector2.ZERO
 	if stick.length() > DEADZONE:
 		var forward := -camera.global_basis.z
 		forward.y = 0.0
@@ -44,7 +43,7 @@ func _physics_process(delta: float) -> void:
 			var along := forward.normalized() * stick.y + side.normalized() * stick.x
 			_origin.global_position += along.limit_length(1.0) * float(settings["speed"]) * delta
 
-	var turn := right.get_vector2("primary").x
+	var turn: float = (controls.call("stick", "turn") as Vector2).x if controls else 0.0
 	if settings["turn"] == "snap":
 		if not _snapped and absf(turn) > SNAP_ON:
 			_snapped = true

@@ -8,6 +8,8 @@ unless its file has changed since.
 
 | File | What it does |
 |---|---|
+| `controls.gd` | The only thing that reads the controllers: each button is bound to a named action (point, grab_left, grab_right, talk, left_menu, left_y, right_a, right_b) and each thumbstick to a stick (walk, turn). Other modules take the actions. `controls_status` shows the bindings; `controls_config` (PC only) changes them. X on the left controller always stops the agent and can't be bound |
+| `ui.gd` | Every window: the menu bar, wrist panel, the agent's chat window and keyboard, and any panel you or the agent add (`ui_*` commands). Needs controls.gd for its buttons |
 | `tools.gd` | The tool window (B on the right controller): a button for each loaded tool, the chosen tool's buttons, and one Undo / Redo list for every tool |
 | `landscape.gd` | Ground you can shape, 20 × 20 m: raise, lower, smooth and flatten brushes. It stands in for the flat floor while it's loaded |
 | `paths.gd` | Roads and trails: put down points with the trigger, then press Finish. Optionally levels the ground under the path |
@@ -29,6 +31,8 @@ From the platform-tools folder:
 
 ```
 .\adb shell mkdir -p /sdcard/Slopitect/modules
+.\adb push "C:\path\to\live-modules\controls.gd" /sdcard/Slopitect/modules/
+.\adb push "C:\path\to\live-modules\ui.gd" /sdcard/Slopitect/modules/
 .\adb push "C:\path\to\live-modules\tools.gd" /sdcard/Slopitect/modules/
 .\adb push "C:\path\to\live-modules\landscape.gd" /sdcard/Slopitect/modules/
 .\adb push "C:\path\to\live-modules\paths.gd" /sdcard/Slopitect/modules/
@@ -39,6 +43,8 @@ From the platform-tools folder:
 .\adb push "C:\path\to\live-modules\physics.gd" /sdcard/Slopitect/modules/
 .\adb push "C:\path\to\live-modules\projects.gd" /sdcard/Slopitect/modules/
 .\adb push "C:\path\to\live-modules\inspect.gd" /sdcard/Slopitect/modules/
+.\slopi.ps1 '{"cmd":"code_load","name":"controls"}'
+.\slopi.ps1 '{"cmd":"code_load","name":"ui"}'
 .\slopi.ps1 '{"cmd":"code_load","name":"tools"}'
 .\slopi.ps1 '{"cmd":"code_load","name":"landscape"}'
 .\slopi.ps1 '{"cmd":"code_load","name":"paths"}'
@@ -51,7 +57,10 @@ From the platform-tools folder:
 .\slopi.ps1 '{"cmd":"code_load","name":"inspect"}'
 ```
 
-Each `code_load` shows the code in the headset and waits for your Yes.
+Each `code_load` shows the code in the headset and waits for your Yes
+(the right thumbstick scrolls the code). Load controls.gd and ui.gd first:
+until they're loaded, the buttons do nothing but the Yes/No question and
+Stop, and there are no windows.
 
 ## Using them
 

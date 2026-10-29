@@ -5,7 +5,8 @@
 | What | How | Kept after a restart |
 | --- | --- | --- |
 | Objects in the world | `spawn`, `move`, `color`, `delete` (you, the agent, or a button) | Not yet (saves are roadmap step 5) |
-| Every window: the menu bar, wrist panel, chat, and new ones | `ui_*` commands (you, the agent, or a button); grab one with the grip to move it | Yes, `user://ui.json` |
+| Every window: the menu bar, wrist panel, chat, and new ones | `ui_*` commands (you, the agent, or a button); grab one with the grip to move it. The panel system itself is a live module (`ui.gd`) | Yes, `user://ui.json` |
+| What each button and thumbstick does | The controls live module (`controls.gd`): `controls_config` from the PC, or a different `controls.gd` | Yes, `user://controls.json` |
 | New features (live modules) | A GDScript file in `modules/` of the Slopitect folder, then `code_load` and your Yes in the headset | Yes: an approved file loads at each start, until it changes |
 | Files in the Slopitect folder | `files_*` commands | It's the headset's storage (`/sdcard/Slopitect`) |
 | Which AI the agent uses | `agent_config` from the PC: `provider`, `model`, `base_url`, `api_key` | Yes, `user://agent.json` |
@@ -64,8 +65,10 @@ In place:
     agent, a button or the PC);
   - every file action in its `models` folder, since model files are read
     by native code that a doctored file could trick;
-  - every new or changed live module, with the code shown beside it and a
-    list of what it uses (files, the internet, other programs...). Nothing
+  - every new or changed live module, with all of its code on a sheet
+    above the question (the right thumbstick scrolls; the sheet is drawn by
+    the question's own code, never by a panel, and the question then waits
+    five minutes) and a list of what it uses (files, the internet, other programs...). Nothing
     in a module is even compiled before your Yes, since compiling a script
     already runs part of it. The Yes is for that exact file (its SHA-256).
 - **Blocked folders:** photos, videos, music, downloads, documents,
@@ -73,8 +76,14 @@ In place:
   reached at all until you unblock one from the PC. The app's own settings
   (which hold your key) are never reachable through files_*. Nothing
   outside `/sdcard` can be reached (that would need root).
-- **The microphone** only records while you hold the left trigger, with a
-  red dot on your hand. No command can turn it on. With speech to text on
+- **Fixed in the APK, never a module:** the Yes/No question and its code
+  sheet, X to stop the agent, and pairing. They read the controller
+  themselves, so no swapped-in controls or ui module can answer a question,
+  change the code you're shown, or take Stop away. While a question is
+  open, the controls module sends no actions.
+- **The microphone** only records while you hold the talk button (the left
+  trigger by default), with a red dot on your hand. No command turns it on;
+  only the controls module does, which is code you said Yes to. With speech to text on
   the headset (`stt_engine` `"local"`), nothing you say leaves it. With a
   service, nothing leaves until you set one, and the recording is deleted
   once it's sent.

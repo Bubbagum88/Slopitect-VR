@@ -14,8 +14,9 @@ the left wrist) and `chat` (your chat window, opens with Y).
 - `ui_add` makes a panel. Fields: `id_panel`, `title`, `place` (`front`:
   opens in front of the person at `distance` and `height` metres; `wrist`;
   `world`: fixed at `position` and `rotation`), `size` [w, h] for a
-  background and its `color`, `visible`, `toggle` (a controller button that
-  shows and hides it: left_menu, left_y, right_a, right_b), `layout`
+  background and its `color`, `visible`, `toggle` (an action, from the
+  controls module, that shows and hides it: by default left_menu (≡),
+  left_y (Y), right_a (A), right_b (B); `controls_status` lists them), `layout`
   (`free`, or `grid` to lay buttons in rows of `columns`, each `cell` [w, h]
   big) and `elements`.
 - Elements, each with a unique `id` and `at` [x, y] in metres from the

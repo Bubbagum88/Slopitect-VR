@@ -50,6 +50,12 @@ func _do(request: Dictionary) -> Dictionary:
 - Put nodes you make under the module itself (`add_child`) or
   `ctx["world"]`; anything you hang on a controller must be freed in
   `_exit_tree()`, so unloading leaves nothing behind.
+- Buttons and thumbsticks come from the controls module, never from the
+  controllers directly: add `func on_action(action: String, down: bool)
+  -> bool` and return true for the actions you take (then you alone get
+  the release). `controls_status` lists the actions; the ui module is
+  asked first, so pointing at a panel, the trigger and grip are its. Read
+  a thumbstick with `ctx["modules"].module("controls").stick("walk")`.
 - Keep work per frame small: the Quest 1 must hold 72 frames a second.
 - Never read or send the app's settings or keys, and don't reach outside
   the Slopitect folder without going through the files_* commands.

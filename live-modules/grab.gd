@@ -4,26 +4,19 @@ extends SlopitectModule
 # Hold the grip near a shape or a placed model to pick it up; it follows the
 # hand until you let go. With the physics module loaded, a dynamic thing
 # you let go of flies on with the hand's speed (a throw). Each pick-up is
-# one undo in the tools window (if the tools module is loaded). The right
-# grip still drags a panel when you point at one.
+# one undo in the tools window (if the tools module is loaded). The grips
+# are the controls module's "grab_left" and "grab_right" actions; pointing
+# at a panel, the right grip moves the panel instead (the ui module is
+# asked first).
 
 const REACH := 0.12  # metres from the hand to the thing's box
-const UI_LAYER := 1 << 19  # the ui module's panels
 const SPEED_FRAMES := 6  # hand speed is taken over this many frames
 
-var _ray: RayCast3D
 var _held := {}  # hand name -> {"node", "offset": Transform3D, "before": Transform3D}
 var _trail := {"left": [], "right": []}  # recent [time, position] of each hand
 
 
 func setup() -> String:
-	_ray = RayCast3D.new()
-	_ray.target_position = Vector3(0, 0, -3.0)
-	_ray.collision_mask = UI_LAYER
-	ctx["right"].add_child(_ray)
-	for hand in ["left", "right"]:
-		ctx[hand].button_pressed.connect(func(button): if button == "grip_click": _grip(hand, true))
-		ctx[hand].button_released.connect(func(button): if button == "grip_click": _grip(hand, false))
 	register("grab_status", _status, "what each hand is holding")
 	register("grab_release", _release_command, "make a hand let go: hand (left or right; default both)")
 	return ""
@@ -32,8 +25,6 @@ func setup() -> String:
 func _exit_tree() -> void:
 	for hand in _held.keys():
 		_let_go(hand)
-	if _ray and is_instance_valid(_ray):
-		_ray.queue_free()
 
 
 func _physics_process(_delta: float) -> void:
@@ -53,12 +44,22 @@ func _physics_process(_delta: float) -> void:
 
 # --- Picking up ----------------------------------------------------------------------
 
-func _grip(hand: String, down: bool) -> void:
+func action_order() -> int:
+	return 20
+
+
+func on_action(action: String, down: bool) -> bool:
+	if not action in ["grab_left", "grab_right"]:
+		return false
+	var hand := action.trim_prefix("grab_")
 	if not down:
 		_let_go(hand)
-		return
-	if hand == "right" and _ray.is_colliding() and (_ray.get_collider() as Node3D).is_visible_in_tree():
-		return  # that grip drags the panel
+		return true
+	return _grip(hand)
+
+
+# Picks up the nearest thing in reach; whether there was one.
+func _grip(hand: String) -> bool:
 	var at: Vector3 = (ctx[hand] as Node3D).global_position
 	var best: Node3D = null
 	var best_distance := REACH
@@ -72,7 +73,7 @@ func _grip(hand: String, down: bool) -> void:
 			best = thing
 			best_distance = distance
 	if best == null:
-		return
+		return false
 	_held[hand] = {"node": best, "offset": (ctx[hand] as Node3D).global_transform.affine_inverse() * best.global_transform,
 		"before": best.global_transform}
 	var physics: SlopitectModule = ctx["modules"].module("physics")
@@ -80,6 +81,7 @@ func _grip(hand: String, down: bool) -> void:
 		physics.call("hold", best, true)
 	(ctx[hand] as XRController3D).trigger_haptic_pulse("haptic", 0.0, 0.3, 0.05, 0.0)
 	print("Slopitect grab: %s hand took %s" % [hand, best.name])
+	return true
 
 
 func _let_go(hand: String) -> void:
