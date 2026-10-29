@@ -403,6 +403,11 @@ func _deliver(words: String) -> void:
 		if not reply.get("ok", false):
 			_note("couldn't send it to the agent: " + String(reply.get("error", "?")))
 		return
+	# The terminal's Chat mode is the one chat window while it's loaded.
+	var terminal: SlopitectModule = ctx["modules"].module("terminal")
+	if terminal != null and terminal.has_method("hear"):
+		terminal.call("hear", words + " ")
+		return
 	var typed: Dictionary = server.run({"cmd": "ui_type", "text": words + " ", "id_panel": CHAT_INPUT[0], "id_element": CHAT_INPUT[1]})
 	if not typed.get("ok", false):
 		_note("heard \"%s\" but couldn't put it in the chat window: %s" % [words, String(typed.get("error", "?"))])
