@@ -66,6 +66,9 @@ const DEFAULTS := {
 	"web_fetch_max_uses": 3,
 	"web_fetch_max_tokens": 8000,
 	"max_searches_per_ask": 10,  # one question, all its rounds together; it stops there
+	# Search through the net live module (net_search and net_read: DuckDuckGo,
+	# no cost) instead of Claude's tools. The agent gets one or the other.
+	"web_via_net": false,
 	# Ask the AI for a short summary of its thinking, shown in the chat window
 	# (providers that can't show thinking ignore it).
 	"show_thinking": true,
@@ -87,7 +90,8 @@ const OLD_DEFAULT_TOOLS := [
 ]
 
 # What agent_budget may set (the Settings window), and in what range;
-# agent_config, from the PC, takes any value.
+# agent_config, from the PC, takes any value. web_via_net (on or off) and
+# model are set there too.
 const BUDGET := {
 	"max_request_tokens": [20000, 100000],
 	"max_context_tokens": [20000, 90000],
@@ -102,6 +106,8 @@ const MODELS := {"claude-haiku-5-5": false, "claude-sonnet-5-5": true, "claude-o
 const CHARS_PER_TOKEN := 3.0
 # Past this share of max_request_tokens, the agent is told to finish up.
 const BUDGET_WARNING := 0.8
+# The net module's web commands, offered only when web_via_net is on.
+const NET_SEARCH := ["net_search", "net_read"]
 
 # The live module that tunes the agent, if it's loaded (and you said Yes to
 # it). Each of its functions is optional; one it doesn't have, or one that
@@ -130,7 +136,7 @@ const SYSTEM_PROMPT := """You are the AI agent inside Slopitect, a VR sandbox ru
 
 You change the world only through your tools. Each tool is one of the app's commands: pass the command's fields as the tool's input (for example spawn takes {"shape": "box", "position": [0, 1, -1]}). Positions are in metres from the middle of the play area, y is up and -z is forward; rotations are in degrees; colours are #rrggbb or names. Every command replies with "ok", and a failed one says exactly what was wrong in "error" without changing anything: read it and fix your input rather than guessing.
 
-You can search the web (web_search) and read a page (web_fetch) when the person needs something current or from a page. Each search costs money, so search only when it helps, and say where what you found came from.
+You can search the web (web_search or net_search) and read a page (web_fetch or net_read) when the person needs something current or from a page. Each search costs money, so search only when it helps, and say where what you found came from.
 
 Keep replies short; they are read on a small panel in VR, and may be read aloud.
 """
@@ -334,6 +340,11 @@ func _budget(request: Dictionary) -> Dictionary:
 		if key in ["cmd", "id"]:
 			continue
 		var value = request[key]
+		if key == "web_via_net":
+			if typeof(value) != TYPE_BOOL:
+				return {"ok": false, "error": "\"web_via_net\" must be true or false"}
+			changes[key] = value
+			continue
 		if key == "model":
 			if settings["provider"] != "anthropic":
 				return {"ok": false, "error": "the model changes here only for Claude (provider anthropic); this one is agent_config, from the PC"}
@@ -343,7 +354,7 @@ func _budget(request: Dictionary) -> Dictionary:
 			changes["fallbacks"] = MODELS[value]
 			continue
 		if not BUDGET.has(key):
-			return {"ok": false, "error": "agent_budget changes model and %s (the rest is agent_config, from the PC)" % ", ".join(BUDGET.keys())}
+			return {"ok": false, "error": "agent_budget changes model, web_via_net and %s (the rest is agent_config, from the PC)" % ", ".join(BUDGET.keys())}
 		if typeof(value) not in [TYPE_INT, TYPE_FLOAT] or value != floorf(value) or value < BUDGET[key][0] or value > BUDGET[key][1]:
 			return {"ok": false, "error": "\"%s\" must be a whole number from %d to %d" % [key, BUDGET[key][0], BUDGET[key][1]]}
 		changes[key] = int(value)
@@ -366,6 +377,7 @@ func budget() -> Dictionary:
 	var out := {}
 	for key in BUDGET:
 		out[key] = settings[key]
+	out["web_via_net"] = settings["web_via_net"]
 	if settings["provider"] == "anthropic":
 		out["model"] = settings["model"]
 	return out
@@ -594,6 +606,9 @@ func _run_tools(calls: Array) -> Array:
 				outcome["image"] = "(attached)"
 			content = JSON.stringify(outcome)
 			is_error = not outcome.get("ok", false)
+			if call["name"] == "net_search" and not is_error:
+				_ask_searches += 1
+				_total_searches += 1
 			# Each tool reply is sent again on every later round, so a huge one
 			# (a big file, a long list) would cost over and over.
 			var cap := int(settings["max_tool_result_chars"])
@@ -641,16 +656,19 @@ func _tools() -> Array:
 	var tools := []
 	var described: Dictionary = ctx["server"].describe_commands()
 	for cmd in described:
+		# One way to search the web: the net module's, or Claude's own (below).
+		if cmd in NET_SEARCH and not settings["web_via_net"]:
+			continue
 		if _allowed_tool(cmd):
 			tools.append({"name": cmd, "description": "%s (from the %s module)" % [described[cmd]["summary"], described[cmd]["module"]],
 				"schema": {"type": "object", "additionalProperties": true}})
 	if _allowed_tool("modules"):
 		tools.append({"name": "modules", "description": "list the app's loaded modules, and why any failed to load",
 			"schema": {"type": "object", "additionalProperties": true}})
-	if int(settings["web_search_max_uses"]) > 0:
+	if int(settings["web_search_max_uses"]) > 0 and not settings["web_via_net"]:
 		tools.append({"name": "web_search", "description": "", "schema": {},
 			"server": {"kind": "web_search", "max_uses": int(settings["web_search_max_uses"])}})
-	if int(settings["web_fetch_max_uses"]) > 0:
+	if int(settings["web_fetch_max_uses"]) > 0 and not settings["web_via_net"]:
 		tools.append({"name": "web_fetch", "description": "", "schema": {},
 			"server": {"kind": "web_fetch", "max_uses": int(settings["web_fetch_max_uses"]), "max_content_tokens": int(settings["web_fetch_max_tokens"])}})
 	tools.append({"name": "new_conversation", "description": "start a new conversation, to use tools that were added after this one began (like a live module's); it forgets this one, so pass a note of what you were doing and what's left",
@@ -875,7 +893,7 @@ func _check_setting(key: String, value: Variant) -> Array:
 			if typeof(value) not in [TYPE_INT, TYPE_FLOAT] or value != floorf(value) or value < 1 or value > 128000:
 				return ["\"%s\" must be a whole number from 1 to 128000" % key, null]
 			return ["", int(value)]
-		"fallbacks", "show_thinking":
+		"fallbacks", "show_thinking", "web_via_net":
 			if typeof(value) != TYPE_BOOL:
 				return ["\"%s\" must be true or false" % key, null]
 			return ["", value]
