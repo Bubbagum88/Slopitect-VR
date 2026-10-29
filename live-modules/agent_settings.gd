@@ -47,7 +47,7 @@ func settings_info() -> Dictionary:
 			"set": {"cmd": "agent_budget", "model": "{value}"}})
 	# How the agent searches the web (an older APK has no switch).
 	if budget.has("web_via_net"):
-		out.append({"id": "web_via_net", "type": "toggle", "label": "Search with the net module (free), not Claude ($0.01 each)",
+		out.append({"id": "web_via_net", "type": "toggle", "label": "Web search: net (free), not Claude",
 			"value": budget["web_via_net"], "set": {"cmd": "agent_budget", "web_via_net": "{value}"}})
 	for key in SLIDERS:
 		var low: int = ranges[key][0]
