@@ -5,6 +5,9 @@ extends SlopitectModule
 # an oven door that drops down). Put a hand near a door and press A (right)
 # or Y (left) to open or close it. Kept per project in saves/doors.json;
 # doors load closed.
+# A and Y come through controls.gd like every button. They also show the
+# terminal and chat windows (vrui.gd), so this module is asked first, and
+# takes the press only when that hand is near a door.
 
 const REACH := 0.15  # m from the door that counts as "near"
 const SPEED := 2.0  # opens in half a second
@@ -147,6 +150,11 @@ func _nearest(at: Vector3) -> String:
 				best_d = dist
 				best = id
 	return best
+
+
+# Before vrui.gd (0), whose window toggles are on A and Y too.
+func action_order() -> int:
+	return -5
 
 
 func on_action(action: String, down: bool) -> bool:
