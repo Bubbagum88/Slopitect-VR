@@ -16,6 +16,10 @@ description: How to place, change and remove things in the world.
 - Build bigger things from several named shapes (a table is a flat box on
   four thin cylinders). Name the parts so they can be changed together,
   like `table_top`, `table_leg1`.
+- To check your work, `view_look` gives you a picture of the world from the
+  person's eyes, or from `position` looking at `look_at`. A picture costs
+  about 450 tokens and is sent again every round after, so take one after a
+  bigger change, not after every step.
 - To add buttons or windows, read the `slopitect-ui` skill.
 - If a command fails, its `error` says exactly why. Fix the input and try
   again; don't repeat the same call.

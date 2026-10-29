@@ -1,6 +1,6 @@
 extends SlopitectModule
 
-# Slopitect: every window in the app, as data.
+# Slopitect live module: every window in the app, as data.
 # A panel is a list of elements (text, buttons, input boxes, plain boxes)
 # with a place: in front of you when it opens, on the left wrist, or fixed in
 # the world. The menu bar, the wrist panel and the agent's chat window are
@@ -10,8 +10,10 @@ extends SlopitectModule
 #
 # In the headset: point with the right controller and pull the trigger to
 # press a button or pick an input box; hold the right grip while pointing at
-# a panel to move it (it then stays where you let go). A panel can have a
-# controller button that shows and hides it ("toggle").
+# a panel to move it (it then stays where you let go). A panel can have an
+# action that shows and hides it ("toggle"). The buttons come from the
+# controls module: "point" presses and picks, "grab_right" moves a panel,
+# and any other action can be a panel's toggle (controls_status lists them).
 #
 # A button's action is any command. In an action, "in_front" as a position
 # means 1 m in front of you when pressed, and "{input:ID}" is replaced by
@@ -34,16 +36,6 @@ const PLACES := ["front", "wrist", "world"]
 const LAYOUTS := ["free", "grid"]
 const ELEMENT_TYPES := ["text", "button", "input", "box"]
 const ALIGNS := {"left": HORIZONTAL_ALIGNMENT_LEFT, "center": HORIZONTAL_ALIGNMENT_CENTER, "right": HORIZONTAL_ALIGNMENT_RIGHT}
-# Controller buttons a panel can be shown and hidden with. The right trigger
-# and grip are kept for pointing and moving, and the left X always stops the
-# agent (the agent module's), so no panel can take them.
-const TOGGLES := {
-	"": [],
-	"left_menu": ["left", "menu_button"],
-	"left_y": ["left", "by_button"],
-	"right_b": ["right", "by_button"],
-	"right_a": ["right", "ax_button"],
-}
 const SOURCE_COMMANDS := ["list", "modules"]  # plus any ending in _status or _list
 const BUTTON_COLOR := Color(0.12, 0.13, 0.16)
 const HOVER_COLOR := Color(0.25, 0.45, 0.9)
@@ -78,7 +70,7 @@ func setup() -> String:
 
 	register("ui_list", _list, "list the panels: id, title, place, shown or not, toggle button, number of elements")
 	register("ui_get", _get_panel, "a panel's full data, including what's typed in its input boxes: id_panel")
-	register("ui_add", _add, "add a panel: id_panel, optional title, place (front, wrist, world), distance, height, position, rotation, size, color, visible, toggle (%s), layout (free or grid with columns and cell), elements" % ", ".join(TOGGLES.keys().slice(1)))
+	register("ui_add", _add, "add a panel: id_panel, optional title, place (front, wrist, world), distance, height, position, rotation, size, color, visible, toggle (an action from controls_status, like left_menu), layout (free or grid with columns and cell), elements")
 	register("ui_update", _update, "change any of a panel's fields (elements replaces them all): id_panel, then the fields")
 	register("ui_remove", _remove, "remove a panel: id_panel")
 	register("ui_show", _show, "show or hide a panel: id_panel, visible (true/false)")
@@ -105,10 +97,6 @@ func setup() -> String:
 	laser_material.albedo_color = Color(0.4, 0.7, 1.0)
 	_laser.material_override = laser_material
 	_right.add_child(_laser)
-
-	_left.button_pressed.connect(_on_button.bind("left"))
-	_right.button_pressed.connect(_on_button.bind("right"))
-	_right.button_released.connect(_on_right_released)
 
 	_load()
 	for panel in panels:
@@ -174,22 +162,37 @@ func _any_open() -> bool:
 
 # --- Controllers ---------------------------------------------------------------
 
-func _on_button(button: String, hand: String) -> void:
-	if hand == "right" and button == "trigger_click":
-		_on_point_pressed()
-		return
-	if hand == "right" and button == "grip_click":
-		_start_drag()
-		return
+# Asked first by the controls module: pointing at a panel, the trigger and
+# grip are the panel's, not a tool's or a grab's.
+func action_order() -> int:
+	return 0
+
+
+func on_action(action: String, down: bool) -> bool:
+	match action:
+		"point":
+			if down and _hovered:
+				_on_point_pressed()
+				return true
+			return false
+		"grab_right":
+			if down:
+				return _start_drag()
+			_end_drag()
+			return true
+	if not down:
+		return false
+	var toggled := false
 	for panel in panels:
-		var toggle: Array = TOGGLES[panel["toggle"]]
-		if not toggle.is_empty() and toggle[0] == hand and toggle[1] == button:
+		if panel["toggle"] == action:
 			_set_visible(panel, not panel["visible"])
 			print("Slopitect ui: \"%s\" %s" % [panel["id_panel"], "shown" if panel["visible"] else "hidden"])
+			toggled = true
+	return toggled
 
 
-func _on_right_released(button: String) -> void:
-	if button != "grip_click" or _dragging.is_empty():
+func _end_drag() -> void:
+	if _dragging.is_empty():
 		return
 	var index := _index_of(_dragging)
 	_dragging = ""
@@ -207,15 +210,16 @@ func _on_right_released(button: String) -> void:
 	print("Slopitect ui: moved \"%s\" to %s" % [panel["id_panel"], panel["position"]])
 
 
-func _start_drag() -> void:
+func _start_drag() -> bool:
 	if not _hovered:
-		return
+		return false
 	var id_panel: String = _hovered.get_meta("panel")
 	var index := _index_of(id_panel)
 	if index == -1 or panels[index]["place"] == "wrist":
-		return  # the wrist panel moves with your wrist
+		return true  # the wrist panel moves with your wrist; the grip is still the panel's
 	_dragging = id_panel
 	_drag_offset = _right.global_transform.affine_inverse() * _holders[id_panel].global_transform
+	return true
 
 
 func _on_point_pressed() -> void:
@@ -616,8 +620,8 @@ func _check_panel(data: Dictionary, is_new: bool, check_actions: bool) -> Dictio
 	if typeof(panel["visible"]) != TYPE_BOOL:
 		return {"error": "panel %s: \"visible\" must be true or false" % id}
 	panel["toggle"] = data.get("toggle", "")
-	if not panel["toggle"] in TOGGLES:
-		return {"error": "panel %s: \"toggle\" must be one of %s (or \"\" for none)" % [id, TOGGLES.keys().slice(1)]}
+	if not (panel["toggle"] == "" or _good_id(panel["toggle"])):
+		return {"error": "panel %s: \"toggle\" must be an action's name (controls_status lists them), or \"\" for none" % id}
 	panel["layout"] = data.get("layout", "free")
 	if not panel["layout"] in LAYOUTS:
 		return {"error": "panel %s: \"layout\" must be free (each element at its \"at\") or grid (buttons in rows)" % id}

@@ -205,6 +205,29 @@ func _put(id: String, path: Dictionary, heights: PackedFloat32Array) -> void:
 	_save()
 
 
+# For other modules (save): every path, and putting a whole set back. Putting
+# a set back doesn't level the ground again; the ground is saved on its own.
+func get_paths() -> Dictionary:
+	return {"paths": _paths.duplicate(true), "next": _next}
+
+
+func set_paths(data: Dictionary) -> void:
+	for id in _meshes:
+		_meshes[id].queue_free()
+	_meshes.clear()
+	_paths.clear()
+	var given = data.get("paths", {})
+	if typeof(given) == TYPE_DICTIONARY:
+		for id in given:
+			if typeof(id) == TYPE_STRING and typeof(given[id]) == TYPE_DICTIONARY and _check(given[id]).is_empty():
+				_paths[id] = given[id].duplicate(true)
+			else:
+				push_error("Slopitect paths: set_paths skipped \"%s\"" % id)
+	_next = maxi(int(data.get("next", 1)), _paths.size() + 1)
+	_rebuild_all()
+	_save()
+
+
 func _take_back(id: String, heights: PackedFloat32Array) -> void:
 	_remove(id)
 	if _landscape and not heights.is_empty():

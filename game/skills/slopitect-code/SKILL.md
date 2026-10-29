@@ -18,6 +18,10 @@ wants a new feature; prefer existing commands and panels for everything else.
    `code_load` again (a changed file needs a new Yes).
 4. `code_list` shows each module, whether it's loaded and its last error;
    `code_unload` takes one out.
+5. Errors a loaded module hits while it runs (a null, a bad index, its own
+   `push_error`) come to you after your next step as "[Errors from live
+   modules ...]", with the file and line. `errors_recent` (optional
+   `module`) shows them all. Fix the file and `code_load` it again.
 
 The shape of a module (Godot 4.7, GDScript, tabs for indents):
 
@@ -46,6 +50,12 @@ func _do(request: Dictionary) -> Dictionary:
 - Put nodes you make under the module itself (`add_child`) or
   `ctx["world"]`; anything you hang on a controller must be freed in
   `_exit_tree()`, so unloading leaves nothing behind.
+- Buttons and thumbsticks come from the controls module, never from the
+  controllers directly: add `func on_action(action: String, down: bool)
+  -> bool` and return true for the actions you take (then you alone get
+  the release). `controls_status` lists the actions; the ui module is
+  asked first, so pointing at a panel, the trigger and grip are its. Read
+  a thumbstick with `ctx["modules"].module("controls").stick("walk")`.
 - Keep work per frame small: the Quest 1 must hold 72 frames a second.
 - Never read or send the app's settings or keys, and don't reach outside
   the Slopitect folder without going through the files_* commands.

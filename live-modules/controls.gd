@@ -1,0 +1,197 @@
+extends SlopitectModule
+
+# Slopitect live module: controls.
+# The one place that reads the controllers. Each button is bound to a named
+# action ("point", "grab_left", "talk", ...) and each thumbstick to a named
+# stick ("walk", "turn"); other modules work with the actions, never with
+# the buttons, so swapping this file changes the whole control scheme.
+#
+# A module takes actions with on_action(action: String, down: bool) -> bool.
+# On a press the modules are asked in turn (lower action_order() first,
+# 100 when a module has none) until one returns true; that one alone gets
+# the release. A module reads a stick with
+# ctx["modules"].module("controls").stick("walk") (a Vector2).
+#
+# Two things never go through here, so no module can take them away: X on
+# the left controller always stops the agent (the agent module's), and the
+# Yes / No window reads the right trigger (and the right thumbstick, to
+# scroll) itself. While it's open, no action is sent and the sticks read zero.
+# The bindings change from the PC only (controls_config).
+
+const SETTINGS_PATH := "user://controls.json"
+const RESERVED := ["left/ax_button"]  # the agent's Stop
+const BUTTONS := ["trigger_click", "grip_click", "ax_button", "by_button", "menu_button", "primary_click"]
+const DEFAULT_BUTTONS := {
+	"right/trigger_click": "point",
+	"right/grip_click": "grab_right",
+	"left/grip_click": "grab_left",
+	"left/trigger_click": "talk",
+	"left/menu_button": "left_menu",
+	"left/by_button": "left_y",
+	"right/by_button": "right_b",
+	"right/ax_button": "right_a",
+}
+const DEFAULT_STICKS := {"left": "walk", "right": "turn"}
+
+var buttons := {}  # "hand/button" -> action
+var sticks := {}  # hand -> stick name
+var _taken := {}  # "hand/button" -> the module that took its press
+var _last := ""  # the last action, for controls_status
+
+
+func setup() -> String:
+	_load()
+	for hand in ["left", "right"]:
+		ctx[hand].button_pressed.connect(_on_button.bind(hand, true))
+		ctx[hand].button_released.connect(_on_button.bind(hand, false))
+	register("controls_status", _status, "what each button and thumbstick does, and the last action")
+	register("controls_config", _config, "from the PC only: buttons {\"hand/button\": action or \"\"}, sticks {hand: name or \"\"}, or reset true")
+	return ""
+
+
+func _exit_tree() -> void:
+	for key in _taken.keys():
+		_release(key)
+
+
+# The value of a named stick (zero when no thumbstick is bound to it).
+func stick(stick_name: String) -> Vector2:
+	if _asking():
+		return Vector2.ZERO  # the right thumbstick scrolls the question's sheet then
+	for hand in sticks:
+		if sticks[hand] == stick_name:
+			return (ctx[hand] as XRController3D).get_vector2("primary")
+	return Vector2.ZERO
+
+
+func _asking() -> bool:
+	var confirm: SlopitectModule = ctx["modules"].module("confirm")
+	return confirm != null and confirm.call("asking")
+
+
+func _on_button(button: String, hand: String, down: bool) -> void:
+	var key := hand + "/" + button
+	if not down:
+		_release(key)
+		return
+	if not buttons.has(key) or _asking():
+		return
+	var action: String = buttons[key]
+	_last = "%s (%s)" % [action, key]
+	var takers := []
+	for child in ctx["modules"].get_children():
+		if child != self and child.has_method("on_action"):
+			takers.append(child)
+	takers.sort_custom(func(a, b): return _order(a) < _order(b))
+	for module in takers:
+		if module.call("on_action", action, true) == true:
+			_taken[key] = module
+			return
+
+
+func _release(key: String) -> void:
+	if not _taken.has(key):
+		return
+	var module = _taken[key]
+	_taken.erase(key)
+	if is_instance_valid(module):
+		module.call("on_action", buttons.get(key, ""), false)
+
+
+func _order(module: Node) -> int:
+	return int(module.call("action_order")) if module.has_method("action_order") else 100
+
+
+# --- Commands ------------------------------------------------------------------------
+
+func _status(_request: Dictionary) -> Dictionary:
+	var held := []
+	for key in _taken:
+		held.append({"button": key, "action": buttons.get(key, ""), "module": String(_taken[key].name) if is_instance_valid(_taken[key]) else ""})
+	return {"ok": true, "buttons": buttons, "sticks": sticks, "reserved": {"left/ax_button": "stop the agent"},
+		"held": held, "last": _last}
+
+
+func _config(request: Dictionary) -> Dictionary:
+	if request.get("reset", false) == true:
+		buttons = DEFAULT_BUTTONS.duplicate()
+		sticks = DEFAULT_STICKS.duplicate()
+		_save()
+		return _status({})
+	var new_buttons := buttons.duplicate()
+	var new_sticks := sticks.duplicate()
+	var asked = request.get("buttons", {})
+	if typeof(asked) != TYPE_DICTIONARY:
+		return {"ok": false, "error": "\"buttons\" must be {\"hand/button\": action}, e.g. {\"right/by_button\": \"right_b\"}"}
+	for key in asked:
+		var problem := _check_button(key, asked[key])
+		if not problem.is_empty():
+			return {"ok": false, "error": problem}
+		if asked[key].is_empty():
+			new_buttons.erase(key)
+		else:
+			new_buttons[key] = asked[key]
+	var asked_sticks = request.get("sticks", {})
+	if typeof(asked_sticks) != TYPE_DICTIONARY:
+		return {"ok": false, "error": "\"sticks\" must be {hand: name}, e.g. {\"left\": \"walk\"}"}
+	for hand in asked_sticks:
+		if not hand in ["left", "right"] or not (asked_sticks[hand] == "" or _good_name(asked_sticks[hand])):
+			return {"ok": false, "error": "a stick is {\"left\" or \"right\": a name of letters, digits and _, or \"\"}"}
+		if asked_sticks[hand].is_empty():
+			new_sticks.erase(hand)
+		else:
+			new_sticks[hand] = asked_sticks[hand]
+	for key in _taken.keys():
+		_release(key)  # a held button's action may be changing
+	buttons = new_buttons
+	sticks = new_sticks
+	_save()
+	return _status({})
+
+
+func _check_button(key, action) -> String:
+	if typeof(key) != TYPE_STRING or key.get_slice_count("/") != 2 or not key.get_slice("/", 0) in ["left", "right"] \
+			or not key.get_slice("/", 1) in BUTTONS:
+		return "%s isn't a button: use \"left/\" or \"right/\" and one of %s" % [JSON.stringify(key), ", ".join(BUTTONS)]
+	if key in RESERVED:
+		return "%s always stops the agent; it can't be bound" % key
+	if typeof(action) != TYPE_STRING or not (action.is_empty() or _good_name(action)):
+		return "an action is a name of 1 to 40 letters, digits and _ (or \"\" for none)"
+	return ""
+
+
+func _good_name(text) -> bool:
+	if typeof(text) != TYPE_STRING or text.is_empty() or text.length() > 40:
+		return false
+	for c in text:
+		if not (c == "_" or (c >= "a" and c <= "z") or (c >= "A" and c <= "Z") or (c >= "0" and c <= "9")):
+			return false
+	return true
+
+
+func _load() -> void:
+	buttons = DEFAULT_BUTTONS.duplicate()
+	sticks = DEFAULT_STICKS.duplicate()
+	if not FileAccess.file_exists(SETTINGS_PATH):
+		return
+	var saved = JSON.parse_string(FileAccess.get_file_as_string(SETTINGS_PATH))
+	if typeof(saved) != TYPE_DICTIONARY or typeof(saved.get("buttons")) != TYPE_DICTIONARY or typeof(saved.get("sticks")) != TYPE_DICTIONARY:
+		push_error("Slopitect controls: %s isn't readable; using the default bindings" % SETTINGS_PATH)
+		return
+	buttons = {}
+	for key in saved["buttons"]:
+		if _check_button(key, saved["buttons"][key]).is_empty() and not saved["buttons"][key].is_empty():
+			buttons[key] = saved["buttons"][key]
+	sticks = {}
+	for hand in saved["sticks"]:
+		if hand in ["left", "right"] and _good_name(saved["sticks"][hand]):
+			sticks[hand] = saved["sticks"][hand]
+
+
+func _save() -> void:
+	var out := FileAccess.open(SETTINGS_PATH, FileAccess.WRITE)
+	if out == null:
+		push_error("Slopitect controls: couldn't save %s (error %d)" % [SETTINGS_PATH, FileAccess.get_open_error()])
+		return
+	out.store_string(JSON.stringify({"buttons": buttons, "sticks": sticks}, "\t"))
+	out.close()

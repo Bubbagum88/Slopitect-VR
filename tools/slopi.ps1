@@ -9,11 +9,32 @@
 #   .\slopi.ps1 '{"cmd":"list"}'
 # To give the agent your API key without it landing in PowerShell's history:
 #   .\slopi.ps1 -SetKey
+# Once per PC (the app only takes commands from programs you said Yes to):
+#   .\slopi.ps1 -Pair
+# then say Yes in the headset. The pairing key is kept in slopi-key.txt next
+# to this script and sent with every command; keep it private.
 param(
     [Parameter(Mandatory = $true, ParameterSetName = "Command", Position = 0)][string]$Command,
     [Parameter(Mandatory = $true, ParameterSetName = "SetKey")][switch]$SetKey,
+    [Parameter(Mandatory = $true, ParameterSetName = "Pair")][switch]$Pair,
     [int]$Port = 7777
 )
+
+$keyFile = Join-Path $PSScriptRoot "slopi-key.txt"
+if ($Pair) {
+    $Command = @{ cmd = "pair"; name = $env:COMPUTERNAME } | ConvertTo-Json -Compress
+    Write-Host "Say Yes in the headset (you have a minute)..."
+} elseif (-not $SetKey -and (Test-Path $keyFile)) {
+    # Puts "pair_key" first in the command's JSON object.
+    $pairKey = (Get-Content $keyFile -Raw).Trim()
+    $body = $Command.Trim()
+    if (-not $body.StartsWith("{")) {
+        Write-Error "A command is a JSON object, like '{""cmd"":""list""}'"
+        exit 1
+    }
+    $rest = $body.Substring(1).TrimStart()
+    $Command = '{"pair_key":"' + $pairKey + '"' + $(if ($rest.StartsWith("}")) { "" } else { "," }) + $rest
+}
 
 if ($SetKey) {
     # Typed in hidden, so it isn't on screen or saved in the command history.
@@ -30,6 +51,9 @@ if ($SetKey) {
         exit 1
     }
     $Command = @{ cmd = "agent_config"; api_key = $key } | ConvertTo-Json -Compress
+    if (Test-Path $keyFile) {
+        $Command = @{ cmd = "agent_config"; api_key = $key; pair_key = (Get-Content $keyFile -Raw).Trim() } | ConvertTo-Json -Compress
+    }
 }
 
 $client = [System.Net.Sockets.TcpClient]::new()
@@ -64,5 +88,12 @@ if ($null -eq $reply) {
     Write-Error "The connection closed without a reply. Is Slopitect open on the headset? (adb forward only works while it's running)"
     exit 1
 }
+$parsed = $reply | ConvertFrom-Json
+if ($Pair -and $parsed.ok -eq $true) {
+    # Saved, never printed.
+    Set-Content -Path $keyFile -Value $parsed.pair_key -NoNewline
+    Write-Host "Paired as ""$($parsed.paired)"". The key is in $keyFile (keep it private)."
+    exit 0
+}
 $reply
-if (($reply | ConvertFrom-Json).ok -ne $true) { exit 1 }
+if ($parsed.ok -ne $true) { exit 1 }

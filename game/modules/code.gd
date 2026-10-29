@@ -7,7 +7,7 @@ extends SlopitectModule
 # extends SlopitectModule, gets the same ctx and registers commands.
 #
 # Code can do anything the app can, so it never loads without your Yes in
-# the headset: code_load shows the code beside the question, with what it
+# the headset: code_load shows the code above the question, with what it
 # uses (files, the internet, other programs...). The Yes is for that exact
 # file: its fingerprint (SHA-256) is kept, so at the next start an approved
 # module loads by itself, and a module whose file changed since waits for a
@@ -16,9 +16,7 @@ extends SlopitectModule
 # back to whoever wrote it, and the fixed file needs a new Yes.
 
 const SETTINGS_PATH := "user://code.json"
-const REVIEW_PANEL := "code_review"
 const MAX_SOURCE := 200000
-const SHOWN_CHARS := 1800
 # What a module's code uses, shown with the question. A hint for you, not a
 # lock: code can reach the same things in other ways.
 const USES := {
@@ -148,21 +146,17 @@ func _load_command(request: Dictionary) -> Dictionary:
 	if _approved.get(module_name, "") == read["sha256"]:
 		return _load_now(module_name, read["sha256"])  # this exact file already has your Yes
 	var uses := _uses(read["source"])
-	_show_review(module_name, read["source"])
 	var reply: Dictionary = _confirm.ask(
 		"Load new code \"%s\"?" % module_name,
-		"%d lines. Uses: %s. The code is shown beside this." % [read["source"].count("\n") + 1, ", ".join(uses) if not uses.is_empty() else "nothing listed"],
+		"%d lines. Uses: %s. The code is shown above this." % [read["source"].count("\n") + 1, ", ".join(uses) if not uses.is_empty() else "nothing listed"],
 		func():
 			var now := _read(module_name)  # read again: the file may have changed while you looked
 			if now.has("error") or now["sha256"] != read["sha256"]:
 				return {"ok": false, "error": "the file changed while waiting for the answer; nothing was loaded"}
 			_approved[module_name] = read["sha256"]
 			_save_settings()
-			return _load_now(module_name, read["sha256"]))
-	if reply.get("wait") is SlopitectPending:
-		(reply["wait"] as SlopitectPending).done.connect(func(_r): _hide_review(), CONNECT_ONE_SHOT)
-	else:
-		_hide_review()
+			return _load_now(module_name, read["sha256"]),
+		_review_text(module_name, read["source"]))
 	return reply
 
 
@@ -204,9 +198,12 @@ func _read(module_name) -> Dictionary:
 	return {"name": module_name, "source": source, "sha256": FileAccess.get_sha256(path)}
 
 
-func _compile(source: String) -> Dictionary:
+func _compile(source: String, module_name: String) -> Dictionary:
 	var script := GDScript.new()
 	script.source_code = source
+	# A path of its own, so its errors say which module they came from (the
+	# errors module reads it). Nothing is at that path; it's only a name.
+	script.take_over_path("user://live-modules/%s.gd" % module_name)
 	_capture.take()
 	_capture.active = true
 	var err := script.reload()
@@ -225,7 +222,7 @@ func _load_now(module_name: String, sha256: String) -> Dictionary:
 		return {"ok": false, "error": read["error"]}
 	if read["sha256"] != sha256:
 		return {"ok": false, "error": "the file isn't the one approved"}
-	var compiled := _compile(read["source"])
+	var compiled := _compile(read["source"], module_name)
 	if compiled.has("error"):
 		_errors[module_name] = compiled["error"]
 		return {"ok": false, "error": compiled["error"]}
@@ -258,22 +255,11 @@ func _uses(source: String) -> Array:
 	return uses
 
 
-# The code to look at while you decide, on a panel beside the question.
-func _show_review(module_name: String, source: String) -> void:
-	var server: Node = ctx["server"]
-	server.run({"cmd": "ui_remove", "id_panel": REVIEW_PANEL})
-	var shown := source.left(SHOWN_CHARS) + ("\n... (%d more characters)" % (source.length() - SHOWN_CHARS) if source.length() > SHOWN_CHARS else "")
-	server.run({"cmd": "ui_add", "id_panel": REVIEW_PANEL, "title": "Code: " + module_name, "place": "front",
-		"distance": 0.8, "height": 0.25, "size": [0.95, 0.75], "color": "#0b0d11",
-		"elements": [
-			{"type": "text", "id": "title", "at": [0, 0.36], "width": 0.9, "font_size": 32, "color": "#ffcc1a", "text": "Code waiting for your Yes: modules/%s.gd" % module_name},
-			{"type": "text", "id": "code", "at": [0, 0.31], "width": 0.9, "font_size": 22, "mono": true, "color": "#d0d0d0", "text": shown},
-		]})
-	server.run({"cmd": "ui_show", "id_panel": REVIEW_PANEL, "visible": true})
-
-
-func _hide_review() -> void:
-	ctx["server"].run({"cmd": "ui_remove", "id_panel": REVIEW_PANEL})
+# The code to look at while you decide, all of it, on the question's own
+# sheet (drawn by the confirm module, so no live module can change what it
+# shows).
+func _review_text(module_name: String, source: String) -> String:
+	return "modules/%s.gd, all of it:\n\n%s" % [module_name, source]
 
 
 # --- Saving ---------------------------------------------------------------------

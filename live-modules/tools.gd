@@ -10,53 +10,36 @@ extends SlopitectModule
 # "buttons": [{"label", "action": a command}], "status": one line}.
 # The chosen tool gets:
 #   tool_selected(on: bool)  when it's chosen or another one is
-#   tool_trigger(down: bool) the right trigger, unless you're pointing at a
-#                            panel or a question is open
+#   tool_trigger(down: bool) the "point" action (the right trigger), unless
+#                            you're pointing at a panel or a question is open
 # Any module can add to the shared undo list with
 # push_undo(label, undo: Callable, redo: Callable).
 
 const PANEL := "tools"
 const SCAN_SECONDS := 0.5
 const MAX_UNDO := 50
-const UI_LAYER := 1 << 19  # the ui module's panels
 const CELL := Vector2(0.11, 0.05)
 const GAP := 0.012
 
-var _ui: SlopitectModule
 var _active := ""  # the chosen tool's id
 var _tools := {}  # id -> the module
 var _signature := ""  # what the panel was last built from
 var _undo: Array = []  # [{label, undo, redo}], newest last
 var _redo: Array = []
-var _ray: RayCast3D
 var _trigger_down := false
 var _since_scan := SCAN_SECONDS
 
 
 func setup() -> String:
-	_ui = ctx["modules"].module("ui")
-	if _ui == null:
-		return "tools needs the ui module (for its window)"
 	register("tools_list", _list, "the tools that are loaded, and which one is chosen")
 	register("tools_select", _select, "choose a tool: tool (its id, or \"\" for none)")
 	register("tools_undo", _undo_command, "undo the last change any tool made")
 	register("tools_redo", _redo_command, "redo the last undone change")
 	register("tools_status", _status, "the chosen tool, and what Undo and Redo would do")
-
-	# Its own pointer check, the same as the ui module's: the trigger is for
-	# the panel you're pointing at, not the tool.
-	_ray = RayCast3D.new()
-	_ray.target_position = Vector3(0, 0, -3.0)
-	_ray.collision_mask = UI_LAYER
-	ctx["right"].add_child(_ray)
-	ctx["right"].button_pressed.connect(_on_pressed)
-	ctx["right"].button_released.connect(_on_released)
 	return ""
 
 
 func _exit_tree() -> void:
-	if _ray and is_instance_valid(_ray):
-		_ray.queue_free()
 	if _tools.has(_active) and is_instance_valid(_tools[_active]):
 		_tools[_active].call("tool_selected", false)
 	ctx["server"].run({"cmd": "ui_remove", "id_panel": PANEL})
@@ -167,19 +150,23 @@ func _undo_label() -> String:
 
 # --- The trigger ---------------------------------------------------------------------
 
-func _on_pressed(button: String) -> void:
-	if button != "trigger_click" or not _tools.has(_active):
-		return
-	var hit := _ray.get_collider() as Node3D if _ray.is_colliding() else null
-	if (hit and hit.is_visible_in_tree()) or _ui.get("pointer_blocked"):
-		return  # that press is for a panel, or for the question that's open
+# The controls module asks the ui module first, so a press on a panel
+# never gets here, and it sends nothing while a question is open.
+func action_order() -> int:
+	return 10
+
+
+func on_action(action: String, down: bool) -> bool:
+	if action != "point":
+		return false
+	if not down:
+		_end_trigger()
+		return true
+	if not _tools.has(_active):
+		return false
 	_trigger_down = true
 	_tools[_active].call("tool_trigger", true)
-
-
-func _on_released(button: String) -> void:
-	if button == "trigger_click":
-		_end_trigger()
+	return true
 
 
 func _end_trigger() -> void:

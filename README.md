@@ -24,7 +24,9 @@ Working now:
 - **Every window is data** *(built, waiting on a headset test)*: the menu
   bar, the wrist panel and the chat window are panels of text, buttons and
   input boxes that you or the agent can change, add, move and remove while
-  the app runs. Grab a panel with the grip to move it.
+  the app runs. Grab a panel with the grip to move it. The panels and the
+  controllers are live modules (`live-modules/ui.gd`, `controls.gd`), not
+  part of the APK, so they can be swapped and rewritten.
 - **A chat window in the headset**: press Y to open a terminal-style window
   that shows each step the agent takes and a summary of its thinking, with
   a keyboard, Send and STOP. X on the left controller always stops the agent.
@@ -47,6 +49,8 @@ Working now:
 
 What you can change live, what needs a new APK, and how the agent is kept
 safe: [docs/LIVE-CHANGES-AND-SAFETY.md](docs/LIVE-CHANGES-AND-SAFETY.md).
+Everything built so far and how far each part is tested:
+[docs/PROJECT-STATE.md](docs/PROJECT-STATE.md).
 
 Planned:
 
@@ -127,11 +131,20 @@ PowerShell in that folder:
 ```
 Set-ExecutionPolicy -Scope Process Bypass
 .\adb forward tcp:7777 tcp:7777
+.\slopi.ps1 -Pair
 .\slopi.ps1 '{"cmd":"spawn","shape":"sphere","position":[0,1.5,-1],"color":"red"}'
 ```
 
 The first line lets this PowerShell window run the script; the second
 connects your PC's port 7777 to the app (again after each reconnect).
+`-Pair` is needed once per PC: other apps on the headset can reach the port
+too, so it only takes commands from programs you said Yes to. Say Yes in
+the headset; the pairing key is saved in `slopi-key.txt` next to the script
+(keep it private) and sent with every command. `pair_config` lists the
+paired programs, and `{"cmd":"pair_config","remove":"NAME"}` unpairs one.
+
+To talk to the agent from the PC and watch what it does, run
+[`tools/slopi-chat.ps1`](tools/slopi-chat.ps1) from the same folder.
 
 | Command | Fields | Example |
 | --- | --- | --- |
@@ -176,8 +189,8 @@ Windows (panels):
 Elements are `text` (optionally a live `source`: a read-only command's
 reply), `button` (its `action` is any command), `input` and `box`; the
 agent's [UI skill](game/skills/slopitect-ui/SKILL.md) lists their fields.
-In the headset, press the left controller's menu button (≡) for the bar
-and Y for the chat. Point with the right controller and pull the trigger to
+With the controls module's default bindings, press the left controller's
+menu button (≡) for the bar and Y for the chat. Point with the right controller and pull the trigger to
 press a button; hold the right grip to move a panel. A button's action can
 use `"position":"in_front"` for 1 m in front of you and `"{input:ID}"` for
 what's typed in a box. Panels are saved on the headset; menu buttons from
@@ -341,7 +354,13 @@ registering the plugin first.)
 | `game/agent/providers/` | One file per kind of AI service (`anthropic.gd`, `openai.gd`) |
 | `game/skills/` | The agent's shipped skills, one `SKILL.md` per folder |
 | `docs/LIVE-CHANGES-AND-SAFETY.md` | What changes live, what needs a new APK, and the safety rules |
+| `docs/PROJECT-STATE.md` | Everything built so far, how sure we are each part works, the rules, and what's open |
+| `docs/MODULE-FRAMEWORK.md` | The plan for live modules to plug into each other, and the review of the draft modules |
+| `live-modules/` | The live modules; `live-modules/drafts/` holds new ones waiting to be reworked |
+| `CLAUDE.md` | Working rules for Claude sessions on this repo |
 | `tools/slopi.ps1` | Sends one command from your PC and prints the reply |
+| `tools/slopi-chat.ps1` | Talks to the agent from your PC and shows its replies and tool calls as they happen |
+| `tools/slopi-backup.ps1` | Backs up a project from the headset into a git repository on the PC, and pushes it with -Push (private projects and assets/ are never taken) |
 | `ci/debug.keystore` | Debug signing key, so each build installs over the last |
 | `game/export_presets.cfg` | The "Quest 1" Android export (Quest 1 and 2 only) |
 | `.github/workflows/quest1-apk.yml` | Builds and checks the APK |

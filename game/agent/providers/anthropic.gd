@@ -24,8 +24,12 @@ func build_request(settings: Dictionary, system: String, history: Array, tools: 
 			"tool_results":
 				var blocks := []
 				for result in item["results"]:
+					var content = result["content"]
+					if result.has("image"):
+						content = [{"type": "text", "text": result["content"]}, {"type": "image",
+							"source": {"type": "base64", "media_type": result["image"]["media_type"], "data": result["image"]["base64"]}}]
 					blocks.append({"type": "tool_result", "tool_use_id": result["id"],
-						"content": result["content"], "is_error": result["is_error"]})
+						"content": content, "is_error": result["is_error"]})
 				if item.has("text"):
 					blocks.append({"type": "text", "text": item["text"]})
 				messages.append({"role": "user", "content": blocks})

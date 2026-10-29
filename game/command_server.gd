@@ -5,6 +5,10 @@ extends Node
 # running on the headset) can reach it, not the rest of the network. On the
 # PC: `.\adb forward tcp:7777 tcp:7777`, then connect to localhost:7777.
 #
+# Any app on the headset can reach that address too, so a connection must be
+# paired first (the pairing module): until it sends a known "pair_key" with a
+# command, it can only use ping and pair.
+#
 # One JSON object per line in, one JSON object per line out. Every reply has
 # "ok"; a failure also has "error" saying exactly what was wrong. The reply
 # echoes the request's "id" if it had one. Every command and its result is
@@ -27,6 +31,12 @@ var _commands := {}  # cmd -> {"module": String, "call": Callable, "summary": St
 # in turn, like a menu button's action) must pass the agent's guard.
 var agent_guard: Callable
 var _agent_depth := 0
+
+# Set by the pairing module: request -> "" when its pair_key is known, else why
+# not. Without it no connection gets past ping and pair.
+var client_guard: Callable
+var _paired_peers := {}  # StreamPeerTCP -> true once it showed a known key
+const WITHOUT_PAIRING := ["ping", "pair"]
 
 
 func _ready() -> void:
@@ -51,6 +61,7 @@ func _process(_delta: float) -> void:
 			print("Slopitect cmd: client disconnected (status %d)" % status)
 			_clients.erase(peer)
 			_buffers.erase(peer)
+			_paired_peers.erase(peer)
 			continue
 		var available := peer.get_available_bytes()
 		if available <= 0:
@@ -66,7 +77,7 @@ func _process(_delta: float) -> void:
 			var line := buffer.slice(0, newline).get_string_from_utf8().strip_edges()
 			buffer = buffer.slice(newline + 1)
 			if not line.is_empty():
-				_reply(peer, handle_line(line))
+				_reply(peer, handle_line(line, peer))
 			newline = buffer.find(10)
 		if buffer.size() > MAX_LINE_BYTES:
 			_reply(peer, {"ok": false, "error": "line longer than %d bytes without a newline; dropped it" % MAX_LINE_BYTES})
@@ -88,8 +99,8 @@ func _reply(peer: StreamPeerTCP, reply: Dictionary) -> void:
 
 
 # Parses one line, runs it and returns the reply. Public so tests can call it
-# without a socket.
-func handle_line(line: String) -> Dictionary:
+# without a socket (with no peer, no pairing is asked for).
+func handle_line(line: String, peer: StreamPeerTCP = null) -> Dictionary:
 	# A line that isn't valid JSON is logged as it came, so hide anything that
 	# looks like a key in it first.
 	var key_pattern := RegEx.create_from_string("(\\w*_key\\W*)[^,}\\s]*")
@@ -102,6 +113,14 @@ func handle_line(line: String) -> Dictionary:
 		return _log_result(line, {"ok": false, "error": "expected a JSON object like {\"cmd\": \"list\"}"})
 	var request: Dictionary = json.data
 	line = JSON.stringify(_redacted(request))
+	if peer != null and not _paired_peers.has(peer) and not request.get("cmd") in WITHOUT_PAIRING:
+		var problem := "the pairing module isn't loaded, so no program can connect"
+		if client_guard.is_valid():
+			problem = client_guard.call(request)
+		if not problem.is_empty():
+			return _log_result(line, {"ok": false, "error": problem})
+		_paired_peers[peer] = true
+	request.erase("pair_key")  # the modules never see it
 	var reply := run(request)
 	if request.has("id"):
 		var id = request["id"]
