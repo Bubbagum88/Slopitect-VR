@@ -20,7 +20,7 @@ env:
   # sherpa-onnx (Apache-2.0): fast streaming speech to text on the headset
   # (vtt.gd's "sherpa" engine). Its released Android library, used as it is.
   SHERPA_ONNX_VERSION: 2.0.1
-  SHERPA_AAR_SHA256: ""
+  SHERPA_AAR_SHA256: a8d09d1d32f3eb8520482c6d3d43fae674681c5b050385967c70a3c2c9bf0ee7
 
 jobs:
   whisper:
