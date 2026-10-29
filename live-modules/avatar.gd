@@ -865,6 +865,16 @@ func _outfit_command(request: Dictionary) -> Dictionary:
 	return {"ok": true, "outfit": outfit_name}
 
 
+# Its section of the Settings window (settings.gd): the outfit it wears.
+func settings_info() -> Dictionary:
+	var options := []
+	for outfit_name in _all_outfits():
+		options.append({"label": outfit_name, "value": outfit_name})
+	return {"title": "The avatar's outfit", "order": 40, "settings": [
+		{"id": "outfit", "type": "choice", "value": _outfit, "options": options, "columns": 2, "set": {"cmd": "avatar_outfit", "name": "{value}"}},
+	]}
+
+
 func _outfits_command(_request: Dictionary) -> Dictionary:
 	return {"ok": true, "wearing": _outfit, "outfits": PackedStringArray(_all_outfits().keys()), "custom": _custom_outfits.duplicate(true)}
 
