@@ -14,8 +14,11 @@ extends SlopitectModule
 # - Hand menu shows or hides the hand menu.
 # - Files & modules opens worlds.gd's window, when it's loaded.
 # The hand menu sits above the left controller: Home (this menu), Settings,
-# Undo / Redo (tools.gd's one list for every change), and a button for each
-# module with hand_info() (see _hand_items).
+# Undo / Redo (tools.gd's one list for every change), a button for each
+# module with hand_info() (see _hand_items), and the wrist panel's buttons
+# (the shapes, and any you added there): the wrist panel is hidden while
+# this module is loaded, so there's one hand menu. Each button that opens a
+# window closes it again.
 # Each menu is a ui panel ("pause", "pause_load", "pause_worlds",
 # "hand_menu"), kept by the window module like every
 # panel; this fills them again each time the menu opens.
@@ -25,6 +28,7 @@ const PANEL := "pause"
 const LOAD_PANEL := "pause_load"
 const WORLDS_PANEL := "pause_worlds"
 const HAND_PANEL := "hand_menu"
+const WRIST_PANEL := "wrist"  # the window module's own small hand panel, folded into the hand menu
 const MENUS := [PANEL, LOAD_PANEL, "pause_worlds"]
 const PAGES := {"main": PANEL, "load": LOAD_PANEL, "worlds": "pause_worlds"}
 const OLD_SETTINGS_PANEL := "pause_settings"  # settings.gd took the Settings page over
@@ -47,6 +51,7 @@ func _exit_tree() -> void:
 		return  # the app is closing, not unloading this: the menus stay for next time
 	for id_panel in MENUS + [HAND_PANEL]:
 		ctx["server"].run({"cmd": "ui_remove", "id_panel": id_panel})
+	ctx["server"].run({"cmd": "ui_show", "id_panel": WRIST_PANEL, "visible": true})
 
 
 var _hand_signature := ""  # what the hand menu was last built from
@@ -64,10 +69,12 @@ func _process(delta: float) -> void:
 	var ui := _ui()
 	if ui == null:
 		return
-	var signature := JSON.stringify([ui.get_instance_id(), _has("tools"), _has("settings"), _hand_items()])
+	var signature := JSON.stringify([ui.get_instance_id(), _has("tools"), _has("settings"), _hand_items(), _wrist_buttons()])
 	if signature != _hand_signature or not _run({"cmd": "ui_get", "id_panel": HAND_PANEL}).get("ok", false):
 		_hand_signature = signature
 		_build_hand()
+	elif _shown(WRIST_PANEL):
+		_run({"cmd": "ui_show", "id_panel": WRIST_PANEL, "visible": false})  # one hand menu
 
 
 # The left home button opens and closes the pause menu. This module asks
@@ -287,13 +294,15 @@ func _hand_items() -> Array:
 func _build_hand() -> void:
 	var buttons := [_button("home", "Home", {"cmd": "pause_do", "act": "toggle"}, "accent", HAND_BUTTON)]
 	if _has("settings"):
-		buttons.append(_button("settings", "Settings", {"cmd": "settings_do", "act": "show"}, "button", HAND_BUTTON))
+		buttons.append(_button("settings", "Settings", {"cmd": "settings_do", "act": "toggle"}, "button", HAND_BUTTON))
 	if _has("tools"):
 		buttons.append(_button("undo", "Undo", {"cmd": "tools_undo"}, "button", HAND_BUTTON))
 		buttons.append(_button("redo", "Redo", {"cmd": "tools_redo"}, "button", HAND_BUTTON))
 	for info in _hand_items():
 		var action: Dictionary = info["action"] if info.has("action") else {"cmd": "pause_do", "act": "toggle_panel", "panel": info["panel"]}
 		buttons.append(_button("m_" + str(info["id"]).left(30), str(info["label"]), action, "button", HAND_BUTTON))
+	for button in _wrist_buttons():
+		buttons.append(_button("w_" + str(button["id"]).left(30), str(button.get("label", button["id"])), button["action"], "button", HAND_BUTTON))
 	var elements := [{"type": "grid", "id": "buttons", "columns": 2, "children": buttons}]
 	var reply: Dictionary
 	if _run({"cmd": "ui_get", "id_panel": HAND_PANEL}).get("ok", false):
@@ -303,6 +312,21 @@ func _build_hand() -> void:
 			"chrome": true, "layout": "column", "visible": true, "elements": elements})
 	if not reply.get("ok", false):
 		push_error("Slopitect pause: the hand menu could not be built: %s" % reply.get("error", "?"))
+		return
+	if _shown(WRIST_PANEL):
+		_run({"cmd": "ui_show", "id_panel": WRIST_PANEL, "visible": false})
+
+
+# The wrist panel's buttons that run a command, to go on the hand menu.
+func _wrist_buttons() -> Array:
+	var out := []
+	var stack: Array = _run({"cmd": "ui_get", "id_panel": WRIST_PANEL}).get("panel", {}).get("elements", []).duplicate()
+	while not stack.is_empty():
+		var element: Dictionary = stack.pop_front()
+		stack.append_array(element.get("children", []))
+		if element.get("type") == "button" and typeof(element.get("action")) == TYPE_DICTIONARY:
+			out.append(element)
+	return out
 
 
 func _load_elements() -> Array:
