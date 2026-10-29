@@ -7,14 +7,17 @@ extends SlopitectModule
 # the thumb when it rests on a button or the thumbstick. How far each is
 # pressed comes from the controls module (value()); without it the hands
 # stay open. The boxes come back when the module is unloaded.
-# The colours change from the PC only (hands_config) and are kept in the
-# app's own storage (user://hands.json).
+# Hide hands: a switch in the Settings window (hands_hide, also usable by the
+# agent). The hands also hide by themselves while the beatsaber module is
+# loaded, and come back when it is unloaded.
+# The colours and the hide switch are kept in the app's own storage (user://hands.json).
 
 const SETTINGS_PATH := "user://hands.json"
 const DEFAULTS := {
 	"skin": "#e0ac80",
 	"nails_left": ["#ff3b7a", "#ff3b7a", "#ff3b7a", "#ff3b7a", "#ff3b7a"],
 	"nails_right": ["#ff3b7a", "#ff3b7a", "#ff3b7a", "#ff3b7a", "#ff3b7a"],
+	"hidden": false,
 }
 const FINGER_LEN := [0.072, 0.08, 0.075, 0.06]  # index to pinky, metres
 const FINGER_R := [0.0095, 0.0095, 0.009, 0.008]
@@ -31,6 +34,7 @@ var _hands := []  # {"node", "hand", "side", "fingers", "thumb", "tbase", "curl"
 var _skin: StandardMaterial3D
 var _nails := {}  # "left"/"right" -> 5 materials, thumb to pinky
 var _boxes := []  # the APK's controller boxes we hid
+var _beat := false  # true while the beatsaber module is loaded
 
 
 func setup() -> String:
@@ -53,9 +57,11 @@ func setup() -> String:
 		if box != null and box.visible:
 			box.visible = false
 			_boxes.append(box)
+	_apply_visible()
 	register("hands_status", _status, "the hands' colours")
 	register("hands_colours", _colours_command, "change the hands' colours in the headset (a comfort setting): any of skin (#rrggbb), nails (#rrggbb, every nail)")
-	register("hands_config", _config, "from the PC only: any of skin (#rrggbb), nails (#rrggbb, or 1 to 5 of them thumb to pinky, for both hands), nails_left, nails_right, or reset true")
+	register("hands_hide", _hide_command, "show or hide the hands in the headset (a comfort setting): hidden (true or false)")
+	register("hands_config", _config, "from the PC only: any of skin (#rrggbb), nails (#rrggbb, or 1 to 5 of them thumb to pinky, for both hands), nails_left, nails_right, hidden (true/false), or reset true")
 	return ""
 
 
@@ -71,6 +77,10 @@ func _exit_tree() -> void:
 
 
 func _process(delta: float) -> void:
+	var beat: bool = ctx["modules"].module("beatsaber") != null
+	if beat != _beat:
+		_beat = beat
+		_apply_visible()
 	var controls: SlopitectModule = ctx["modules"].module("controls")
 	var k := clampf(delta * FOLLOW, 0.0, 1.0)
 	for h in _hands:
@@ -95,6 +105,16 @@ func _process(delta: float) -> void:
 		(h["tbase"] as Node3D).rotation_degrees = Vector3(-20.0 * curl[0], side * (-45.0 + 45.0 * curl[0]), 0.0)
 		(h["thumb"][1] as Node3D).rotation.x = -deg_to_rad(30.0) * curl[0]
 		(h["thumb"][2] as Node3D).rotation.x = -deg_to_rad(45.0) * curl[0]
+
+
+# --- Hiding ----------------------------------------------------------------------------
+
+# The hands show unless the person hid them in Settings or beatsaber is loaded.
+func _apply_visible() -> void:
+	var show: bool = not (settings["hidden"] == true or _beat)
+	for h in _hands:
+		if is_instance_valid(h["node"]):
+			(h["node"] as Node3D).visible = show
 
 
 # --- Building a hand -------------------------------------------------------------------
@@ -184,7 +204,8 @@ func _status(_request: Dictionary) -> Dictionary:
 
 
 # Its section of the Settings window (settings.gd): a few skin and nail
-# colours to pick from; any other colour is hands_colours or hands_config.
+# colours to pick from, and a switch to hide the hands; any other colour is
+# hands_colours or hands_config.
 func settings_info() -> Dictionary:
 	var out := []
 	for part in [["skin", "Skin", SKINS, settings["skin"]], ["nails", "Nails", NAILS, settings["nails_left"][0]]]:
@@ -193,11 +214,13 @@ func settings_info() -> Dictionary:
 			options.append({"label": colour_name, "value": part[2][colour_name], "color": part[2][colour_name]})
 		out.append({"id": part[0], "type": "choice", "label": part[1], "value": part[3], "options": options, "columns": 3,
 			"set": {"cmd": "hands_colours", part[0]: "{value}"}})
+	out.append({"id": "hidden", "type": "toggle", "label": "Hide hands", "value": settings["hidden"],
+		"set": {"cmd": "hands_hide", "hidden": "{value}"}})
 	return {"title": "Hands", "order": 30, "settings": out}
 
 
 # Skin and nail colours can change in the headset (isaac's choice,
-# 2026-10-29); one colour per nail and reset stay with hands_config.
+# 2026-10-29); one colour per nail, reset and the hide switch stay with hands_config.
 func _colours_command(request: Dictionary) -> Dictionary:
 	var changes := {}
 	for key in request:
@@ -209,10 +232,21 @@ func _colours_command(request: Dictionary) -> Dictionary:
 	return _config(changes)
 
 
+# The hide switch, in the headset and from the agent.
+func _hide_command(request: Dictionary) -> Dictionary:
+	var on = request.get("hidden")
+	if typeof(on) == TYPE_STRING:
+		on = on == "true"
+	if typeof(on) != TYPE_BOOL:
+		return {"ok": false, "error": "hands_hide needs hidden: true or false"}
+	return _config({"hidden": on})
+
+
 func _config(request: Dictionary) -> Dictionary:
 	if request.get("reset", false) == true:
 		settings = DEFAULTS.duplicate(true)
 		_apply_colours()
+		_apply_visible()
 		_save()
 		return _status({})
 	var changed := settings.duplicate(true)
@@ -233,10 +267,18 @@ func _config(request: Dictionary) -> Dictionary:
 				for hand in (["left", "right"] if key == "nails" else [key.trim_prefix("nails_")]):
 					for i in colours.size():
 						changed["nails_" + hand][i] = colours[i]
+			"hidden":
+				var on = request[key]
+				if typeof(on) == TYPE_STRING:
+					on = on == "true"
+				if typeof(on) != TYPE_BOOL:
+					return {"ok": false, "error": "\"hidden\" must be true or false"}
+				changed["hidden"] = on
 			_:
-				return {"ok": false, "error": "unknown setting \"%s\" (one of: skin, nails, nails_left, nails_right, reset)" % key}
+				return {"ok": false, "error": "unknown setting \"%s\" (one of: skin, nails, nails_left, nails_right, hidden, reset)" % key}
 	settings = changed
 	_apply_colours()
+	_apply_visible()
 	_save()
 	return _status({})
 
@@ -267,3 +309,5 @@ func _load() -> void:
 		var colours = saved.get(key)
 		if typeof(colours) == TYPE_ARRAY and colours.size() == 5 and colours.all(_colour):
 			settings[key] = colours.duplicate()
+	if typeof(saved.get("hidden")) == TYPE_BOOL:
+		settings["hidden"] = saved["hidden"]
