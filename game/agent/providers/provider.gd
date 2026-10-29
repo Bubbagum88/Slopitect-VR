@@ -18,6 +18,9 @@ extends RefCounted
 # its own replies back unchanged (Claude needs its thinking blocks back).
 #
 # Tools are [{"name": String, "description": String, "schema": Dictionary}].
+# A tool with "server": {"kind": "web_search" or "web_fetch", "max_uses",
+# and for web_fetch "max_content_tokens"} runs on the provider's side, inside
+# the request; a provider that has no such tool leaves it out.
 
 
 # Returns {"url": String, "headers": PackedStringArray, "body": String}, or
@@ -29,8 +32,11 @@ func build_request(_settings: Dictionary, _system: String, _history: Array, _too
 # Returns {"text": String, "tool_calls": Array, "stop": String, "raw": Variant,
 # "usage": Dictionary (the provider's own), "tokens": {"input", "output",
 # "cached"} (input counts all of the prompt; cached is the part read from the
-# provider's cache), and optionally "thinking": String}, or {"error": String}. "stop" is one of "tool_use",
-# "end", "max_tokens", "refusal", or the provider's own word for anything else.
+# provider's cache; optionally "searches", the web searches it ran), and optionally "thinking": String
+# and "web": [String] (what it searched for or fetched)}, or {"error": String}. "stop" is one of "tool_use",
+# "end", "max_tokens", "refusal", "pause" (the provider paused a long turn of
+# its own tools: send the conversation again to carry on), or the provider's
+# own word for anything else.
 func parse_response(_code: int, _body: String) -> Dictionary:
 	return {"error": "this provider does not parse replies"}
 

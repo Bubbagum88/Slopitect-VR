@@ -11,7 +11,7 @@
 | Files in the Slopitect folder | `files_*` commands | It's the headset's storage (`/sdcard/Slopitect`) |
 | Which AI the agent uses | `agent_config` from the PC: `provider`, `model`, `base_url`, `api_key` | Yes, `user://agent.json` |
 | What the agent may do | `agent_config` from the PC: `allowed_tools` | Yes |
-| How the agent works | `agent_config`: `effort`, `max_tokens`, `max_tool_rounds`, `show_thinking`, and the token limits `max_tokens_per_ask`, `max_context_tokens`, `max_tool_result_chars` | Yes |
+| How the agent works | `agent_config`: `effort`, `max_tokens`, `max_tool_rounds`, `show_thinking`, and the token limits `max_tokens_per_ask`, `max_context_tokens`, `max_tool_result_chars`, and the web limits `web_search_max_uses`, `web_fetch_max_uses`, `web_fetch_max_tokens`, `max_searches_per_ask` | Yes |
 | Speech out | `tts_set` (comfort: speed, pitch, volume, voice), also in the Settings window | Yes, `user://tts.json` |
 | Hold-to-talk | `vtt_config` from the PC (engine, service, key); `send_to_agent` with `vtt_set` too | Yes, `user://vtt.json` |
 | Personal folders the agent may reach | `files_config` from the PC (`unblock`, `block`) | Yes, `user://files.json` |

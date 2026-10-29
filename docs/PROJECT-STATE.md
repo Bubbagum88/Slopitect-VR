@@ -35,7 +35,7 @@ a Yes in the headset. Modules stay separate and swappable.
 | Empty room | Starts OpenXR on the Quest 1; logs GPU, runtime, resolution, frame rate, memory | Headset (72 Hz, about 71.7 fps, 34 MB) |
 | Command server | Port 7777 on loopback, JSON lines; modules register commands | Headset |
 | Modules | `game/modules.json`; a module that fails is logged and skipped | Headset |
-| Agent | Claude (Anthropic) and OpenAI-style providers; tools are the app's commands; skills are `SKILL.md` files; `allowed_tools` firewall; prompt caching and token limits; the caveman short-reply skill (always on, from agent_tuning.gd) | Headset with a real key (needs a workspace-scoped key) |
+| Agent | Claude (Anthropic) and OpenAI-style providers; tools are the app's commands; skills are `SKILL.md` files; `allowed_tools` firewall; prompt caching and token limits; web search and web fetch through Claude's own tools (PC-only limits; PC-tested against a scripted API, not yet with a real key); the caveman short-reply skill (always on, from agent_tuning.gd) | Headset with a real key (needs a workspace-scoped key) |
 | Chat window | Y opens a terminal-style window with keyboard, Send and STOP; left X always stops the agent | Headset (typing) |
 | Files | The agent's own `/sdcard/Slopitect` folder freely; anything else needs your Yes each time | Headset (`files_status`) |
 | Live code | `code_load` loads a module after your Yes; `code_unload` turns it off | PC |
