@@ -26,7 +26,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: whisper-out
-          key: godot-whisper-${{ env.WHISPER_COMMIT }}-android-arm64-linux-x86_64-ndk${{ env.WHISPER_NDK }}
+          key: godot-whisper-${{ env.WHISPER_COMMIT }}-android-arm64-linux-x86_64-ndk${{ env.WHISPER_NDK }}-sgemm-fix1
 
       - if: steps.cache.outputs.cache-hit != 'true'
         uses: actions/checkout@v4
@@ -35,6 +35,12 @@ jobs:
           ref: ${{ env.WHISPER_COMMIT }}
           path: godot-whisper
           submodules: true
+
+      - uses: actions/checkout@v4
+        if: steps.cache.outputs.cache-hit != 'true'
+        with:
+          path: slopitect
+          sparse-checkout: ci
 
       # The Quest's library goes in the APK. The Linux one is for the editor
       # that imports and exports the project here: Godot 4.7.2 aborts on exit
@@ -48,8 +54,17 @@ jobs:
           test -d "$ANDROID_HOME/ndk/${WHISPER_NDK}" || { echo "::error::NDK ${WHISPER_NDK} did not install"; exit 1; }
           pip install scons
           cd godot-whisper
+          # The plugin's own sgemm.cpp patch leaves a function undefined on the
+          # Quest 1's CPU, and the headset then can't load the library.
+          python3 ../slopitect/ci/patch-godot-whisper.py
           scons platform=android arch=arm64 target=template_release -j"$(nproc)"
           scons platform=linux arch=x86_64 target=template_release -j"$(nproc)"
+          # A shared library links even with symbols missing; Android only
+          # finds out when it loads it. Internal (anonymous-namespace) and
+          # whisper/ggml symbols can only come from the library itself.
+          nm="$ANDROID_HOME/ndk/${WHISPER_NDK}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-nm"
+          missing=$("$nm" -D --undefined-only bin/addons/godot_whisper/bin/libgodot_whisper.android.template_release.arm64.so | grep -E '_GLOBAL__N_|ggml_|whisper_' || true)
+          [ -z "$missing" ] || { echo "::error::the Android library uses functions it doesn't have:"; echo "$missing"; exit 1; }
           mkdir -p ../whisper-out/bin
           cp bin/addons/godot_whisper/bin/libgodot_whisper.android.template_release.arm64.so \
             bin/addons/godot_whisper/bin/libgodot_whisper.linux.template_release.x86_64.so ../whisper-out/bin/

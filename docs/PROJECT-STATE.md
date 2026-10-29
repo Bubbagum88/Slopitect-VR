@@ -36,7 +36,7 @@ a Yes in the headset. Modules stay separate and swappable.
 | Agent | Claude (Anthropic) and OpenAI-style providers; tools are the app's commands; skills are `SKILL.md` files; `allowed_tools` firewall; prompt caching and token limits; short replies (caveman skill) | Headset with a real key (needs a workspace-scoped key) |
 | Chat window | Y opens a terminal-style window with keyboard, Send and STOP; left X always stops the agent | Headset (typing) |
 | Files | The agent's own `/sdcard/Slopitect` folder freely; anything else needs your Yes each time | Headset (`files_status`) |
-| Voice | Speech out through Android TTS; hold-to-talk speech to text on the headset (godot-whisper) | TTS returns ok with SherpaTTS; audible not confirmed; STT not working yet (needs the startup log) |
+| Voice | Speech out through Android TTS; hold-to-talk speech to text on the headset (godot-whisper) | TTS returns ok with SherpaTTS; audible not confirmed; STT: the headset couldn't load the whisper library (a missing function, fixed in CI; new APK not yet on the headset) |
 | Live code | `code_load` loads a module after your Yes; `code_unload` turns it off | PC |
 | Confirm | The Yes/No window only you can answer; shows a module's whole code on its own sheet (right stick scrolls, 5 min wait) | PC |
 | View | `view_look` gives the agent a picture of the world | PC |
@@ -126,8 +126,13 @@ container).
 
 - **Headset test of the next APK** (PR #7): view, errors, pairing, the code
   sheet, controls and ui as live modules, and every live module.
-- **Speech to text** on the headset is not working; needs the startup log.
-  Whether speech out is audible is not confirmed.
+- **Speech to text** on the headset: the startup log showed `dlopen failed:
+  cannot locate symbol _ZN12_GLOBAL__N_14loadI13__Float32x4_ttEET_PKT0_`.
+  godot-whisper's own sgemm.cpp patch hid that function on CPUs without
+  half-float vector maths (the Quest 1); `ci/patch-godot-whisper.py` keeps it,
+  and CI now fails if the library is missing any of its own functions.
+  Needs the new APK on the headset, then `voice_config` with
+  `stt_engine` `"local"`. Whether speech out is audible is not confirmed.
 - **Module framework** ([MODULE-FRAMEWORK.md](MODULE-FRAMEWORK.md)): the
   owner's decisions, then the live-module steps, then the APK pieces.
 - **Roadmap** (README): Claude on the PC through MCP (step 4), backups to
