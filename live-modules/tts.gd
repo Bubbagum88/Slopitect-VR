@@ -7,14 +7,25 @@ extends SlopitectModule
 # replies, voice, rate, pitch, volume) are comfort settings: they change in
 # the headset's Settings window or with tts_set.
 #
-# Godot's Android speech sends the next utterance only after the engine says
-# the last one is done. An engine that never says so (its process closed, or
-# it dropped one) would hold everything after it silent, so speech that runs
-# far past what its text could take is stopped and logged.
+# On the headset the speech is played by Slopitect itself: the engine
+# writes each sentence to a sound file (TextToSpeech.synthesizeToFile,
+# reached through Godot's JavaClassWrapper) and the app plays it. The
+# Quest 1 played the engine's own sound (Android showed it playing, at full
+# volume, nothing muted) but nothing could be heard while Slopitect was in
+# front. Where that can't work (not Android, or the Java calls fail; the
+# reason is in tts_status and the log), the engine speaks for itself as before.
+#
+# Then Godot's Android speech sends the next utterance only after the engine
+# says the last one is done. An engine that never says so (its process
+# closed, or it dropped one) would hold everything after it silent, so
+# speech that runs far past what its text could take is stopped and logged.
 
 const SETTINGS_PATH := "user://tts.json"
 const OLD_SETTINGS_PATH := "user://voice.json"  # the APK's voice module kept these before
 const POLL_SECONDS := 0.5
+const FILE_POLL_SECONDS := 0.1
+const SENTENCE_CHARS := 200  # sentences are joined up to about this long; the first plays while the rest are written
+const ENGINE_NOT_HEARD := -99  # onInit hasn't come yet
 const MAX_SAY := 2000
 const SPEECH_GRACE_SECONDS := 15.0
 const SPEECH_SECONDS_PER_CHAR := 0.2  # far slower than any voice at rate 1
@@ -35,11 +46,29 @@ var _since_poll := 0.0
 var _seen_reply := ""
 var _last := ""  # what happened last, for tts_status
 
+# Playing in the app (see the top).
+var _in_app_problem := "not started"  # why speech can't be played in the app; "" when it can
+var _java_tts  # android.speech.tts.TextToSpeech
+var _java_listener  # its OnInitListener, kept so it isn't collected
+var _java_file  # the java.io.File class
+var _init_status := ENGINE_NOT_HEARD  # onInit's status: 0 ready, anything else failed
+var _waiting := []  # what to say once the engine is ready: [text, voice]
+var _jobs := []  # sentences being written, in order: {path, chars, since, stream}
+var _player: AudioStreamPlayer
+var _next_id := 0
+var _since_files := 0.0
+var _voice_set := ""  # the voice the in-app engine was last set to
+
 
 func setup() -> String:
 	if not ProjectSettings.get_setting("audio/general/text_to_speech", false):
 		return "this build has text to speech switched off (audio/general/text_to_speech)"
 	_load_settings()
+	_player = AudioStreamPlayer.new()
+	add_child(_player)
+	_in_app_problem = _start_in_app()
+	if not _in_app_problem.is_empty():
+		print("Slopitect tts: the speech engine plays its own sound (%s)" % _in_app_problem)
 	# A reply already there when this loads isn't read out.
 	_seen_reply = String(ctx["server"].run({"cmd": "agent_status"}).get("last_reply", ""))
 	register("tts_say", _say, "say something aloud through the headset's speech engine: text, optional voice (an id from tts_voices); waits for anything already being said")
@@ -53,6 +82,9 @@ func setup() -> String:
 
 func _exit_tree() -> void:
 	DisplayServer.tts_stop()
+	if _java_tts != null:
+		_stop_in_app()
+		_java_tts.shutdown()
 
 
 func settings_info() -> Dictionary:
@@ -78,6 +110,10 @@ func settings_info() -> Dictionary:
 
 
 func _process(delta: float) -> void:
+	_since_files += delta
+	if _since_files >= FILE_POLL_SECONDS:
+		_since_files = 0.0
+		_update_in_app()
 	_since_poll += delta
 	if _since_poll < POLL_SECONDS:
 		return
@@ -108,6 +144,12 @@ func _voice_list(fresh := false) -> Array:
 # For other modules: says text aloud; "" when it's on its way, or why not.
 # interrupt stops what is being said first; otherwise it waits its turn.
 func speak(text: String, voice := "", interrupt := false) -> String:
+	text = text.left(MAX_SAY)
+	if _in_app_problem.is_empty():
+		if interrupt:
+			_stop_in_app()
+		_waiting.append([text, voice])
+		return ""
 	var voices := _voice_list()
 	if voices.is_empty():
 		return "the headset has no text-to-speech voices (no speech engine installed, or it isn't ready yet)"
@@ -115,7 +157,6 @@ func speak(text: String, voice := "", interrupt := false) -> String:
 		voice = settings["voice"]
 	if voice.is_empty() or not voices.any(func(v): return v["id"] == voice):
 		voice = voices[0]["id"]
-	text = text.left(MAX_SAY)
 	var now := Time.get_ticks_msec() / 1000.0
 	var seconds := SPEECH_GRACE_SECONDS + text.length() * SPEECH_SECONDS_PER_CHAR / float(settings["rate"])
 	# Queued speech starts after what is already being said.
@@ -124,9 +165,159 @@ func speak(text: String, voice := "", interrupt := false) -> String:
 	return ""
 
 
-# For other modules: whether the engine says it is speaking.
+# For other modules: whether something is being said (or about to be).
 func speaking() -> bool:
+	if _in_app_problem.is_empty():
+		return _player.playing or not _jobs.is_empty() or not _waiting.is_empty()
 	return _speech_deadline > 0.0 and DisplayServer.tts_is_speaking()
+
+
+# --- Playing in the app ---------------------------------------------------------
+
+# Makes the engine's TextToSpeech; "" when it worked, or why not.
+func _start_in_app() -> String:
+	if OS.get_name() != "Android":
+		return "not on Android"
+	if not Engine.has_singleton("AndroidRuntime") or not Engine.has_singleton("JavaClassWrapper"):
+		return "this build has no AndroidRuntime or JavaClassWrapper"
+	var wrapper = Engine.get_singleton("JavaClassWrapper")
+	var app = Engine.get_singleton("AndroidRuntime").getApplicationContext()
+	if app == null:
+		return "Android gave no application context"
+	# onInit comes on an Android thread; it only sets the status.
+	_java_listener = wrapper.create_sam_callback("android.speech.tts.TextToSpeech$OnInitListener", func(status: int) -> void: _init_status = status)
+	if _java_listener == null:
+		return "couldn't make the OnInitListener (%s)" % _java_error(wrapper)
+	_java_tts = wrapper.wrap("android.speech.tts.TextToSpeech").TextToSpeech(app, _java_listener)
+	if _java_tts == null:
+		return "couldn't make a TextToSpeech (%s)" % _java_error(wrapper)
+	_java_file = wrapper.wrap("java.io.File")
+	if _java_file == null:
+		return "couldn't reach java.io.File (%s)" % _java_error(wrapper)
+	print("Slopitect tts: speech will play in the app; waiting for the speech engine to start")
+	return ""
+
+
+func _java_error(wrapper) -> String:
+	var e = wrapper.get_exception()
+	return "no Java exception" if e == null else String(e.toString())
+
+
+# Hands what's waiting to the engine once it's ready, turns written files
+# into sound, and plays them in order.
+func _update_in_app() -> void:
+	if not _in_app_problem.is_empty():
+		return
+	if _init_status == ENGINE_NOT_HEARD:
+		return
+	if _init_status != 0:
+		_in_app_problem = "the speech engine failed to start (onInit status %d)" % _init_status
+		_note(_in_app_problem + "; the engine plays its own sound instead")
+		var waiting := _waiting.duplicate()
+		_waiting.clear()
+		for item in waiting:
+			speak(item[0], item[1])
+		return
+	while not _waiting.is_empty():
+		var item: Array = _waiting.pop_front()
+		_write(item[0], item[1])
+	var now := Time.get_ticks_msec() / 1000.0
+	for job in _jobs:
+		if job["stream"] == null and _written(job["path"]):
+			job["stream"] = AudioStreamWAV.load_from_file(job["path"])
+			DirAccess.remove_absolute(job["path"])
+			if job["stream"] == null:
+				job["stream"] = false
+				_note("the speech engine wrote a sound file Godot couldn't read")
+	if _jobs.is_empty() or _player.playing:
+		return
+	var head: Dictionary = _jobs[0]
+	if head["stream"] == null:
+		# Written in order, so the first is late only if the engine is stuck.
+		if now - head["since"] > SPEECH_GRACE_SECONDS + head["chars"] * SPEECH_SECONDS_PER_CHAR:
+			_note("the speech engine never finished writing a sentence; skipped it")
+			DirAccess.remove_absolute(head["path"])
+			_jobs.pop_front()
+			if not _jobs.is_empty():
+				_jobs[0]["since"] = now
+		return
+	_jobs.pop_front()
+	if not _jobs.is_empty():
+		_jobs[0]["since"] = now
+	if head["stream"] is AudioStreamWAV:
+		_player.stream = head["stream"]
+		_player.volume_db = linear_to_db(maxf(float(settings["volume"]) / 100.0, 0.001))
+		_player.play()
+
+
+# Asks the engine to write each sentence of text to its own file.
+func _write(text: String, voice: String) -> void:
+	var wrapper = Engine.get_singleton("JavaClassWrapper")
+	_java_tts.setSpeechRate(float(settings["rate"]))
+	_java_tts.setPitch(float(settings["pitch"]))
+	if voice.is_empty():
+		voice = settings["voice"]
+	if voice != _voice_set:
+		_voice_set = voice
+		if not voice.is_empty():
+			_set_java_voice(voice)
+	var now := Time.get_ticks_msec() / 1000.0
+	for sentence in _sentences(text):
+		_next_id += 1
+		var path := OS.get_cache_dir().path_join("slopitect-speech-%d.wav" % _next_id)
+		DirAccess.remove_absolute(path)
+		var result = _java_tts.synthesizeToFile(sentence, null, _java_file.File(path), "slopitect-%d" % _next_id)
+		if typeof(result) != TYPE_INT or result != 0:
+			_note("the speech engine wouldn't write the speech (synthesizeToFile gave %s; %s)" % [str(result), _java_error(wrapper)])
+			return
+		_jobs.append({"path": path, "chars": sentence.length(), "since": now, "stream": null})
+
+
+func _set_java_voice(voice: String) -> void:
+	var voices = _java_tts.getVoices()
+	if voices == null:
+		_note("the speech engine listed no voices; using its default")
+		return
+	for v in voices.toArray():
+		if String(v.getName()) == voice:
+			_java_tts.setVoice(v)
+			return
+	_note("the speech engine has no voice \"%s\"; using its default" % voice)
+
+
+# Sentences joined up to about SENTENCE_CHARS, so the first can play while
+# the engine writes the rest.
+func _sentences(text: String) -> PackedStringArray:
+	var out := PackedStringArray()
+	var current := ""
+	var regex := RegEx.create_from_string("[^.!?\\n]*[.!?]+\\s*|[^.!?\\n]+|\\n+")
+	for m in regex.search_all(text):
+		var piece := m.get_string()
+		if not current.is_empty() and current.length() + piece.length() > SENTENCE_CHARS:
+			out.append(current.strip_edges())
+			current = ""
+		current += piece
+	if not current.strip_edges().is_empty():
+		out.append(current.strip_edges())
+	return out
+
+
+# The engine writes the WAV header last, over zeros, when it has finished.
+func _written(path: String) -> bool:
+	var file := FileAccess.open(path, FileAccess.READ)
+	if file == null or file.get_length() < 44:
+		return false
+	return file.get_buffer(4).get_string_from_ascii() == "RIFF"
+
+
+func _stop_in_app() -> void:
+	if _java_tts != null:
+		_java_tts.stop()
+	_player.stop()
+	for job in _jobs:
+		DirAccess.remove_absolute(job["path"])
+	_jobs.clear()
+	_waiting.clear()
 
 
 # Speech the engine never finished blocks everything said after it, so it is
@@ -160,6 +351,8 @@ func _say(request: Dictionary) -> Dictionary:
 
 func _stop_command(_request: Dictionary) -> Dictionary:
 	DisplayServer.tts_stop()
+	if _in_app_problem.is_empty():
+		_stop_in_app()
 	_speech_deadline = 0.0
 	return {"ok": true}
 
@@ -176,7 +369,10 @@ func _status(_request: Dictionary) -> Dictionary:
 	return {
 		"ok": true,
 		"voices": _voice_list().size(),
-		"speaking": engine_speaking,
+		"speaking": speaking() if _in_app_problem.is_empty() else engine_speaking,
+		"plays": "in the app" if _in_app_problem.is_empty() else "through the speech engine (%s)" % _in_app_problem,
+		"engine_started": "not yet" if _init_status == ENGINE_NOT_HEARD else ("yes" if _init_status == 0 else "failed (%d)" % _init_status),
+		"sentences_waiting": _jobs.size() + _waiting.size(),
 		"speech_should_end_in": maxf(_speech_deadline - Time.get_ticks_msec() / 1000.0, 0.0) if _speech_deadline > 0.0 else 0.0,
 		"settings": settings,
 		"last": _last,
