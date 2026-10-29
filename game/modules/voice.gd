@@ -31,6 +31,11 @@ const MIN_SECONDS := 0.4
 const HTTP_TIMEOUT := 60.0
 const POLL_SECONDS := 0.5
 const MAX_SAY := 2000
+# Speech that hasn't finished this long after it started never will: Godot's
+# Android speech waits for the engine to say an utterance is done before it
+# sends the next, and an engine that is killed or drops one never says so.
+const SPEECH_GRACE_SECONDS := 15.0
+const SPEECH_SECONDS_PER_CHAR := 0.2  # far slower than any voice at rate 1
 const LOCAL_CLASS := "SpeechToText"  # from the godot-whisper plugin
 const LOCAL_LANGUAGES := {"": 0, "en": 1}  # its Language enum: 0 Auto, 1 English
 
@@ -67,6 +72,8 @@ var _last := ""  # what happened last, for voice_status
 var _dot: MeshInstance3D
 var _since_poll := 0.0
 var _seen_reply := ""
+var _voice_cache := []  # the engine's voices, asked once it has some (each ask is a slow call into Android)
+var _speech_deadline := 0.0  # when what is being said should have finished; 0 when nothing is
 
 
 func setup() -> String:
@@ -138,6 +145,7 @@ func _process(delta: float) -> void:
 	if _since_poll < POLL_SECONDS:
 		return
 	_since_poll = 0.0
+	_check_speech()
 	# Read the agent's new replies aloud.
 	var status: Dictionary = ctx["server"].run({"cmd": "agent_status"})
 	if not status.get("ok", false):
@@ -146,16 +154,22 @@ func _process(delta: float) -> void:
 	if reply != _seen_reply:
 		_seen_reply = reply
 		if settings["speak_replies"] and not reply.is_empty():
-			_speak(reply)
+			_speak(reply, "", true)  # a new reply replaces one still being read
 
 
 # --- Speech out -----------------------------------------------------------------
 
-func _voice_list() -> Array:
-	return DisplayServer.tts_get_voices() if ProjectSettings.get_setting("audio/general/text_to_speech", false) else []
+# Asked again only while the engine has none (it may still be starting) or
+# when voice_voices asks for a fresh list.
+func _voice_list(fresh := false) -> Array:
+	if not ProjectSettings.get_setting("audio/general/text_to_speech", false):
+		return []
+	if fresh or _voice_cache.is_empty():
+		_voice_cache = DisplayServer.tts_get_voices()
+	return _voice_cache
 
 
-func _speak(text: String, voice := "") -> String:
+func _speak(text: String, voice := "", interrupt := false) -> String:
 	var voices := _voice_list()
 	if voices.is_empty():
 		return "the headset has no text-to-speech voices (no speech engine installed, or it isn't ready yet)"
@@ -163,8 +177,29 @@ func _speak(text: String, voice := "") -> String:
 		voice = settings["voice"]
 	if voice.is_empty() or not voices.any(func(v): return v["id"] == voice):
 		voice = voices[0]["id"]
-	DisplayServer.tts_speak(text.left(MAX_SAY), voice, int(settings["volume"]), float(settings["pitch"]), float(settings["rate"]))
+	text = text.left(MAX_SAY)
+	var now := Time.get_ticks_msec() / 1000.0
+	var seconds := SPEECH_GRACE_SECONDS + text.length() * SPEECH_SECONDS_PER_CHAR / float(settings["rate"])
+	# Queued speech starts after what is already being said.
+	_speech_deadline = (maxf(_speech_deadline, now) if not interrupt and _speech_deadline > 0.0 else now) + seconds
+	DisplayServer.tts_speak(text, voice, int(settings["volume"]), float(settings["pitch"]), float(settings["rate"]), 0, interrupt)
 	return ""
+
+
+# Speech the engine never finished blocks everything said after it, so it is
+# stopped, and the next thing said goes through.
+func _check_speech() -> void:
+	if _speech_deadline == 0.0:
+		return
+	if not DisplayServer.tts_is_speaking():
+		_speech_deadline = 0.0
+		return
+	if Time.get_ticks_msec() / 1000.0 < _speech_deadline:
+		return
+	_speech_deadline = 0.0
+	DisplayServer.tts_stop()
+	_note("the speech engine never said it finished speaking (it may have been closed); stopped it so the next speech can play")
+	push_warning("Slopitect voice: the speech engine never finished an utterance; reset its queue")
 
 
 func _say(request: Dictionary) -> Dictionary:
@@ -182,12 +217,13 @@ func _say(request: Dictionary) -> Dictionary:
 
 func _stop_speaking(_request: Dictionary) -> Dictionary:
 	DisplayServer.tts_stop()
+	_speech_deadline = 0.0
 	return {"ok": true}
 
 
 func _voices(_request: Dictionary) -> Dictionary:
 	var voices := []
-	for v in _voice_list():
+	for v in _voice_list(true):
 		voices.append({"id": v["id"], "name": v["name"], "language": v["language"]})
 	return {"ok": true, "voices": voices}
 
@@ -420,6 +456,7 @@ func _status(_request: Dictionary) -> Dictionary:
 		"speech_out": ProjectSettings.get_setting("audio/general/text_to_speech", false),
 		"voices": _voice_list().size(),
 		"speaking": DisplayServer.tts_is_speaking() if not _voice_list().is_empty() else false,
+		"speech_should_end_in": maxf(_speech_deadline - Time.get_ticks_msec() / 1000.0, 0.0) if _speech_deadline > 0.0 else 0.0,
 		"microphone_in_build": ProjectSettings.get_setting("audio/driver/enable_input", false),
 		"microphone_permission": OS.get_name() != "Android" or MIC_PERMISSION in OS.get_granted_permissions(),
 		"hold_to_talk": "on (hold the left trigger)" if _stt_problem().is_empty() else "off: " + _stt_problem(),
