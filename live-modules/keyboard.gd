@@ -14,14 +14,11 @@ extends SlopitectModule
 # chat goes through the terminal too. The layout follows where it sends:
 # the command symbols for the terminal's command line, ' ? ! for words.
 # Hide folds the keys away, leaving the display line, Keys and Send.
-# Editing, on the row over the letters: < and > move the cursor (with Sel
-# on they pick the letters they pass over), All picks the whole line, Cut,
-# Copy and Paste use the app's clipboard (vrui's), and Take brings in what's
-# in the focused window's box (or the terminal's line) to change and Send
-# back. With nothing picked on the line, Copy takes the rows picked on the
-# focused window's screen (pull the trigger on the terminal's screen and
-# move along), otherwise the whole line. Typing or Paste replaces what's
-# picked.
+# With textEdit.gd loaded the line can be edited (a cursor, Sel, Cut, Copy,
+# Paste, Undo, ...; see there): its keys are on two rows over the letters,
+# with Take, which brings in what's in the focused window's box (or the
+# terminal's line) to change and Send back. Without it, typing goes on the
+# end of the line.
 # The terminal builds itself without keys while this is loaded (and with
 # them again when it's unloaded); the chat window's keys are taken off.
 # A Menu tile and a hand menu button open it, like the terminal's.
@@ -41,22 +38,26 @@ const WORD_KEYS := ["1234567890-", "qwertyuiop'", "asdfghjkl?!", "zxcvbnm,./:"]
 # Keyboard parts on the chat window (the row keys are key_R_C).
 const OTHER_IDS := ["space", "del", "clear", "quote", "shift"]
 const DISPLAY := "display"
+# textEdit's keys, over the letters: [key, label, width in keys] (Take is this module's).
+const EDIT_ROWS := [
+	[["left", "<", 1.0], ["right", ">", 1.0], ["word_left", "<<", 1.0], ["word_right", ">>", 1.0],
+		["home", "Home", 1.5], ["end", "End", 1.5], ["select", "Sel", 2.0], ["all", "All", 2.0]],
+	[["cut", "Cut", 1.5], ["copy", "Copy", 1.5], ["paste", "Paste", 1.5], ["take", "Take", 1.5],
+		["delete", "Del>", 1.5], ["case", "Aa", 1.0], ["undo", "Undo", 1.25], ["redo", "Redo", 1.25]]]
 const SHOWN := 36  # most characters the display line shows
 
 var _since := CHECK_SECONDS
 var _layout := ""  # "command" or "words": the keys the window was built with
 var _text := ""  # typed on the display line, not sent yet
 var _shift := false  # the next letter is a capital
-var _caret := 0  # where typing goes on the display line (letters before it)
-var _anchor := -1  # the other end of the letters picked on the line, or -1: none
-var _picking := false  # Sel: the cursor keys pick the letters they pass over
+var _edit_id := 0  # the textEdit module the window was built with (0: none)
 var _collapsed := false  # the keys folded away: only the display line, Keys and Send
 var _built_collapsed := false
 
 
 func setup() -> String:
 	register("keyboard_type", _type_command, "type on the keyboard's display line: text")
-	register("keyboard_key", _key_command, "a key on the keyboard: key (shift, backspace, clear, left, right, select, all, cut, copy, paste, take: on the display line; run: send it; collapse: hide or show the keys)")
+	register("keyboard_key", _key_command, "a key on the keyboard: key (shift, backspace, clear: on the display line; take: bring in the focused box's text, with textEdit; run: send it; collapse: hide or show the keys)")
 	register("keyboard_status", _status, "what the keyboard types into now (terminal, an input box, or nothing) and its layout")
 	return ""
 
@@ -95,7 +96,10 @@ func _process(delta: float) -> void:
 	var shown := _shown()
 	var target := _target(shown)
 	var layout := "command" if target == TERMINAL and _run({"cmd": "terminal_status"}).get("mode", "") == "terminal" else "words"
-	if layout != _layout or _collapsed != _built_collapsed or not shown.has(PANEL):
+	var edit := _edit()
+	var edit_id := edit.get_instance_id() if edit != null else 0
+	if layout != _layout or _collapsed != _built_collapsed or edit_id != _edit_id or not shown.has(PANEL):
+		_edit_id = edit_id
 		_layout = layout
 		_build(layout, shown.has(PANEL))
 	if shown.has(CHAT):
@@ -135,7 +139,10 @@ func _type_command(request: Dictionary) -> Dictionary:
 	if _shift and text.to_upper() != text.to_lower():
 		text = text.to_upper()
 		_shift = false
-	_insert(text)
+	if _edit() != null:
+		_edit().call("insert", text)
+	else:
+		_text += text
 	_show()
 	return {"ok": true}
 
@@ -146,28 +153,12 @@ func _key_command(request: Dictionary) -> Dictionary:
 		"shift":
 			_shift = not _shift
 		"backspace":
-			if _anchor == -1 and _caret > 0:
-				_anchor = _caret - 1
-			_insert("")
+			if _edit() != null:
+				_edit().call("backspace")
+			else:
+				_text = _text.left(_text.length() - 1)
 		"clear":
-			_set_text("")
-		"left", "right":
-			_move(-1 if request["key"] == "left" else 1)
-		"select":
-			_picking = not _picking
-			if not _picking and _anchor == _caret:
-				_anchor = -1
-		"all":
-			_anchor = 0
-			_caret = _text.length()
-		"copy", "cut":
-			return _copy(request["key"] == "cut")
-		"paste":
-			var ui := _ui()
-			var text: String = ui.call("clipboard") if ui != null else ""
-			if text.is_empty():
-				return {"ok": false, "error": "nothing has been copied"}
-			_insert(text)
+			_set_line("")
 		"take":
 			return _take()
 		"run":
@@ -177,7 +168,7 @@ func _key_command(request: Dictionary) -> Dictionary:
 			_build(_layout, _shown().has(PANEL))
 			return {"ok": true, "collapsed": _collapsed}
 		_:
-			return {"ok": false, "error": "\"key\" must be shift, backspace, clear, left, right, select, all, cut, copy, paste, take, run or collapse"}
+			return {"ok": false, "error": "\"key\" must be shift, backspace, clear, take, run or collapse"}
 	_show()
 	return {"ok": true}
 
@@ -186,121 +177,76 @@ func _key_command(request: Dictionary) -> Dictionary:
 # runs it there: the terminal's Run, or the input box's window's "send".
 func _send() -> Dictionary:
 	var target := _target(_shown())
+	var text := _line()
 	var reply: Dictionary
 	if target == TERMINAL:
 		_run({"cmd": "terminal_key", "key": "clear"})
-		if not _text.is_empty():
-			_run({"cmd": "terminal_type", "text": _text})
+		if not text.is_empty():
+			_run({"cmd": "terminal_type", "text": text})
 		reply = _run({"cmd": "terminal_key", "key": "run"})
 	elif target.is_empty():
 		return {"ok": false, "error": "nothing to send to: open the terminal or pick an input box"}
 	else:
 		_run({"cmd": "ui_key", "key": "clear"})
-		if not _text.is_empty():
-			_run({"cmd": "ui_type", "text": _text})
+		if not text.is_empty():
+			_run({"cmd": "ui_type", "text": text})
 		reply = _run({"cmd": "ui_press", "id_panel": target.get_slice("/", 0), "id_element": "send"})
 		if not reply.get("ok", false) and str(reply.get("error", "")).begins_with("no button"):
 			reply = {"ok": true, "typed_into": target}  # a window with no Send: the text in its box is the end of it
 	if reply.get("ok", false) or reply.get("wait") != null:
-		_set_text("")
+		_set_line("")
 		_shift = false
 		_show()
 	return reply
 
 
-# Puts text in place of what's picked on the line (or at the cursor).
-func _insert(text: String) -> void:
-	var from := _caret if _anchor == -1 else mini(_caret, _anchor)
-	var to := _caret if _anchor == -1 else maxi(_caret, _anchor)
-	_text = _text.left(from) + text + _text.substr(to)
-	_caret = from + text.length()
-	_anchor = -1
+func _edit() -> SlopitectModule:
+	var edit: SlopitectModule = ctx["modules"].module("textEdit")
+	return edit if edit != null and edit.has_method("insert") else null
 
 
-func _set_text(text: String) -> void:
-	_text = text
-	_caret = text.length()
-	_anchor = -1
-	_picking = false
+# The line typed so far: textEdit's when it's loaded, else this one's.
+func _line() -> String:
+	return _edit().call("text") if _edit() != null else _text
 
 
-# The cursor one letter left or right. With Sel on it picks as it goes;
-# without, a pick is let go (the cursor goes to its edge).
-func _move(step: int) -> void:
-	if _picking:
-		if _anchor == -1:
-			_anchor = _caret
-		_caret = clampi(_caret + step, 0, _text.length())
-		return
-	if _anchor != -1:
-		_caret = mini(_caret, _anchor) if step < 0 else maxi(_caret, _anchor)
-		_anchor = -1
-		return
-	_caret = clampi(_caret + step, 0, _text.length())
-
-
-# Copy (or Cut): the letters picked on the line; with none, the rows picked
-# on the focused window's screen (Copy only); otherwise the whole line.
-func _copy(cut: bool) -> Dictionary:
-	var ui := _ui()
-	if ui == null:
-		return {"ok": false, "error": "no vrui"}
-	var text := ""
-	if _anchor != -1 and _anchor != _caret:
-		text = _text.substr(mini(_caret, _anchor), absi(_caret - _anchor))
-		if cut:
-			_insert("")
+func _set_line(text: String) -> void:
+	if _edit() != null:
+		_edit().call("set_text", text)
 	else:
-		var window: String = ui.call("focused_window")
-		if not cut and not window.is_empty():
-			text = ui.call("selected_text", window)
-		if text.is_empty():
-			text = _text
-			if cut:
-				_set_text("")
-	if text.is_empty():
-		return {"ok": false, "error": "nothing to copy: pick letters or rows, or type something"}
-	ui.call("copy_text", text)
+		_text = text
+
+
+# textEdit changed the line (one of its keys).
+func text_changed() -> void:
 	_show()
-	return {"ok": true, "copied": text.length()}
 
 
 # Brings in what's in the box the keyboard sends to (or the terminal's line),
-# to change it on the display line and Send it back.
+# to change it and Send it back.
 func _take() -> Dictionary:
 	var target := _target(_shown())
 	var ui := _ui()
-	if target.is_empty() or ui == null:
+	if target.is_empty() or ui == null or not ui.has_method("input_text"):
 		return {"ok": false, "error": "nothing to take from: open the terminal or pick an input box"}
 	var text: String
 	if target == TERMINAL:
 		text = str(_run({"cmd": "terminal_status"}).get("line", ""))
 	else:
 		text = ui.call("input_text", target)
-	_set_text(text)
+	_set_line(text)
 	_show()
 	return {"ok": true, "took": text.length()}
 
 
-# What the display line says: the cursor is |, the letters picked are
-# between ‹ and ›. A long line shows the part round the cursor.
+# What the display line says.
 func _display() -> String:
-	if _text.is_empty():
-		return "> type here" + _flags()
-	var line := _text.left(_caret) + "|" + _text.substr(_caret)
-	if _anchor != -1:
-		var from := mini(_caret, _anchor)
-		var to := maxi(_caret, _anchor)
-		line = _text.left(from) + "‹" + _text.substr(from, to - from) + "›" + _text.substr(to)
-	var at := _caret + 1  # where the cursor is in `line`
-	if line.length() > SHOWN:
-		var start := clampi(at - SHOWN / 2, 0, line.length() - SHOWN)
-		line = ("..." if start > 0 else "") + line.substr(start, SHOWN) + ("..." if start + SHOWN < line.length() else "")
-	return "> " + line + _flags()
-
-
-func _flags() -> String:
-	return ("  [Shift]" if _shift else "") + ("  [Sel]" if _picking else "")
+	var line := "> " + (_text if _text.length() <= SHOWN else "..." + _text.right(SHOWN))
+	if _edit() != null:
+		line = "> " + _edit().call("display", SHOWN)
+	if _line().is_empty():
+		line = "> type here"
+	return line + ("  [Shift]" if _shift else "")
 
 
 # Changes only the display line, without building the window again.
@@ -311,8 +257,7 @@ func _show() -> void:
 
 
 func _status(_request: Dictionary) -> Dictionary:
-	return {"ok": true, "typing_into": _target(_shown()), "layout": _layout, "text": _text, "shift": _shift, "collapsed": _collapsed,
-		"caret": _caret, "picked": "" if _anchor == -1 else _text.substr(mini(_caret, _anchor), absi(_caret - _anchor))}
+	return {"ok": true, "typing_into": _target(_shown()), "layout": _layout, "text": _line(), "shift": _shift, "collapsed": _collapsed}
 
 
 # Takes the keys off the chat window. The shift key is there whenever the window
@@ -327,15 +272,16 @@ func _strip(id_panel: String) -> void:
 			_run({"cmd": "ui_element_remove", "id_panel": id_panel, "id_element": "key_%d_%d" % [r, c]})
 
 
-# The window's keys: the editing row, letters and figures, then Shift,
-# Space, Del, Clr and Run (Send for words). Hide, beside the display line, folds the keys away;
+# The window's keys: letters and figures, then Shift, Space, Del, Clr and
+# Run (Send for words). Hide, beside the display line, folds the keys away;
 # folded, the line has Keys (to unfold them) and Send beside it.
 func _build(layout: String, exists: bool) -> void:
 	var words := layout == "words"
 	var keys: Array = WORD_KEYS if words else COMMAND_KEYS
 	var width := COLS * UNIT - GAP
 	var left := -width / 2.0
-	var line_y := ROW_Y + KEY / 2.0 + 0.03 + (0.0 if _collapsed else UNIT)
+	var editing := _edit() != null and not _collapsed
+	var line_y := ROW_Y + KEY / 2.0 + 0.03 + (2 * UNIT if editing else 0.0)
 	var toggle_w := 2 * UNIT - GAP
 	var beside := 2 * UNIT * (2 if _collapsed else 1)  # room for Keys and Send, or Hide
 	var elements := [{"type": "text", "id": DISPLAY, "text": _display(), "at": [-beside / 2.0, line_y + 0.012], "width": width - beside, "font_size": 28},
@@ -355,16 +301,15 @@ func _build(layout: String, exists: bool) -> void:
 			elements.append({"type": "button", "id": "key_%d_%d" % [r, c], "label": ch,
 				"at": [left + KEY / 2.0 + c * UNIT, ROW_Y - r * UNIT], "size": [KEY, KEY],
 				"action": {"cmd": "keyboard_type", "text": ch}})
-	var edit_row := [
-		["left", "<", 1.0], ["right", ">", 1.0], ["select", "Sel", 1.5], ["all", "All", 1.5],
-		["cut", "Cut", 1.5], ["copy", "Copy", 1.5], ["paste", "Paste", 1.5], ["take", "Take", 1.5]]
-	if not _collapsed:
-		var edit_x := left
-		for key in edit_row:
-			var w: float = key[2] * UNIT - GAP
-			elements.append({"type": "button", "id": "edit_" + key[0], "label": key[1],
-				"at": [edit_x + w / 2.0, ROW_Y + UNIT], "size": [w, KEY], "action": {"cmd": "keyboard_key", "key": key[0]}})
-			edit_x += key[2] * UNIT
+	if editing:
+		for e in EDIT_ROWS.size():
+			var edit_x := left
+			for key in EDIT_ROWS[e]:
+				var w: float = key[2] * UNIT - GAP
+				var action := {"cmd": "keyboard_key", "key": "take"} if key[0] == "take" else {"cmd": "text_key", "key": key[0]}
+				elements.append({"type": "button", "id": "edit_" + key[0], "label": key[1],
+					"at": [edit_x + w / 2.0, ROW_Y + (2 - e) * UNIT], "size": [w, KEY], "action": action})
+				edit_x += key[2] * UNIT
 	var bottom := ROW_Y - keys.size() * UNIT
 	var bottom_row := [
 		["shift", "Shift", 2, {"cmd": "keyboard_key", "key": "shift"}],
