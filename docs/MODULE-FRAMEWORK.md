@@ -46,7 +46,7 @@ function, and leaves cleanly when it's unloaded.
 | Input only through controls | `on_action(action, down)` for buttons; `stick("walk")` for thumbsticks; a new `value(hand, "grip")` for how far a grip or trigger is pressed | Reading the controllers directly (controller, stick_move, vrui, hands) | controls.gd (live); `value()` is new |
 | One settings helper | Lists its defaults once; they're kept in `user://NAME.json`, and `NAME_config` (PC only) changes them | Each module writing its own load and save, or not saving | module.gd (APK) |
 | Save by plug-in | `save_part()` returns its data and `load_part(data)` puts it back; save finds every module that has them | The list of parts written into save.gd, and world's separate format | save.gd (live) |
-| Menus by plug-in | `menu_info()` returns a window's name and the panel it opens (or a command); the Menu shows a tile for each | Every module building its own way into its windows | ui.gd (live), see [VR-UI.md](VR-UI.md) |
+| Menus by plug-in | `menu_info()` returns a window's name and the panel it opens (or a command); the Menu shows a tile for each | Every module building its own way into its windows | vrui.gd (live), see [VR-UI.md](VR-UI.md) |
 | Events, not polling | The agent sends signals (started, replied, stopped); modules connect to them | aimsg and the avatar asking agent_status 2 to 3 times a second | agent.gd (APK) |
 | Internet through one gate | A download goes through one fetch function that only allows the hosts approved on the PC | web.gd downloading from anywhere | A net helper (live), hosts set with `net_config` |
 | A header at the top | `const INFO := {"needs": ["controls", "ui"], "version": 1}` | Modules that silently do nothing when another is missing | code.gd (APK) reads it and loads what's needed first |
@@ -85,14 +85,14 @@ Live modules only (no new APK):
 1. Keep the repo's paths.gd and tools.gd; drop stick_move.gd. *(Done.)*
 2. controls.gd: add `value(hand, name)` for grip and trigger, and "run a
    command" as a binding kind. Then drop controller.gd. *(Done, PC-tested;
-   panel attaching is ui.gd's `hand` place, step 5.)*
+   panel attaching is vrui.gd's `hand` place, step 5.)*
 3. hands.gd: read through controls, save colours. *(Done, PC-tested.)*
 4. aimsg.gd: chat formatting only, real fields, no debug file. *(Done,
-   PC-tested: ui.gd shows a source through a module's format(), so aimsg
-   changes no window; that ui.gd part comes with the VR UI work.)*
+   PC-tested: vrui.gd shows a source through a module's format(), so aimsg
+   changes no window; that vrui.gd part comes with the VR UI work.)*
 5. vrui.gd: take "point" from controls, respect the Yes/No window, redraw
    only on change, save panels, take over panel attaching. *(Done,
-   PC-tested: ui.gd now draws every panel the vrui way, takes "point" from
+   PC-tested: vrui.gd now draws every panel the vrui way, takes "point" from
    controls, does nothing while a question is up, draws again only on a
    change and saves panels; panel attaching is the `hand` place. The vrui
    draft is gone.)*
@@ -121,6 +121,6 @@ Open decisions (the owner's):
 - Drop stick_move, controller and world's save format in favour of move,
   controls and save? (Recommended: yes.)
 - ~~Should vrui become how all panels are drawn?~~ Decided 2026-10-29: yes,
-  ui.gd draws every panel the vrui way, only on a change. Still to see:
+  vrui.gd draws every panel the vrui way, only on a change. Still to see:
   frame time on the Quest 1 with several panels.
 - Which sites may web downloads come from? assets.gd's list is the start.

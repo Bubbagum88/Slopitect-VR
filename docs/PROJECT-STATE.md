@@ -67,7 +67,7 @@ All PC-tested, none yet on the headset. See
 | inspect | Point at a thing to switch its physics, grabbing and hiding, or delete it |
 | avatar | The agent's avatar, moved out of the APK: animations, emotions, a mouth that follows speech, a paged speech bubble that docks at the edge of view, outfits; `body()` for other modules (jelly). The APK avatar it replaces was seen on the headset; this one is PC-tested only |
 | memory | The agent's memory per world and global: notes, past questions with their tools and errors, digests; keys and personal info cleaned out |
-| aimsg | Formats the chat log (who's talking, wrapping, markdown out, code marked); shown through ui.gd's source "format" |
+| aimsg | Formats the chat log (who's talking, wrapping, markdown out, code marked); shown through vrui.gd's source "format" |
 | net | Downloads, https only and only from hosts allowed on the PC (`net_config`), redirects checked; records each file's source |
 | worlds | The Worlds window (a tile on the Menu): tabs to open or make a project's world, keep and go back to checkpoints, look through the Slopitect folder, and load or unload live modules. Built on projects, save, files and code |
 | jelly | Squash and stretch on the avatar, volume kept; needs the live avatar module's `body()`. Tested on the PC with a stand-in avatar |
@@ -112,7 +112,7 @@ container).
   `.\adb install -r slopitect-quest1-debug.apk`.
 - **Live module on the headset:** `.\adb push NAME.gd /sdcard/Slopitect/modules/`,
   then `.\slopi.ps1 code_load` and Yes in the headset. After a fresh APK,
-  load `controls.gd` and `ui.gd` first, or there are no windows.
+  load `controls.gd` and `vrui.gd` first, or there are no windows.
 - **Headless on a PC** (how every live module so far was tested):
   1. Godot 4.7.2 Linux build; run `--headless --import` in `game/` once,
      then remove the `.uid` files and `openxr_action_map.tres` it writes.

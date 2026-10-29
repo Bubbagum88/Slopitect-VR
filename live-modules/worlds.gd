@@ -35,7 +35,7 @@ func _exit_tree() -> void:
 	ctx["server"].run({"cmd": "ui_remove", "id_panel": PANEL})
 
 
-# A tile on the Menu (ui.gd's launcher). It opens through worlds_do, so the
+# A tile on the Menu (vrui.gd's launcher). It opens through worlds_do, so the
 # window always shows what's there now.
 func menu_info() -> Dictionary:
 	return {"id": "worlds", "label": "Worlds", "order": 20, "action": {"cmd": "worlds_do", "act": "toggle"}}
@@ -143,7 +143,7 @@ func _show(page: String) -> Dictionary:
 # Lays out every tab again, keeping the tab you're on (or going to page).
 # Returns "" or what went wrong.
 func _build(page: String) -> String:
-	if not _has("ui"):
+	if not (_has("vrui") or _has("ui")):
 		return "the Worlds window needs the ui module"
 	var elements := []
 	elements.append_array(_worlds_tab())

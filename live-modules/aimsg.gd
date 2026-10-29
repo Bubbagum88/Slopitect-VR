@@ -6,7 +6,7 @@ extends SlopitectModule
 # taken out, code blocks marked with "|", and tool calls, thinking and
 # notes kept to one short line each.
 #
-# It doesn't change any window. A text element in ui.gd whose source has
+# It doesn't change any window. A text element in vrui.gd whose source has
 # "format": "aimsg" is shown through format() while this module is loaded,
 # and as plain lines when it isn't, so taking it out never breaks the chat
 # window. The default chat window's log has it.
@@ -33,7 +33,7 @@ func setup() -> String:
 	return ""
 
 
-# Called by ui.gd for a text source with "format": "aimsg": the agent's
+# Called by vrui.gd for a text source with "format": "aimsg": the agent's
 # events (agent_status's "events", a list of lines) as the chat log's text.
 func format(value, _source: Dictionary) -> String:
 	if not value is Array:

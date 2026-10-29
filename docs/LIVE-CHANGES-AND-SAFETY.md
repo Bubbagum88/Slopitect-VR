@@ -5,7 +5,7 @@
 | What | How | Kept after a restart |
 | --- | --- | --- |
 | Objects in the world | `spawn`, `move`, `color`, `delete` (you, the agent, or a button) | Not yet (saves are roadmap step 5) |
-| Every window: the menu bar, wrist panel, chat, and new ones | `ui_*` commands (you, the agent, or a button); grab one with the grip to move it. The panel system itself is a live module (`ui.gd`) | Yes, `user://ui.json` |
+| Every window: the menu bar, wrist panel, chat, and new ones | `ui_*` commands (you, the agent, or a button); grab one with the grip to move it. The panel system itself is a live module (`vrui.gd`) | Yes, `user://ui.json` |
 | What each button and thumbstick does | The controls live module (`controls.gd`): `controls_config` from the PC, or a different `controls.gd` | Yes, `user://controls.json` |
 | New features (live modules) | A GDScript file in `modules/` of the Slopitect folder, then `code_load` and your Yes in the headset | Yes: an approved file loads at each start, until it changes |
 | Files in the Slopitect folder | `files_*` commands | It's the headset's storage (`/sdcard/Slopitect`) |
