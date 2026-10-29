@@ -1,7 +1,8 @@
 extends SlopitectModule
 
 # Slopitect live module: save.
-# Keeps what's built: the shapes (the objects module's), the placed models
+# Keeps what's built: the shapes (the objects module's), the made shapes'
+# recipes (the shapes module's), the placed models
 # (the assets module's), the ground (landscape), the paths, the inspect
 # tool's switches (hidden, grabbable) and the joints are saved by
 # themselves to saves/world.json in the Slopitect folder whenever they
@@ -13,12 +14,13 @@ extends SlopitectModule
 
 const CHECK_SECONDS := 5.0  # how often it looks for changes to save
 const MAX_CHECKPOINTS := 50
-const PARTS := {"models": "assets", "landscape": "landscape", "paths": "paths", "switches": "inspect", "joints": "joints"}  # part -> the module it needs
+const PARTS := {"models": "assets", "landscape": "landscape", "paths": "paths", "switches": "inspect", "made": "shapes", "joints": "joints"}  # part -> the module it needs
 
 var _folder := ""
 var _last_saved := ""  # what world.json holds, to save only on a change
 var _since_check := 0.0
 var _pending := {}  # part -> its saved value, while its module isn't loaded; kept in every save until it is
+var _kept := {}  # part -> its value at the last snapshot, kept if its module is unloaded later
 var _restoring := false
 
 
@@ -73,8 +75,14 @@ func _run(request: Dictionary) -> Dictionary:
 
 # --- What the world is --------------------------------------------------------------
 
-func _shapes() -> Array:
-	return _run({"cmd": "list"}).get("objects", [])
+# The built-in shapes; made ones (the shapes module's) are saved as recipes.
+func _shapes(made_too := false) -> Array:
+	var world: Node3D = ctx["world"]
+	return _run({"cmd": "list"}).get("objects", []).filter(func(shape):
+		if made_too:
+			return true
+		var node := world.get_node_or_null(NodePath(str(shape.get("name", ""))))
+		return node == null or not node.get_meta("made", false))
 
 
 # The whole world. A part whose module isn't loaded is the one last saved.
@@ -85,6 +93,8 @@ func _snapshot() -> Dictionary:
 		if module == null:
 			if _pending.has(part):
 				state[part] = _pending[part]
+			elif _kept.has(part):
+				state[part] = _kept[part]  # unloaded since: kept until it's back
 			continue
 		match part:
 			"models":
@@ -95,16 +105,20 @@ func _snapshot() -> Dictionary:
 				state["paths"] = module.call("get_paths")
 			"switches":
 				state["switches"] = module.call("get_settings")
+			"made":
+				state["made"] = module.call("get_made")
 			"joints":
 				state["joints"] = module.call("get_joints")
+		_kept[part] = state.get(part)
 	return state
 
 
 func _put_back(state: Dictionary) -> PackedStringArray:
 	_restoring = true
 	_pending.clear()
+	_kept.clear()
 	var problems := PackedStringArray()
-	for shape in _shapes():
+	for shape in _shapes(true):
 		_run({"cmd": "delete", "name": shape["name"]})
 	for shape in state.get("shapes", []):
 		if typeof(shape) != TYPE_DICTIONARY:
@@ -145,6 +159,9 @@ func _put_part(part: String, value) -> PackedStringArray:
 		"switches":
 			if typeof(value) == TYPE_DICTIONARY:
 				module.call("set_settings", value)
+		"made":
+			if typeof(value) == TYPE_DICTIONARY:
+				module.call("set_made", value)
 		"joints":
 			if typeof(value) == TYPE_DICTIONARY:
 				module.call("set_joints", value)

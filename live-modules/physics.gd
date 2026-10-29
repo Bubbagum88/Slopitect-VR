@@ -90,9 +90,29 @@ func _local_box(node: Node3D) -> AABB:
 
 
 # A collision shape the size of the thing, with its scale baked in (the
-# engine doesn't take stretched shapes).
-func _shape_for(node: Node3D) -> CollisionShape3D:
+# engine doesn't take stretched shapes). A made shape (shapes.gd: stairs, an
+# arch, a pipe) gets its own outline: every face when it stays put, its
+# convex hull when it moves (moving bodies can't have hollows).
+func _shape_for(node: Node3D, mode: String) -> CollisionShape3D:
 	var scale := node.global_basis.get_scale()
+	if node is MeshInstance3D and node.get_meta("made", false) and (node as MeshInstance3D).mesh:
+		var mesh: Mesh = (node as MeshInstance3D).mesh
+		var made := CollisionShape3D.new()
+		if mode == "static":
+			var faces := mesh.get_faces()
+			for i in faces.size():
+				faces[i] *= scale
+			var trimesh := ConcavePolygonShape3D.new()
+			trimesh.set_faces(faces)
+			made.shape = trimesh
+		else:
+			var hull := mesh.create_convex_shape(true, true)
+			var points := hull.points
+			for i in points.size():
+				points[i] *= scale
+			hull.points = points
+			made.shape = hull
+		return made
 	var box := _local_box(node)
 	var size := box.size * scale
 	var holder := CollisionShape3D.new()
@@ -126,7 +146,7 @@ func _make_body(node: Node3D, config: Dictionary) -> void:
 		return
 	var body := RigidBody3D.new()
 	body.name = "Body_" + String(node.name)
-	body.add_child(_shape_for(node))
+	body.add_child(_shape_for(node, config["mode"]))
 	body.mass = float(config["mass"])
 	var material := PhysicsMaterial.new()
 	material.bounce = float(config["bounce"])
