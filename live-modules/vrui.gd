@@ -151,6 +151,7 @@ var _openers := {}  # id_panel -> the panel whose "open" button opened it (for i
 var _scroll := {}  # "panel/element" -> lines scrolled back from the newest
 var _stick_lines := 0.0  # lines the thumbstick has moved a scrolling text but not yet sent
 var _pointed := []  # the panels pointed at most recently, newest first (see last_pointed)
+var _focused := []  # focusable windows, the one you last used first (see focused_window)
 var _dragging := ""  # id_panel being carried, by the grip or by its title bar
 var _drag_offset: Transform3D
 var _sliding := ""  # "panel/element" of the slider the trigger is holding
@@ -505,6 +506,8 @@ func _hide_home_ghost() -> void:
 
 
 func _on_point_pressed() -> void:
+	if not _pointing.is_empty():
+		_focus_window(_pointing)
 	if not _hovered:
 		return  # the panel's background: the press is the panel's, and does nothing
 	var id_panel: String = _hovered.get_meta("panel")
@@ -579,8 +582,11 @@ func _set_visible(panel: Dictionary, on: bool) -> void:
 	_set_pointable(_holders[panel["id_panel"]], on)
 	if on:
 		_since_poll = POLL_SECONDS
+		_focus_window(panel["id_panel"])  # a window you open is the one you're about to use
 		if _focus.is_empty() or not _element_visible(_focus):
 			_focus_first_input(panel["id_panel"])
+	else:
+		_show_window_focus()  # the next window you used before it has the focus now
 	if not panel["place"] in ["front", "follow"]:
 		_save()  # panels that open in front always start hidden, so aren't saved for this
 
@@ -1313,7 +1319,7 @@ func _check_panel(data: Dictionary, is_new: bool, check_actions: bool) -> Dictio
 		return {"error": "a panel \"%s\" already exists" % id}
 	var panel := {"id_panel": id}
 	for key in data:
-		if not key in ["id_panel", "title", "place", "distance", "height", "position", "rotation", "size", "color", "visible", "toggle", "layout", "columns", "cell", "elements", "chrome", "pages", "page", "apps", "menu", "hand", "scale", "home", "keep_place"]:
+		if not key in ["id_panel", "title", "place", "distance", "height", "position", "rotation", "size", "color", "visible", "toggle", "layout", "columns", "cell", "elements", "chrome", "pages", "page", "apps", "menu", "hand", "scale", "home", "keep_place", "focusable"]:
 			return {"error": "panel %s: unknown field \"%s\"" % [id, key]}
 	panel["title"] = data.get("title", id)
 	if typeof(panel["title"]) != TYPE_STRING or panel["title"].length() > 60:
@@ -1340,6 +1346,9 @@ func _check_panel(data: Dictionary, is_new: bool, check_actions: bool) -> Dictio
 			and panel["home"].get("place") in HOME_PLACES and _numbers(panel["home"].get("position"), 3, -20.0, 20.0)
 			and _numbers(panel["home"].get("rotation"), 3, -360.0, 360.0)):
 		return {"error": "panel %s: \"home\" must be {} or {\"place\": one of %s, \"position\": [x, y, z], \"rotation\": [x, y, z]}" % [id, HOME_PLACES]}
+	panel["focusable"] = data.get("focusable", true)
+	if typeof(panel["focusable"]) != TYPE_BOOL:
+		return {"error": "panel %s: \"focusable\" must be true (pointing at it and pulling the trigger makes it the window you type into) or false (a keyboard, a menu)" % id}
 	panel["keep_place"] = data.get("keep_place", false)
 	if typeof(panel["keep_place"]) != TYPE_BOOL:
 		return {"error": "panel %s: \"keep_place\" must be true (stays where you put it) or false (opens at home)" % id}
@@ -1737,7 +1746,8 @@ func _build(id_panel: String) -> void:
 	var frame := PanelContainer.new()
 	frame.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var back := _to_color(panel["color"]) if panel.has("color") else _theme_color("panel")
-	frame.add_theme_stylebox_override("panel", _box(Color(back, PANEL_ALPHA), PANEL_RADIUS, _theme_color("border"), BORDER, PADDING))
+	var frame_style := _box(Color(back, PANEL_ALPHA), PANEL_RADIUS, _theme_color("border"), BORDER, PADDING)
+	frame.add_theme_stylebox_override("panel", frame_style)
 	viewport.add_child(frame)
 	var stack := VBoxContainer.new()
 	stack.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -1757,6 +1767,10 @@ func _build(id_panel: String) -> void:
 	notice.clip_text = true
 	stack.add_child(notice)
 	view["notice"] = notice
+	view["frame_style"] = frame_style
+	if focused_window() == id_panel:
+		frame_style.border_color = _theme_color("accent")
+		frame_style.set_border_width_all(maxi(2, _px(BORDER * 2.0)))
 
 	var px := frame.get_combined_minimum_size().ceil()
 	px.x = maxf(px.x, 16.0)
@@ -1940,10 +1954,12 @@ func _content(panel: Dictionary, view: Dictionary) -> Control:
 	var placed := []  # [element, at, size]
 	var grid_buttons: Array = panel["elements"].filter(func(e): return e["type"] == "button" and not e.has("at"))
 	var grid_index := 0
-	var left := 0.0
-	var right := 0.0
-	var top := 0.0
-	var bottom := 0.0
+	# Without a "size" the panel is as big as its elements, wherever they
+	# sit (not stretched to take in its (0, 0) as well).
+	var left := INF
+	var right := -INF
+	var top := -INF
+	var bottom := INF
 	if panel.has("size"):
 		left = -panel["size"][0] / 2.0
 		right = -left
@@ -1989,6 +2005,11 @@ func _content(panel: Dictionary, view: Dictionary) -> Control:
 		top = maxf(top, box.end.y)
 		if not element.has("page") or element["page"] == panel["page"]:
 			placed.append([element, box])
+	if left > right:  # no elements
+		left = 0.0
+		right = 0.0
+		top = 0.0
+		bottom = 0.0
 	var area := Control.new()
 	area.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	area.clip_contents = true
@@ -2247,6 +2268,47 @@ func _scroll_target(hit: StaticBody3D) -> String:
 			return element["id"]
 		found.append(element["id"])
 	return found[0] if found.size() == 1 else ""
+
+
+# The window you last pointed at and pulled the trigger on, or opened (the
+# one typing is for): its edge is lit. Panels with "focusable" false (a
+# keyboard) never take it. When it closes, the one before it has it again.
+func _focus_window(id_panel: String) -> void:
+	var index := _index_of(id_panel)
+	if index == -1 or not panels[index]["focusable"]:
+		return
+	if not _focused.is_empty() and _focused[0] == id_panel:
+		return
+	_focused.erase(id_panel)
+	_focused.push_front(id_panel)
+	_focused.resize(mini(_focused.size(), 8))
+	if not _focus.begins_with(id_panel + "/"):
+		_focus_first_input(id_panel)  # its input box, if it has one
+	_show_window_focus()
+
+
+func focused_window() -> String:
+	for id_panel in _focused:
+		var index := _index_of(id_panel)
+		if index != -1 and panels[index]["visible"]:
+			return id_panel
+	return ""
+
+
+# Lights the focused window's edge, and puts the others' back.
+func _show_window_focus() -> void:
+	var focused := focused_window()
+	for id_panel in _views:
+		var style: StyleBoxFlat = _views[id_panel].get("frame_style")
+		if style == null:
+			continue
+		var lit: bool = id_panel == focused
+		var color: Color = _theme_color("accent") if lit else _theme_color("border")
+		if style.border_color == color:
+			continue
+		style.border_color = color
+		style.set_border_width_all(maxi(2, _px(BORDER * 2.0)) if lit else maxi(1, _px(BORDER)))
+		_redraw(id_panel)
 
 
 # For a keyboard module: the input box typing goes to ("panel/element", or
