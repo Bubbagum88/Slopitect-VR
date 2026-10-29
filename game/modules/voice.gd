@@ -54,6 +54,7 @@ var _record: AudioEffectRecord
 var _capture: AudioEffectCapture  # the same sound as frames, for the local engine
 var _frames := PackedVector2Array()
 var _local: Node  # godot-whisper's SpeechToText, made on first use
+var _plugin := {}  # what was found about the godot-whisper plugin at start
 var _local_model := ""  # the model file _local has loaded
 var _local_thread: Thread
 var _mic_player: AudioStreamPlayer
@@ -112,6 +113,8 @@ func setup() -> String:
 	register("voice_config", _config, "from the PC only: show or change any of: %s" % ", ".join(DEFAULTS.keys()))
 	var problem := _stt_problem()
 	print("Slopitect voice: %d speech voices; hold-to-talk %s (%s)" % [_voice_list().size(), "on" if problem.is_empty() else "off: " + problem, settings["stt_engine"]])
+	_plugin = _plugin_report()
+	print("Slopitect voice: the on-headset speech-to-text plugin: %s" % JSON.stringify(_plugin))
 	return ""
 
 
@@ -411,6 +414,7 @@ func _status(_request: Dictionary) -> Dictionary:
 		"stt_engine": settings["stt_engine"],
 		"stt_url": settings["stt_url"],
 		"local_in_build": ClassDB.class_exists(LOCAL_CLASS),
+		"plugin": _plugin,
 		"local_model": _local_model_path(),
 		"local_model_found": FileAccess.file_exists(_local_model_path()),
 		"local_model_loaded": not _local_model.is_empty(),
@@ -508,3 +512,25 @@ func _save_settings() -> void:
 		return
 	file.store_string(JSON.stringify(settings, "  "))
 	file.close()
+
+
+# Everything about whether the godot-whisper plugin got loaded, in one go:
+# the engine's list of extensions to load at start, which ones it loaded,
+# whether the plugin's files are in the APK, and if it's missing, what
+# loading it now says (any engine error goes to the log and errors_recent).
+func _plugin_report() -> Dictionary:
+	const LIST := "res://.godot/extension_list.cfg"
+	const PLUGIN := "res://addons/godot_whisper/godot_whisper.gdextension"
+	var report := {
+		"class_found": ClassDB.class_exists(LOCAL_CLASS),
+		"extension_list_found": FileAccess.file_exists(LIST),
+		"extension_list": FileAccess.get_file_as_string(LIST).strip_edges().split("\n") if FileAccess.file_exists(LIST) else [],
+		"loaded_extensions": GDExtensionManager.get_loaded_extensions(),
+		"plugin_file_found": FileAccess.file_exists(PLUGIN),
+		"os": OS.get_name(), "architecture": Engine.get_architecture_name(), "debug_build": OS.is_debug_build(),
+	}
+	if not report["class_found"] and report["plugin_file_found"] and not GDExtensionManager.is_extension_loaded(PLUGIN):
+		var status := GDExtensionManager.load_extension(PLUGIN)
+		report["load_now"] = ["ok", "failed", "already loaded", "not loaded", "needs restart"][status] if status < 5 else str(status)
+		report["class_found_after_load_now"] = ClassDB.class_exists(LOCAL_CLASS)
+	return report
