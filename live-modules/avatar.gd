@@ -16,7 +16,7 @@ extends SlopitectModule
 #   turned to you and made bigger when the avatar is far away so it stays
 #   readable. When the avatar is out of view the bubble waits at the edge of
 #   your view on its side, so you still see what it says. Long replies are
-#   shown a page at a time. Colours come from ui.gd's theme when it has one.
+#   shown a page at a time. Colours come from vrui.gd's theme when it has one.
 # - Outfits: data (a list of simple shapes), so new ones can be added while
 #   the app runs, by you or the agent.
 #
@@ -579,7 +579,9 @@ func _show_page() -> void:
 
 func _theme() -> Dictionary:
 	var colours := DEFAULT_THEME.duplicate()
-	var ui = ctx["modules"].module("ui")
+	var ui = ctx["modules"].module("vrui")
+	if ui == null:
+		ui = ctx["modules"].module("ui")  # before the rename to vrui
 	if ui != null and ui.has_method("theme"):
 		var theme: Dictionary = ui.theme()
 		for key in colours:

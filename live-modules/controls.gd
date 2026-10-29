@@ -21,7 +21,7 @@ extends SlopitectModule
 # "position": "in_front" turned into the point 1 m in front of you). Never
 # a *_config or agent_ command, so no button changes a setting. Bound to
 # {"panel": id_panel}, a press shows that window, or hides it if it's shown
-# (any ui.gd panel, such as "chat" or "worlds").
+# (any vrui.gd panel, such as "chat" or "worlds").
 #
 # Two things never go through here, so no module can take them away: X on
 # the left controller always stops the agent (the agent module's), and the

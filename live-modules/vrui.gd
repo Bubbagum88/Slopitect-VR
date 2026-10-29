@@ -1,6 +1,9 @@
 extends SlopitectModule
 
-# Slopitect live module: every window in the app, as data.
+# Slopitect live module "vrui": every window in the app, as data. (It was
+# ui.gd; the ui_* commands, user://ui.json and ui_config keep their names,
+# so saved panels and other modules carry on. Modules find it with
+# module("vrui"), or module("ui") for the older one.)
 # A panel is a list of elements (text, buttons, input boxes, plain boxes)
 # with a place: in front of you when it opens, on the left wrist, or fixed in
 # the world. The menu bar, the wrist panel and the agent's chat window are
@@ -208,10 +211,19 @@ func _exit_tree() -> void:
 			node.queue_free()
 
 
+# Whether the Yes/No window is asking. The APK's confirm module sets
+# pointer_blocked only on a module called "ui"; this one is "vrui", so it
+# asks confirm itself as well.
+func _asking() -> bool:
+	var confirm: SlopitectModule = ctx["modules"].module("confirm")
+	return confirm != null and confirm.has_method("asking") and confirm.call("asking")
+
+
 func _physics_process(_delta: float) -> void:
 	if not _dragging.is_empty() and _holders.has(_dragging):
 		_holders[_dragging].global_transform = _right.global_transform * _drag_offset
-	_ray.enabled = not pointer_blocked
+	var blocked := pointer_blocked or _asking()
+	_ray.enabled = not blocked
 	var hit: StaticBody3D = _ray.get_collider() as StaticBody3D if _ray.enabled and _ray.is_colliding() else null
 	_pointing = String(hit.get_meta("panel", "")) if hit else ""
 	var control: Control = null
@@ -221,7 +233,7 @@ func _physics_process(_delta: float) -> void:
 		_set_hover(_hovered, false)
 		_hovered = control
 		_set_hover(_hovered, true)
-	if pointer_blocked:
+	if blocked:
 		_laser.visible = false  # the question draws its own
 		_cursor.visible = false
 		return

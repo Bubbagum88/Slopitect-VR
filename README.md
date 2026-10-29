@@ -25,7 +25,7 @@ Working now:
   bar, the wrist panel and the chat window are panels of text, buttons and
   input boxes that you or the agent can change, add, move and remove while
   the app runs. Grab a panel with the grip to move it. The panels and the
-  controllers are live modules (`live-modules/ui.gd`, `controls.gd`), not
+  controllers are live modules (`live-modules/vrui.gd`, `controls.gd`), not
   part of the APK, so they can be swapped and rewritten.
 - **A chat window in the headset**: press Y to open a terminal-style window
   that shows each step the agent takes and a summary of its thinking, with
@@ -350,7 +350,7 @@ registering the plugin first.)
 | `game/modules.gd` | Loads the modules listed in `game/modules.json` |
 | `game/modules/module.gd` | The base every module extends |
 | `game/modules/objects.gd` | Spawn, move, colour, delete and list objects |
-| `game/modules/ui.gd` | Every window: panels, the pointer, typing; the default bar, wrist panel and chat |
+| `live-modules/vrui.gd` | Every window: panels, the pointer, typing; the default bar, wrist panel and chat |
 | `game/modules/confirm.gd` | The Yes/No questions only you can answer, in the headset |
 | `game/modules/files.gd` | Files: the Slopitect folder, everything else behind your Yes |
 | `game/modules/agent.gd` | The AI agent: settings, firewall, tool loop |

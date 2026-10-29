@@ -15,9 +15,9 @@ avatar already shows the agent's state); `web.gd` became
 `controls_config`, and right-stick walking is
 `{"sticks": {"right": "walk", "left": "turn"}}` there, so `controller.gd` and
 `stick_move.gd` are gone. `vrui.gd`'s look (rounded panels, real text and
-buttons, the hand window) is now how `live-modules/ui.gd` draws every
+buttons, the hand window) is now how `live-modules/vrui.gd` draws every
 window, taking "point" from controls and drawing only on a change; panel
-attaching from `controller.gd` is ui.gd's `hand` place.
+attaching from `controller.gd` is vrui.gd's `hand` place.
 
 The full review, and what happens to each, is in
 [docs/MODULE-FRAMEWORK.md](../../docs/MODULE-FRAMEWORK.md).

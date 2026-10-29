@@ -1,8 +1,17 @@
 # VR UI: how the windows work
 
 Written 2026-10-29, updated the same day when ui.gd took over the vrui
-draft's look. Covers `live-modules/ui.gd` (every window) and what it asks of
-other modules. Tested headless on a PC with Godot 4.7.2 (about 90 checks,
+draft's look and was renamed `live-modules/vrui.gd`, the base for every
+window. Covers vrui.gd and what it asks of other modules.
+
+**The rename.** The module is now called `vrui`; modules find it with
+`ctx["modules"].module("vrui")`, falling back to `module("ui")` for the
+older file. Everything else kept its name: the `ui_*` commands, saved
+panels in `user://ui.json`, the theme in `ui_config`. On the headset,
+unload the old `ui` module and the old vrui draft, then load vrui.gd; your
+panels come back from ui.json. The APK's Yes/No window still blocks the
+pointer: vrui asks the confirm module itself, since the APK only tells a
+module called "ui". Tested headless on a PC with Godot 4.7.2 (about 90 checks,
 opengl3 pictures, and worlds.gd's window opening on it); **not yet seen on
 the headset**. Hover, haptics, the hand window, follow panels, text sizes
 and how fast a SubViewport panel draws on the Quest 1 can only be judged in
@@ -11,7 +20,7 @@ the headset.
 ## The pieces
 
 ```
-controls.gd ── actions ("point", "grab_right", toggles) ──► ui.gd ──► ui_* commands
+controls.gd ── actions ("point", "grab_right", toggles) ──► vrui.gd ──► ui_* commands
      ▲                                                     │  ▲
      └──────────── pulse(hand, strength, seconds) ◄────────┘  │
                                                               │
@@ -21,14 +30,14 @@ controls.gd ── actions ("point", "grab_right", toggles) ──► ui.gd ─�
                  ui.set_text() ──► change one text at once
 ```
 
-- **One window system.** Every window is a panel in `ui.gd`: data (a
+- **One window system.** Every window is a panel in `vrui.gd`: data (a
   dictionary) that you, the agent or a module change with the `ui_*`
   commands. Each panel is drawn the way the vrui draft drew its windows:
   real 2D panels, rounded buttons and wrapped text in a SubViewport, shown
   on a quad. The picture is drawn again only when something on it changes
   (hover, press, a new text), never every frame, which matters on the
   Quest 1 (Snapdragon 835). The vrui draft is gone; its look lives here.
-- **Input only through controls.gd.** ui.gd takes "point" (right trigger),
+- **Input only through controls.gd.** vrui.gd takes "point" (right trigger),
   "grab_right" (right grip) and any action a panel uses as its toggle.
   The Yes/No window still reads the trigger itself, and while it asks, the
   pointer does nothing on panels (`pointer_blocked`).
@@ -117,10 +126,10 @@ do before you press:
 | --- | --- | --- |
 | `menu_info()` | any module | `{"id", "label", "order" (lower first, 100 default), "panel": id_panel}` or `{..., "action": a command}`: a tile on the Menu. A tile closes the Menu after opening its window |
 | `format(value, source)` | any module | Lays out a text source's value (aimsg for the chat log) |
-| `ui.theme()` | ui.gd | The theme: colours as `Color`, `font_title` / `font_body` / `font_small` as text sizes |
-| `ui.set_text(id_panel, id_element, text)` | ui.gd | Changes one text element now, without rebuilding the panel or saving (a terminal's screen). The text isn't saved, since it can be anything. A `scroll` text keeps its newest lines in view |
-| `ui.scroll_text(id_panel, id_element, lines)` | ui.gd | Scrolls a `scroll` text back by `lines` from the newest (0 = newest) |
-| `ui.press(id_panel, id_element)` | ui.gd | Presses a button or toggle |
+| `ui.theme()` | vrui.gd | The theme: colours as `Color`, `font_title` / `font_body` / `font_small` as text sizes |
+| `ui.set_text(id_panel, id_element, text)` | vrui.gd | Changes one text element now, without rebuilding the panel or saving (a terminal's screen). The text isn't saved, since it can be anything. A `scroll` text keeps its newest lines in view |
+| `ui.scroll_text(id_panel, id_element, lines)` | vrui.gd | Scrolls a `scroll` text back by `lines` from the newest (0 = newest) |
+| `ui.press(id_panel, id_element)` | vrui.gd | Presses a button or toggle |
 | `controls.pulse(hand, strength, seconds)` | controls.gd | A buzz on a controller |
 
 A tile's or button's command can't be a `*_config` command (settings are PC
@@ -159,16 +168,16 @@ These are the defaults, picked for a panel about 0.6 m away:
 
 - **SubViewport panels, drawn only on change.** isaac liked the vrui
   draft's look (and its hand window) better than the first quads-and-Label3D
-  version, so ui.gd now draws that way. The cost vrui had came from drawing
-  every frame; ui.gd draws a panel's picture once and again only when it
+  version, so vrui.gd now draws that way. The cost vrui had came from drawing
+  every frame; vrui.gd draws a panel's picture once and again only when it
   changes, and works out pointing itself (Godot's GUI input is off), so
   input still comes only through controls.gd and stops while a Yes/No
   question is up.
-- **Text wrapping lives in ui.gd**, not a separate module: only the window
+- **Text wrapping lives in vrui.gd**, not a separate module: only the window
   knows its real width, so it wraps there, and the terminal and chat get it
   through `set_text` and `scroll`.
-- **The launcher lives in ui.gd**, not a separate menu.gd as
-  MODULE-FRAMEWORK.md first planned: the Menu bar was already ui.gd's, and
+- **The launcher lives in vrui.gd**, not a separate menu.gd as
+  MODULE-FRAMEWORK.md first planned: the Menu bar was already vrui.gd's, and
   one module avoids two panels fighting over the left menu button.
 - **The chat panel's element ids didn't change**, so aimsg and anything
   else that finds them keeps working.
