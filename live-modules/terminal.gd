@@ -103,6 +103,11 @@ func menu_info() -> Dictionary:
 	return {"id": "terminal", "label": "Terminal", "order": 50, "panel": PANEL, "tools": true}
 
 
+# A button on the hand menu (pause.gd).
+func hand_info() -> Dictionary:
+	return {"id": "terminal", "label": "Terminal", "order": 20, "panel": PANEL}
+
+
 func _process(delta: float) -> void:
 	_since_check += delta
 	if _since_check >= CHECK_SECONDS:
