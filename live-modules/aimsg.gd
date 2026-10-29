@@ -50,6 +50,12 @@ func format(value, _source: Dictionary) -> String:
 	return _text
 
 
+# One event as the chat log shows it, with a blank line after a message
+# (chat.gd keeps its own scrollback with this).
+func event_lines(event: String) -> Array:
+	return _event_lines(event)
+
+
 func _event_lines(event: String) -> Array:
 	var role := "note"
 	var text := event

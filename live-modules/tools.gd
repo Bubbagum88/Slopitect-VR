@@ -1,9 +1,10 @@
 extends SlopitectModule
 
 # Slopitect live module: tools.
-# A small tool window (B on the right controller, or its tile on the Menu,
-# shows and hides it) with a button for each tool, the chosen tool's own
-# buttons, and Undo / Redo.
+# The Tools menu (B on the right controller, or its tile on the Menu, shows
+# and hides it): a button for each tool, which chooses it and opens that
+# tool's own menu (its buttons, Undo / Redo, and a back arrow), the windows
+# that are tools (the terminal), and Undo / Redo.
 #
 # A tool is any other loaded module with a tool_info() function, so a tool
 # is its own file: load it and its button appears, unload it and it goes.
@@ -19,8 +20,10 @@ extends SlopitectModule
 const PANEL := "tools"
 const SCAN_SECONDS := 0.5
 const MAX_UNDO := 50
-const CELL := Vector2(0.11, 0.05)
-const GAP := 0.012
+const TOOL_PANEL_PREFIX := "tools_t_"  # each tool's own menu: tools_t_ID
+const CELL := Vector2(0.2, 0.06)
+const COLUMNS := 2
+const MENU_WIDTH := 0.41
 
 var _active := ""  # the chosen tool's id
 var _tools := {}  # id -> the module
@@ -43,7 +46,12 @@ func setup() -> String:
 func _exit_tree() -> void:
 	if _tools.has(_active) and is_instance_valid(_tools[_active]):
 		_tools[_active].call("tool_selected", false)
-	ctx["server"].run({"cmd": "ui_remove", "id_panel": PANEL})
+	if ctx["modules"].module(name) != null:
+		return  # the app is closing, not unloading this: the menus stay for next time
+	for panel in ctx["server"].run({"cmd": "ui_list"}).get("panels", []):
+		var id_panel := str(panel.get("id_panel", ""))
+		if id_panel == PANEL or id_panel.begins_with(TOOL_PANEL_PREFIX):
+			ctx["server"].run({"cmd": "ui_remove", "id_panel": id_panel})
 
 
 func _process(delta: float) -> void:
@@ -104,7 +112,9 @@ func _scan() -> void:
 		_active = ""
 		_trigger_down = false
 	_tools = found
-	var signature := JSON.stringify([_active, infos, _undo_label(), _redo.size()])
+	# Built again on a new or reloaded ui module too.
+	var ui := _ui()
+	var signature := JSON.stringify([_active, infos, _undo_label(), _redo.size(), _windows(), ui.get_instance_id() if ui != null else 0])
 	if signature != _signature:
 		_signature = signature
 		_build_panel(infos)
@@ -178,52 +188,120 @@ func _end_trigger() -> void:
 
 # --- The window ----------------------------------------------------------------------
 
+# The Tools menu: a button for each tool, which chooses it and opens its own
+# menu (its buttons, with a back arrow to this one); the windows that count
+# as tools (a module whose menu_info() has "tools": true, like the
+# terminal); and Undo / Redo. Each menu is a ui panel, kept by ui.gd: this
+# only adds it the first time and replaces its elements after, so where you
+# put it stays.
 func _build_panel(infos: Dictionary) -> void:
+	if _ui() == null:
+		return
 	var ids := infos.keys()
 	ids.sort_custom(func(a, b): return [infos[a].get("order", 100), a] < [infos[b].get("order", 100), b])
-	var rows := []
-	var tool_row := [{"label": "No tool", "action": {"cmd": "tools_select", "tool": ""}}]
+	var tool_buttons := [_button("none", "No tool", {"cmd": "tools_select", "tool": ""}, "accent" if _active.is_empty() else "button")]
 	for id in ids:
 		var label := str(infos[id].get("label", id)).left(30)
-		tool_row.append({"label": ("> " + label) if id == _active else label, "action": {"cmd": "tools_select", "tool": id}})
-	rows.append(tool_row)
-	if infos.has(_active) and typeof(infos[_active].get("buttons")) == TYPE_ARRAY:
-		var own: Array = infos[_active]["buttons"]
-		for start in range(0, own.size(), 5):
-			rows.append(own.slice(start, start + 5))
-	var undo_label := _undo_label()
-	rows.append([
-		{"label": ("Undo " + undo_label).left(40) if not undo_label.is_empty() else "Undo", "action": {"cmd": "tools_undo"}},
-		{"label": "Redo (%d)" % _redo.size() if not _redo.is_empty() else "Redo", "action": {"cmd": "tools_redo"}},
-	])
+		var button := _button("t_" + id, ("> " + label) if id == _active else label, {"cmd": "tools_select", "tool": id}, "accent" if id == _active else "button")
+		button["open"] = _tool_panel(id)
+		tool_buttons.append(button)
+	var elements := [
+		{"type": "text", "id": "status", "width": MENU_WIDTH, "font_size": 24, "color": "muted", "source": {"cmd": "tools_status", "field": "line"}},
+		_heading("tools_title", "Tools"),
+		{"type": "grid", "id": "tool_grid", "columns": COLUMNS, "children": tool_buttons},
+	]
+	var windows := _windows()
+	if not windows.is_empty():
+		elements.append(_heading("windows_title", "Windows"))
+		elements.append({"type": "grid", "id": "window_grid", "columns": COLUMNS, "children": windows})
+	elements.append(_undo_row(""))
+	_put(PANEL, "Tools", elements, {"toggle": "right_b", "menu": "Tools"})
 
-	var widest := 0
-	for row in rows:
-		widest = maxi(widest, row.size())
-	var width := widest * (CELL.x + GAP) + GAP
-	var height := (rows.size() + 1) * (CELL.y + GAP) + GAP
-	var top := height / 2.0 - GAP - CELL.y / 2.0
-	var elements := [{"type": "text", "id": "status", "at": [-width / 2.0 + GAP, top], "width": width - 2 * GAP,
-		"font_size": 22, "source": {"cmd": "tools_status", "field": "line"}}]
-	for r in rows.size():
-		var row: Array = rows[r]
-		for c in row.size():
-			var button = row[c]
-			if typeof(button) != TYPE_DICTIONARY or typeof(button.get("action")) != TYPE_DICTIONARY:
-				continue
-			var x := (c - (row.size() - 1) / 2.0) * (CELL.x + GAP)
-			var y := top - (r + 1) * (CELL.y + GAP)
-			elements.append({"type": "button", "id": "b%d_%d" % [r, c], "label": str(button.get("label", "?")).left(40),
-				"at": [x, y], "size": [CELL.x, CELL.y], "action": button["action"],
-				"color": "accent" if r == 0 and c > 0 and ids[c - 1] == _active else "button"})
-	# A title bar to carry and close it, and a tile on the Menu (ui.gd).
-	var panel := {"cmd": "ui_add", "id_panel": PANEL, "title": "Tools", "place": "front", "distance": 0.5, "height": -0.2,
-		"toggle": "right_b", "chrome": true, "menu": "Tools", "size": [width, height], "elements": elements}
-	var listed: Dictionary = ctx["server"].run({"cmd": "ui_list"})
-	for existing in listed.get("panels", []):
-		if existing.get("id_panel") == PANEL:
-			panel["cmd"] = "ui_update"
-			panel["visible"] = existing.get("visible", false)
+	# Each tool's own menu; the menus of tools that went are taken away.
+	var wanted := {}
+	for id in ids:
+		wanted[_tool_panel(id)] = true
+		var own := []
+		if typeof(infos[id].get("buttons")) == TYPE_ARRAY:
+			for i in infos[id]["buttons"].size():
+				var button = infos[id]["buttons"][i]
+				if typeof(button) == TYPE_DICTIONARY and typeof(button.get("action")) == TYPE_DICTIONARY:
+					own.append(_button("b%d" % i, str(button.get("label", "?")), button["action"]))
+		var tool_elements := [
+			{"type": "text", "id": "status", "width": MENU_WIDTH, "font_size": 24, "color": "muted", "source": {"cmd": "tools_status", "field": "line"}},
+			{"type": "grid", "id": "own", "columns": COLUMNS, "children": own},
+			_undo_row("u"),
+			_button("put_away", "Put it away" if id == _active else "Choose it", {"cmd": "tools_select", "tool": "" if id == _active else id}),
+		]
+		_put(_tool_panel(id), str(infos[id].get("label", id)).left(60), tool_elements, {})
+	for panel in ctx["server"].run({"cmd": "ui_list"}).get("panels", []):
+		var id_panel := str(panel.get("id_panel", ""))
+		if id_panel.begins_with(TOOL_PANEL_PREFIX) and not wanted.has(id_panel):
+			ctx["server"].run({"cmd": "ui_remove", "id_panel": id_panel})
+
+
+func _tool_panel(id: String) -> String:
+	return TOOL_PANEL_PREFIX + id
+
+
+func _button(id: String, label: String, action: Dictionary, color := "button") -> Dictionary:
+	return {"type": "button", "id": id, "label": label.left(40), "size": [CELL.x, CELL.y], "action": action, "color": color}
+
+
+func _heading(id: String, text: String) -> Dictionary:
+	return {"type": "text", "id": id, "text": text, "width": MENU_WIDTH, "font_size": 30, "color": "accent"}
+
+
+func _undo_row(prefix: String) -> Dictionary:
+	var undo_label := _undo_label()
+	return {"type": "row", "id": prefix + "undo_row", "children": [
+		_button(prefix + "undo", ("Undo " + undo_label) if not undo_label.is_empty() else "Undo", {"cmd": "tools_undo"}),
+		_button(prefix + "redo", "Redo (%d)" % _redo.size() if not _redo.is_empty() else "Redo", {"cmd": "tools_redo"}),
+	]}
+
+
+# The windows that are tools: menu_info() with "tools": true. A window opens
+# in this menu's place, with a back arrow; a command runs.
+func _windows() -> Array:
+	var out := []
+	var infos := []
+	for child in ctx["modules"].get_children():
+		if child != self and child.has_method("menu_info"):
+			var info = child.call("menu_info")
+			if typeof(info) == TYPE_DICTIONARY and info.get("tools", false) == true and typeof(info.get("id")) == TYPE_STRING:
+				infos.append(info)
+	infos.sort_custom(func(a, b): return [a.get("order", 100), a["id"]] < [b.get("order", 100), b["id"]])
+	for info in infos:
+		var label := str(info.get("label", info["id"]))
+		if typeof(info.get("panel")) == TYPE_STRING:
+			out.append({"type": "button", "id": "w_" + info["id"], "label": label.left(40), "size": [CELL.x, CELL.y], "open": info["panel"]})
+		elif typeof(info.get("action")) == TYPE_DICTIONARY:
+			out.append(_button("w_" + info["id"], label, info["action"]))
+	return out
+
+
+# Adds the panel the first time, then changes only its elements. A panel
+# from before the menus (laid out by "at") is made again as a column.
+func _put(id_panel: String, title: String, elements: Array, extra: Dictionary) -> void:
+	var got: Dictionary = ctx["server"].run({"cmd": "ui_get", "id_panel": id_panel})
+	var visible := false
+	if got.get("ok", false):
+		if got["panel"].get("layout") == "column":
+			var updated: Dictionary = ctx["server"].run({"cmd": "ui_update", "id_panel": id_panel, "elements": elements})
+			if not updated.get("ok", false):
+				push_error("Slopitect tools: %s could not be built: %s" % [id_panel, updated.get("error")])
+			return
+		visible = got["panel"].get("visible", false)
+		ctx["server"].run({"cmd": "ui_remove", "id_panel": id_panel})
+	var panel := {"cmd": "ui_add", "id_panel": id_panel, "title": title, "place": "front", "distance": 0.5, "height": -0.2,
+		"chrome": true, "layout": "column", "visible": visible, "elements": elements}
+	panel.merge(extra)
 	var reply: Dictionary = ctx["server"].run(panel)
 	if not reply.get("ok", false):
-		push_error("Slopitect tools: the window could not be built: %s" % reply.get("error"))
+		push_error("Slopitect tools: %s could not be built: %s" % [id_panel, reply.get("error")])
+
+
+# The window module, by either name (it may be renamed vrui).
+func _ui() -> SlopitectModule:
+	var ui: SlopitectModule = ctx["modules"].module("vrui")
+	return ui if ui != null else ctx["modules"].module("ui")
