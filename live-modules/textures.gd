@@ -1,8 +1,11 @@
 extends SlopitectModule
 
 # Textures on shapes. textures_apply puts an image from downloads/ (or a
-# built-in "noise") on named shapes, tinted by the shape's colour, mapped
-# in world space so every size looks the same. Optional metallic and
+# built-in "noise") on named shapes, tinted by the shape's colour. The
+# texture is mapped on the shape itself (triplanar in its own space), so it
+# moves, turns and is carried with the shape; it's scaled by the shape's
+# size, so a tile is "scale" metres on a big box and a small one alike, and
+# it's fitted again when the shape is resized. Optional metallic and
 # roughness make things shiny. Kept per project in saves/textures.json and
 # put back when the world loads.
 
@@ -34,8 +37,8 @@ func _process(delta: float) -> void:
 		_load()
 	for n in _map:
 		var node := _find(n)
-		if node and node.material_override != _mine.get(n):
-			_put(n, node)
+		if node and (not _mine.has(n) or node.material_override != _mine[n] or node.scale != _mine[n].get_meta("scale", node.scale)):
+			_put(n, node)  # its material was replaced, or it was resized
 
 
 func _home() -> String:
@@ -127,10 +130,14 @@ func _put(n: String, node: MeshInstance3D) -> bool:
 	m.set_meta("base", base)
 	m.albedo_texture = tex
 	m.albedo_color = base if info.get("tint", true) else Color.WHITE
+	# Triplanar in the shape's own space, not the world's, so the texture
+	# goes where the shape goes. Its own space is before its scale, so the
+	# scale is put back in to keep each tile the same size in metres.
 	m.uv1_triplanar = true
-	m.uv1_world_triplanar = true
-	var s := 1.0 / maxf(float(info.get("scale", 1.0)), 0.01)
-	m.uv1_scale = Vector3(s, s, s)
+	m.uv1_world_triplanar = false
+	var tile := maxf(float(info.get("scale", 1.0)), 0.01)
+	m.uv1_scale = node.scale.abs().max(Vector3(0.001, 0.001, 0.001)) / tile
+	m.set_meta("scale", node.scale)
 	m.metallic = clampf(float(info.get("metallic", 0.0)), 0.0, 1.0)
 	m.roughness = clampf(float(info.get("roughness", 0.8)), 0.0, 1.0)
 	m.metallic_specular = 0.5 if m.roughness >= 0.5 else 0.9
