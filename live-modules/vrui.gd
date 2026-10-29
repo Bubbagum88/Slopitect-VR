@@ -150,6 +150,7 @@ var _hovered: Control  # the element (or title bar, tab, tile) the pointer is on
 var _openers := {}  # id_panel -> the panel whose "open" button opened it (for its back arrow)
 var _scroll := {}  # "panel/element" -> lines scrolled back from the newest
 var _stick_lines := 0.0  # lines the thumbstick has moved a scrolling text but not yet sent
+var _pointed := []  # the panels pointed at most recently, newest first (see last_pointed)
 var _dragging := ""  # id_panel being carried, by the grip or by its title bar
 var _drag_offset: Transform3D
 var _sliding := ""  # "panel/element" of the slider the trigger is holding
@@ -251,6 +252,10 @@ func _physics_process(_delta: float) -> void:
 	_ray.enabled = not blocked
 	var hit: StaticBody3D = _ray.get_collider() as StaticBody3D if _ray.enabled and _ray.is_colliding() else null
 	_pointing = String(hit.get_meta("panel", "")) if hit else ""
+	if not _pointing.is_empty() and (_pointed.is_empty() or _pointed[0] != _pointing):
+		_pointed.erase(_pointing)
+		_pointed.push_front(_pointing)
+		_pointed.resize(mini(_pointed.size(), 4))
 	var control: Control = null
 	if not _pointing.is_empty() and _views.has(_pointing):
 		control = _control_at(_pointing, _picture_point(_pointing, _ray.get_collision_point()))
@@ -2242,6 +2247,19 @@ func _scroll_target(hit: StaticBody3D) -> String:
 			return element["id"]
 		found.append(element["id"])
 	return found[0] if found.size() == 1 else ""
+
+
+# For a keyboard module: the input box typing goes to ("panel/element", or
+# ""), and the panel pointed at most recently other than `except`.
+func focus() -> String:
+	return _focus
+
+
+func last_pointed(except := "") -> String:
+	for id_panel in _pointed:
+		if id_panel != except:
+			return id_panel
+	return ""
 
 
 func scroll_text(id_panel: String, id_element: String, lines: int) -> int:
