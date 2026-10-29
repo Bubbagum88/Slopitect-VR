@@ -28,6 +28,10 @@ const MIN_SECONDS := 0.4
 const HTTP_TIMEOUT := 60.0
 const LOCAL_CLASS := "SpeechToText"  # from the godot-whisper plugin
 const LOCAL_LANGUAGES := {"": 0, "en": 1}  # its Language enum: 0 Auto, 1 English
+const TRIM_FRAME := 320  # 20 ms at 16 kHz, the steps quiet is measured in
+const TRIM_RELATIVE := 0.1  # quieter than a tenth of the loudest 20 ms counts as quiet
+const TRIM_FLOOR := 0.002  # and so does anything this quiet, however quiet the rest
+const TRIM_PAD_SECONDS := 0.3  # kept either side of the words, so their edges aren't cut
 const CHAT_INPUT := ["chat", "line"]  # the chat window's input box, where your words go
 
 const DEFAULTS := {
@@ -264,6 +268,13 @@ func _local_work(frames: PackedVector2Array, path: String) -> void:
 	var samples: PackedFloat32Array = _local.call("resample", frames, 2)  # SRC_SINC_FASTEST
 	report["samples_16k"] = samples.size()
 	report["resample_ms"] = Time.get_ticks_msec() - started
+	# The quiet before and after the words is cut off: whisper's work grows
+	# with the audio it is given, and trailing quiet is where it repeats itself.
+	samples = _trim_quiet(samples)
+	report["speech_s"] = snappedf(samples.size() / 16000.0, 0.01)
+	if samples.is_empty():
+		call_deferred("_local_done", report, "")
+		return
 	started = Time.get_ticks_msec()
 	# Whisper's encoder covers a fixed 30 s window (an audio context of 1500,
 	# 50 per second) however short the recording; covering only what was
@@ -279,7 +290,41 @@ func _local_work(frames: PackedVector2Array, path: String) -> void:
 	if not error.is_empty():
 		report["error"] = error
 	var words: String = String(result[0]) if not result.is_empty() else ""
+	# The rest of the result is one entry per token whisper wrote: with the
+	# time, it tells the listening (encoder) apart from the writing (decoder).
+	report["tokens"] = maxi(result.size() - 1, 0)
 	call_deferred("_local_done", report, words)
+
+
+# The part of a 16 kHz recording from a little before the first loud 20 ms
+# to a little after the last; "loud" is relative to the loudest part, so a
+# quiet microphone works too. Empty when it was all quiet.
+func _trim_quiet(samples: PackedFloat32Array) -> PackedFloat32Array:
+	var frame := TRIM_FRAME
+	var count := samples.size() / frame
+	if count == 0:
+		return samples
+	var levels := PackedFloat32Array()
+	levels.resize(count)
+	var loudest := 0.0
+	for i in count:
+		var sum := 0.0
+		for j in range(i * frame, (i + 1) * frame):
+			sum += samples[j] * samples[j]
+		levels[i] = sqrt(sum / frame)
+		loudest = maxf(loudest, levels[i])
+	var threshold := maxf(loudest * TRIM_RELATIVE, TRIM_FLOOR)
+	var first := -1
+	var last := -1
+	for i in count:
+		if levels[i] >= threshold:
+			if first == -1:
+				first = i
+			last = i
+	if first == -1:
+		return PackedFloat32Array()
+	var pad := int(TRIM_PAD_SECONDS * 16000)
+	return samples.slice(maxi(first * frame - pad, 0), mini((last + 1) * frame + pad, samples.size()))
 
 
 func _local_done(report: Dictionary, words: String) -> void:
