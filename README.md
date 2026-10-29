@@ -49,6 +49,8 @@ Working now:
 
 What you can change live, what needs a new APK, and how the agent is kept
 safe: [docs/LIVE-CHANGES-AND-SAFETY.md](docs/LIVE-CHANGES-AND-SAFETY.md).
+Everything built so far and how far each part is tested:
+[docs/PROJECT-STATE.md](docs/PROJECT-STATE.md).
 
 Planned:
 
@@ -352,6 +354,10 @@ registering the plugin first.)
 | `game/agent/providers/` | One file per kind of AI service (`anthropic.gd`, `openai.gd`) |
 | `game/skills/` | The agent's shipped skills, one `SKILL.md` per folder |
 | `docs/LIVE-CHANGES-AND-SAFETY.md` | What changes live, what needs a new APK, and the safety rules |
+| `docs/PROJECT-STATE.md` | Everything built so far, how sure we are each part works, the rules, and what's open |
+| `docs/MODULE-FRAMEWORK.md` | The plan for live modules to plug into each other, and the review of the draft modules |
+| `live-modules/` | The live modules; `live-modules/drafts/` holds new ones waiting to be reworked |
+| `CLAUDE.md` | Working rules for Claude sessions on this repo |
 | `tools/slopi.ps1` | Sends one command from your PC and prints the reply |
 | `tools/slopi-chat.ps1` | Talks to the agent from your PC and shows its replies and tool calls as they happen |
 | `tools/slopi-backup.ps1` | Backs up a project from the headset into a git repository on the PC, and pushes it with -Push (private projects and assets/ are never taken) |
