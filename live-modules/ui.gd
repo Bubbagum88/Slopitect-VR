@@ -30,9 +30,17 @@ extends SlopitectModule
 # under the title; an element with a "page" shows only on that tab.
 # The Menu bar is also the launcher: any module with menu_info() gets a
 # tile on it (see _scan_apps), so a module needs no button of its own.
-# Pointing gives feedback: the button lifts and lights up, a dot shows where
-# you point, and the controller ticks (controls.pulse) on hover and press.
-# Docs: docs/VR-UI.md.
+# Pointing gives feedback: the button lights up, a dot shows where you
+# point, and the controller ticks (controls.pulse) on hover and press.
+#
+# Panels are drawn the way the vrui draft drew its windows (rounded, with
+# real 2D panels and text, see Drawing), redrawn only when they change. A
+# panel can be held by a hand ("hand" place), and its elements can flow in
+# rows, columns and grids (layout column or row) instead of each having an
+# "at", so a menu is a list of what's in it. A button with "open" opens
+# another panel in its place, with a back arrow: menus inside menus.
+# A text element with "scroll" keeps its newest lines in view (a terminal);
+# ui_scroll moves it back and forth. Docs: docs/VR-UI.md.
 
 const SAVE_PATH := "user://ui.json"
 const CONFIG_PATH := "user://ui_config.json"  # the theme, from the PC only
@@ -46,21 +54,24 @@ const MAX_ELEMENTS := 150
 const MAX_TEXT := 4000
 const MAX_INPUT := 500
 const MAX_PAGES := 8
-const PLACES := ["front", "wrist", "world", "follow"]
-const LAYOUTS := ["free", "grid"]
-const ELEMENT_TYPES := ["text", "button", "input", "box", "toggle", "slider"]
+const PLACES := ["front", "wrist", "world", "follow", "hand"]
+const LAYOUTS := ["free", "grid", "column", "row"]
+const ELEMENT_TYPES := ["text", "button", "input", "box", "toggle", "slider", "row", "column", "grid"]
+const CONTAINERS := ["row", "column", "grid"]
+const MAX_DEPTH := 6  # rows in columns in grids...
 const ALIGNS := {"left": HORIZONTAL_ALIGNMENT_LEFT, "center": HORIZONTAL_ALIGNMENT_CENTER, "right": HORIZONTAL_ALIGNMENT_RIGHT}
 const SOURCE_COMMANDS := ["list", "modules"]  # plus any ending in _status or _list
 # Colours, sizes and text sizes every panel draws with unless it says
 # otherwise. Text sizes are for about 0.6 m away; 24 is the smallest that
 # reads comfortably on the Quest 1.
+# The colours are the vrui draft's.
 const DEFAULT_THEME := {
-	"panel": "#10131a", "border": "#2b3346", "title_bar": "#1a2030", "title": "#c9d4ff",
-	"text": "#e8ecf4", "muted": "#8a93a6", "button": "#1f2533", "hover": "#2f4a8a",
-	"press": "#5b86ff", "accent": "#4a7dff", "danger": "#a8322a", "ok": "#2f8f4e",
-	"input": "#b3e6ff", "input_bg": "#0b0e14", "screen": "#08100a", "notice": "#ff7466",
+	"panel": "#0b0d11", "border": "#3a4560", "title_bar": "#151a26", "title": "#9fb4ff",
+	"text": "#e8ecf4", "muted": "#8a93a6", "button": "#1f2129", "hover": "#3a4560",
+	"press": "#4a6cff", "accent": "#4a6cff", "danger": "#a8322a", "ok": "#2f8f4e",
+	"input": "#b3e6ff", "input_bg": "#07080b", "screen": "#08100a", "notice": "#ff7466",
 	"laser": "#66b3ff", "cursor": "#ffffff",
-	"font_title": 30, "font_body": 28, "font_small": 24,
+	"font_title": 40, "font_body": 36, "font_small": 28,
 }
 const THEME_FONTS := ["font_title", "font_body", "font_small"]
 const TYPE_COLORS := {"text": "text", "button": "button", "input": "input", "box": "screen", "toggle": "button", "slider": "accent"}
@@ -68,9 +79,19 @@ const TYPE_COLORS := {"text": "text", "button": "button", "input": "input", "box
 # element saved with one of these follows the theme instead.
 const OLD_DEFAULT_COLORS := {"text": "#ffffff", "button": "#1f2129", "input": "#b3e6ff", "box": "#08100a"}
 const OLD_PANEL_COLOR := "#0b0d11"
-const TITLE_BAR := 0.05  # metres, above the panel's background
+const TITLE_BAR := 0.05  # metres
 const TAB_BAR := 0.045
-const HOVER_LIFT := 0.004  # a hovered button comes this far towards you
+const GAP := 0.01  # between rows and elements
+const PADDING := 0.016  # inside a window's edge
+const BORDER := 0.0025
+const PANEL_RADIUS := 0.022  # the rounded corners
+const BUTTON_RADIUS := 0.014
+const PANEL_ALPHA := 0.94
+const PX_PER_M := 1250.0  # a panel's picture: about what the Quest 1 shows at 0.6 m
+const APP_COLUMNS := 5
+const HAND_POSITION := [0.0, 0.12, -0.02]  # a hand panel's default place on the controller
+const HAND_ROTATION := [-35.0, 0.0, 0.0]
+const HAND_SCALE := 0.5
 const PRESS_SECONDS := 0.12
 const FOLLOW_ANGLE := 35.0  # degrees you turn away before a follow panel catches up
 const FOLLOW_DISTANCE := 0.5  # or metres you walk
@@ -98,7 +119,11 @@ var _shift := false
 var _ray: RayCast3D
 var _laser: MeshInstance3D
 var _cursor: MeshInstance3D
-var _hovered: StaticBody3D
+var _views := {}  # id_panel -> {viewport, controls: {id: Control}, pointables, notice, quad, px}
+var _pointing := ""  # the panel the pointer is on
+var _hovered: Control  # the element (or title bar, tab, tile) the pointer is on
+var _openers := {}  # id_panel -> the panel whose "open" button opened it (for its back arrow)
+var _scroll := {}  # "panel/element" -> lines scrolled back from the newest
 var _dragging := ""  # id_panel being carried, by the grip or by its title bar
 var _drag_offset: Transform3D
 var _sliding := ""  # "panel/element" of the slider the trigger is holding
@@ -119,12 +144,14 @@ func setup() -> String:
 
 	register("ui_list", _list, "list the panels: id, title, place, shown or not, toggle button, number of elements")
 	register("ui_get", _get_panel, "a panel's full data, including what's typed in its input boxes: id_panel")
-	register("ui_add", _add, "add a panel: id_panel, optional title, place (front, wrist, world, follow), distance, height, position, rotation, size, color, visible, toggle (an action from controls_status, like left_menu), chrome (title bar with close), pages [tab names], page (the tab shown), apps (launcher tiles), layout (free or grid with columns and cell), elements")
+	register("ui_add", _add, "add a panel: id_panel, optional title, place (front, wrist, world, follow, hand), hand (left/right), distance, height, position, rotation, scale, size, color, visible, toggle (an action from controls_status, like left_menu), chrome (title bar with close), menu (its tile's label), pages [tab names], page (the tab shown), apps (launcher tiles), layout (free, grid with columns and cell, or column / row to flow), elements")
 	register("ui_update", _update, "change any of a panel's fields (elements replaces them all): id_panel, then the fields")
 	register("ui_remove", _remove, "remove a panel: id_panel")
 	register("ui_show", _show, "show or hide a panel: id_panel, visible (true/false)")
 	register("ui_page", _page_command, "show one of a panel's tabs: id_panel, page (its name)")
-	register("ui_element_add", _element_add, "add an element to a panel: id_panel, element ({type: text|button|input|box|toggle|slider, id, at [x,y], ...}), optional index")
+	register("ui_back", _back_command, "go back from a panel another one's \"open\" button opened: id_panel")
+	register("ui_scroll", _scroll_command, "scroll a text element with scroll: id_panel, id_element, lines (more goes back, fewer forward; 0 for the newest)")
+	register("ui_element_add", _element_add, "add an element to a panel: id_panel, element ({type: text|button|input|box|toggle|slider|row|column|grid, id, at [x,y] or in a flow, ...}), optional parent (a row, column or grid's id), index")
 	register("ui_element_update", _element_update, "change an element's fields: id_panel, id_element, then the fields")
 	register("ui_element_remove", _element_remove, "remove an element: id_panel, id_element")
 	register("ui_press", _press_command, "press a button or toggle, as if pointed at and clicked: id_panel, id_element")
@@ -184,9 +211,13 @@ func _physics_process(_delta: float) -> void:
 		_holders[_dragging].global_transform = _right.global_transform * _drag_offset
 	_ray.enabled = not pointer_blocked
 	var hit: StaticBody3D = _ray.get_collider() as StaticBody3D if _ray.enabled and _ray.is_colliding() else null
-	if hit != _hovered:
+	_pointing = String(hit.get_meta("panel", "")) if hit else ""
+	var control: Control = null
+	if not _pointing.is_empty() and _views.has(_pointing):
+		control = _control_at(_pointing, _picture_point(_pointing, _ray.get_collision_point()))
+	if control != _hovered:
 		_set_hover(_hovered, false)
-		_hovered = hit
+		_hovered = control
 		_set_hover(_hovered, true)
 	if pointer_blocked:
 		_laser.visible = false  # the question draws its own
@@ -195,13 +226,13 @@ func _physics_process(_delta: float) -> void:
 	if not _sliding.is_empty():
 		_slide_follow()
 	var length := LASER_LENGTH
-	if _hovered:
+	if hit:
 		var point := _ray.get_collision_point()
 		length = _right.global_position.distance_to(point)
 		_cursor.global_position = point + _ray.get_collision_normal() * 0.002
-	_cursor.visible = _hovered != null
+	_cursor.visible = hit != null
 	# Only show the laser while a panel is out that it can point at.
-	_laser.visible = _hovered != null or _any_open()
+	_laser.visible = hit != null or _any_open()
 	_laser.scale = Vector3(1, 1, length)
 	_laser.position = Vector3(0, 0, -length / 2.0)
 
@@ -219,11 +250,9 @@ func _process(delta: float) -> void:
 	for panel in panels:
 		if not panel["visible"]:
 			continue
-		for element in panel["elements"]:
+		for element in _flat(panel["elements"]):
 			if element["type"] == "text" and element.has("source"):
-				var label := _find_node(panel["id_panel"], element["id"]) as Label3D
-				if label:
-					label.text = _read_source(element)
+				_set_label_text(panel["id_panel"], element["id"], _read_source(element))
 
 
 func _any_open() -> bool:
@@ -270,7 +299,7 @@ func action_order() -> int:
 func on_action(action: String, down: bool) -> bool:
 	match action:
 		"point":
-			if down and _hovered:
+			if down and not _pointing.is_empty():
 				_on_point_pressed()
 				return true
 			if not down:
@@ -303,9 +332,15 @@ func _end_drag() -> void:
 	_dragging = ""
 	if index == -1:
 		return
-	# Where you let go is where it stays: it's now a panel in the world.
+	# Where you let go is where it stays: it's now a panel in the world
+	# (a hand panel too: you took it out of your hand).
 	var panel: Dictionary = panels[index]
 	var holder: Node3D = _holders[panel["id_panel"]]
+	if holder.get_parent() != self:
+		var at := holder.global_transform
+		holder.get_parent().remove_child(holder)
+		add_child(holder)
+		holder.global_transform = at
 	var p := holder.global_position
 	var r := holder.global_rotation_degrees
 	panel["place"] = "world"
@@ -317,9 +352,9 @@ func _end_drag() -> void:
 
 
 func _start_drag() -> bool:
-	if not _hovered:
+	if _pointing.is_empty():
 		return false
-	var id_panel: String = _hovered.get_meta("panel")
+	var id_panel := _pointing
 	var index := _index_of(id_panel)
 	if index == -1 or panels[index]["place"] == "wrist":
 		return true  # the wrist panel moves with your wrist; the grip is still the panel's
@@ -331,7 +366,7 @@ func _start_drag() -> bool:
 
 func _on_point_pressed() -> void:
 	if not _hovered:
-		return
+		return  # the panel's background: the press is the panel's, and does nothing
 	var id_panel: String = _hovered.get_meta("panel")
 	var index := _index_of(id_panel)
 	if index == -1:
@@ -354,6 +389,8 @@ func _on_point_pressed() -> void:
 			_open_app(id_panel, _hovered.get_meta("value"))
 			return
 		"back":
+			_pulse(0.4, 0.04)
+			_back(id_panel)
 			return
 	var id_element: String = _hovered.get_meta("element")
 	var element := _element(id_panel, id_element)
@@ -366,7 +403,10 @@ func _on_point_pressed() -> void:
 		"button", "toggle":
 			_pulse(0.4, 0.04)
 			_flash(_hovered)
-			press(id_panel, id_element)
+			if element.has("open") and not element.has("action"):
+				_open_menu(id_panel, element["open"])
+			else:
+				press(id_panel, id_element)
 		"slider":
 			_pulse(0.2, 0.02)
 			_sliding = id_panel + "/" + id_element
@@ -378,6 +418,10 @@ func _set_visible(panel: Dictionary, on: bool) -> void:
 	if on and panel["place"] in ["front", "follow"]:
 		_holders[panel["id_panel"]].global_transform = _front_transform(panel)
 		_following.erase(panel["id_panel"])
+	if not on and _openers.has(panel["id_panel"]):
+		_openers.erase(panel["id_panel"])
+		if panel["chrome"]:
+			_build(panel["id_panel"])  # no back arrow the next time it opens
 	panel["visible"] = on
 	_holders[panel["id_panel"]].visible = on
 	_set_pointable(_holders[panel["id_panel"]], on)
@@ -408,6 +452,52 @@ func _in_front() -> Array:
 	forward = forward.normalized() if forward.length() > 0.01 else Vector3.FORWARD
 	var p := head.origin + forward * 1.0 + Vector3(0, -0.3, 0)
 	return [p.x, p.y, p.z]
+
+
+# A button's "open": the other panel takes this one's place (and this one
+# hides), with a back arrow in its title bar that brings this one back.
+func _open_menu(from: String, to: String) -> void:
+	var index := _index_of(to)
+	if index == -1:
+		_notice(from, "no panel \"%s\" to open" % to)
+		return
+	var target: Dictionary = panels[index]
+	_openers[to] = from
+	_build(to)
+	var holder: Node3D = _holders[to]
+	if target["place"] in ["front", "follow"] and _holders.has(from):
+		holder.global_transform = _holders[from].global_transform
+	target["visible"] = true
+	holder.visible = true
+	_set_pointable(holder, true)
+	_since_poll = POLL_SECONDS
+	var opener: Dictionary = panels[_index_of(from)]
+	opener["visible"] = false
+	_holders[from].visible = false
+	_set_pointable(_holders[from], false)
+
+
+func _back(id_panel: String) -> void:
+	var from: String = _openers.get(id_panel, "")
+	var index := _index_of(id_panel)
+	if index == -1:
+		return
+	var at: Transform3D = _holders[id_panel].global_transform
+	_set_visible(panels[index], false)
+	var back := _index_of(from)
+	if back == -1:
+		return
+	_set_visible(panels[back], true)
+	if panels[back]["place"] in ["front", "follow"]:
+		_holders[from].global_transform = at
+
+
+func _back_command(request: Dictionary) -> Dictionary:
+	var id_panel := str(request.get("id_panel"))
+	if not _openers.has(id_panel):
+		return {"ok": false, "error": "panel \"%s\" wasn't opened from another one" % id_panel}
+	_back(id_panel)
+	return {"ok": true}
 
 
 # A short tick on the right controller, through the controls module (the one
@@ -508,20 +598,19 @@ func theme() -> Dictionary:
 func _slide_follow() -> void:
 	var parts := _sliding.split("/")
 	var element := _element(parts[0], parts[1])
-	var node := _find_node(parts[0], parts[1]) as Node3D
-	if element.is_empty() or node == null:
+	var control := _find_node(parts[0], parts[1]) as Control
+	if element.is_empty() or control == null or not _holders.has(parts[0]):
 		_sliding = ""
 		return
-	var plane := Plane(node.global_basis.z.normalized(), node.global_position)
-	var from := _right.global_position
-	var hit = plane.intersects_ray(from, -_right.global_basis.z)
+	var screen := _holders[parts[0]].get_node("Screen") as Node3D
+	var plane := Plane(screen.global_basis.z.normalized(), screen.global_position)
+	var hit = plane.intersects_ray(_right.global_position, -_right.global_basis.z)
 	if hit == null:
 		return
-	var local: Vector3 = node.global_transform.affine_inverse() * hit
-	var width: float = element["size"][0]
-	var t := clampf(local.x / width + 0.5, 0.0, 1.0)
+	var track := (control.get_node("Inside") as Control).get_global_rect()
+	var t := clampf((_picture_point(parts[0], hit).x - track.position.x) / maxf(track.size.x, 1.0), 0.0, 1.0)
 	_slide_value = _snap_value(element, lerpf(element["min"], element["max"], t))
-	_show_slider(node, element, _slide_value)
+	_show_slider(control, element, _slide_value, parts[0])
 
 
 func _end_slide() -> void:
@@ -692,9 +781,7 @@ func set_text(id_panel: String, id_element: String, text: String) -> bool:
 	if element.get("type") != "text" or element.has("source"):
 		return false
 	_live_text[id_panel + "/" + id_element] = text.left(MAX_TEXT)
-	var label := _find_node(id_panel, id_element) as Label3D
-	if label:
-		label.text = _live_text[id_panel + "/" + id_element]
+	_set_label_text(id_panel, id_element, _live_text[id_panel + "/" + id_element])
 	return true
 
 
@@ -724,7 +811,7 @@ func _focus_first_input(only_panel := "") -> void:
 	for panel in panels:
 		if (only_panel.is_empty() and not panel["visible"]) or (not only_panel.is_empty() and panel["id_panel"] != only_panel):
 			continue
-		for element in panel["elements"]:
+		for element in _flat(panel["elements"]):
 			if element["type"] == "input":
 				_set_focus(panel["id_panel"] + "/" + element["id"])
 				return
@@ -785,7 +872,7 @@ func _get_panel(request: Dictionary) -> Dictionary:
 	if index == -1:
 		return {"ok": false, "error": "no panel \"%s\" (ui_list shows them)" % str(request.get("id_panel"))}
 	var panel: Dictionary = panels[index].duplicate(true)
-	for element in panel["elements"]:
+	for element in _flat(panel["elements"]):
 		if element["type"] == "input":
 			element["value"] = _inputs.get(panel["id_panel"] + "/" + element["id"], "")
 	return {"ok": true, "panel": panel}
@@ -853,15 +940,21 @@ func _element_add(request: Dictionary) -> Dictionary:
 	if typeof(request.get("element")) != TYPE_DICTIONARY:
 		return {"ok": false, "error": "ui_element_add needs \"element\", like {\"type\": \"button\", \"id\": \"go\", \"label\": \"Go\", \"action\": {\"cmd\": \"list\"}}"}
 	var merged: Dictionary = panels[index].duplicate(true)
-	var at = request.get("index", merged["elements"].size())
-	if typeof(at) != TYPE_FLOAT and typeof(at) != TYPE_INT or int(at) < 0 or int(at) > merged["elements"].size():
-		return {"ok": false, "error": "\"index\" must be 0 to %d" % merged["elements"].size()}
-	merged["elements"].insert(int(at), request["element"])
+	var into: Array = merged["elements"]
+	if request.has("parent"):
+		var parent := _find_in(merged["elements"], str(request["parent"]))
+		if not parent.get("type") in CONTAINERS:
+			return {"ok": false, "error": "\"parent\" must be the id of a row, column or grid on panel \"%s\"" % merged["id_panel"]}
+		into = parent["children"]
+	var at = request.get("index", into.size())
+	if typeof(at) != TYPE_FLOAT and typeof(at) != TYPE_INT or int(at) < 0 or int(at) > into.size():
+		return {"ok": false, "error": "\"index\" must be 0 to %d" % into.size()}
+	into.insert(int(at), request["element"])
 	var checked := _check_panel(merged, false, true)
 	if checked.has("error"):
 		return {"ok": false, "error": checked["error"]}
 	panels[index] = checked["panel"]
-	return _changed(merged["id_panel"], {"ok": true, "element": checked["panel"]["elements"][int(at)]})
+	return _changed(merged["id_panel"], {"ok": true, "element": _find_in(checked["panel"]["elements"], str(request["element"].get("id")))})
 
 
 func _element_update(request: Dictionary) -> Dictionary:
@@ -869,31 +962,29 @@ func _element_update(request: Dictionary) -> Dictionary:
 	if index == -1:
 		return {"ok": false, "error": "no panel \"%s\" (ui_list shows them)" % str(request.get("id_panel"))}
 	var merged: Dictionary = panels[index].duplicate(true)
-	var at := _element_index(merged, str(request.get("id_element")))
-	if at == -1:
+	var target := _find_in(merged["elements"], str(request.get("id_element")))
+	if target.is_empty():
 		return {"ok": false, "error": "no element \"%s\" on panel \"%s\" (ui_get shows them)" % [str(request.get("id_element")), merged["id_panel"]]}
 	for key in request:
 		if not key in ["cmd", "id", "id_panel", "id_element"]:
 			if request[key] == null:
-				merged["elements"][at].erase(key)  # null takes an optional field off
+				target.erase(key)  # null takes an optional field off
 			else:
-				merged["elements"][at][key] = request[key]
+				target[key] = request[key]
 	var checked := _check_panel(merged, false, true)
 	if checked.has("error"):
 		return {"ok": false, "error": checked["error"]}
 	panels[index] = checked["panel"]
-	return _changed(merged["id_panel"], {"ok": true, "element": checked["panel"]["elements"][at]})
+	return _changed(merged["id_panel"], {"ok": true, "element": _find_in(checked["panel"]["elements"], target["id"])})
 
 
 func _element_remove(request: Dictionary) -> Dictionary:
 	var index := _index_of(str(request.get("id_panel")))
 	if index == -1:
 		return {"ok": false, "error": "no panel \"%s\" (ui_list shows them)" % str(request.get("id_panel"))}
-	var at := _element_index(panels[index], str(request.get("id_element")))
-	if at == -1:
+	if not _remove_in(panels[index]["elements"], str(request.get("id_element"))):
 		return {"ok": false, "error": "no element \"%s\" on panel \"%s\" (ui_get shows them)" % [str(request.get("id_element")), panels[index]["id_panel"]]}
-	var removed: Dictionary = panels[index]["elements"].pop_at(at)
-	return _changed(panels[index]["id_panel"], {"ok": true, "removed": removed["id"]})
+	return _changed(panels[index]["id_panel"], {"ok": true, "removed": str(request.get("id_element"))})
 
 
 func _press_command(request: Dictionary) -> Dictionary:
@@ -1010,7 +1101,7 @@ func _check_panel(data: Dictionary, is_new: bool, check_actions: bool) -> Dictio
 		return {"error": "a panel \"%s\" already exists" % id}
 	var panel := {"id_panel": id}
 	for key in data:
-		if not key in ["id_panel", "title", "place", "distance", "height", "position", "rotation", "size", "color", "visible", "toggle", "layout", "columns", "cell", "elements", "chrome", "pages", "page", "apps", "menu"]:
+		if not key in ["id_panel", "title", "place", "distance", "height", "position", "rotation", "size", "color", "visible", "toggle", "layout", "columns", "cell", "elements", "chrome", "pages", "page", "apps", "menu", "hand", "scale"]:
 			return {"error": "panel %s: unknown field \"%s\"" % [id, key]}
 	panel["title"] = data.get("title", id)
 	if typeof(panel["title"]) != TYPE_STRING or panel["title"].length() > 60:
@@ -1023,7 +1114,16 @@ func _check_panel(data: Dictionary, is_new: bool, check_actions: bool) -> Dictio
 		if typeof(value) not in [TYPE_INT, TYPE_FLOAT] or value < key[2] or value > key[3]:
 			return {"error": "panel %s: \"%s\" must be a number from %s to %s (metres)" % [id, key[0], key[2], key[3]]}
 		panel[key[0]] = float(value)
-	for key in [["position", [0, 1.4, -1], 20.0], ["rotation", [0, 0, 0], 360.0]]:
+	var in_hand: bool = panel["place"] == "hand"
+	panel["hand"] = data.get("hand", "left")
+	if not panel["hand"] in ["left", "right"]:
+		return {"error": "panel %s: \"hand\" must be left or right" % id}
+	panel["scale"] = data.get("scale", HAND_SCALE if in_hand else 1.0)
+	if typeof(panel["scale"]) not in [TYPE_INT, TYPE_FLOAT] or panel["scale"] < 0.1 or panel["scale"] > 3.0:
+		return {"error": "panel %s: \"scale\" must be 0.1 to 3" % id}
+	panel["scale"] = float(panel["scale"])
+	# For a hand panel, position and rotation are from the controller.
+	for key in [["position", HAND_POSITION if in_hand else [0, 1.4, -1], 20.0], ["rotation", HAND_ROTATION if in_hand else [0, 0, 0], 360.0]]:
 		var value = data.get(key[0], key[1])
 		if not _numbers(value, 3, -key[2], key[2]):
 			return {"error": "panel %s: \"%s\" must be [x, y, z], each from %s to %s" % [id, key[0], -key[2], key[2]]}
@@ -1040,8 +1140,6 @@ func _check_panel(data: Dictionary, is_new: bool, check_actions: bool) -> Dictio
 		panel[key] = data.get(key, false)
 		if typeof(panel[key]) != TYPE_BOOL:
 			return {"error": "panel %s: \"%s\" must be true or false" % [id, key]}
-	if panel["chrome"] and not panel.has("size"):
-		return {"error": "panel %s: a panel with \"chrome\" needs a \"size\" [width, height] for its background" % id}
 	panel["menu"] = data.get("menu", "")
 	if typeof(panel["menu"]) != TYPE_STRING or panel["menu"].length() > 24:
 		return {"error": "panel %s: \"menu\" must be the label of its tile on the Menu (up to 24 characters), or \"\" for none" % id}
@@ -1062,7 +1160,7 @@ func _check_panel(data: Dictionary, is_new: bool, check_actions: bool) -> Dictio
 		return {"error": "panel %s: \"toggle\" must be an action's name (controls_status lists them), or \"\" for none" % id}
 	panel["layout"] = data.get("layout", "free")
 	if not panel["layout"] in LAYOUTS:
-		return {"error": "panel %s: \"layout\" must be free (each element at its \"at\") or grid (buttons in rows)" % id}
+		return {"error": "panel %s: \"layout\" must be free (each element at its \"at\"), grid (buttons in rows), or column or row (elements flow, no \"at\" needed)" % id}
 	if panel["layout"] == "grid":
 		var columns = data.get("columns", 4)
 		if typeof(columns) not in [TYPE_INT, TYPE_FLOAT] or columns < 1 or columns > 20:
@@ -1085,14 +1183,17 @@ func _check_panel(data: Dictionary, is_new: bool, check_actions: bool) -> Dictio
 			return {"error": "panel %s, element %s: %s" % [id, JSON.stringify(item.get("id")), checked["error"]]}
 		if checked["element"].has("page") and not checked["element"]["page"] in panel["pages"]:
 			return {"error": "panel %s, element %s: \"page\" must be one of the panel's pages %s" % [id, checked["element"]["id"], panel["pages"]]}
-		if seen.has(checked["element"]["id"]):
-			return {"error": "panel %s: two elements are called \"%s\"" % [id, checked["element"]["id"]]}
-		seen[checked["element"]["id"]] = true
+		for element in _flat([checked["element"]]):
+			if seen.has(element["id"]):
+				return {"error": "panel %s: two elements are called \"%s\"" % [id, element["id"]]}
+			seen[element["id"]] = true
 		panel["elements"].append(checked["element"])
+	if seen.size() > MAX_ELEMENTS:
+		return {"error": "panel %s: more than %d elements" % [id, MAX_ELEMENTS]}
 	return {"panel": panel}
 
 
-func _check_element(data: Dictionary, panel: Dictionary, check_actions: bool) -> Dictionary:
+func _check_element(data: Dictionary, panel: Dictionary, check_actions: bool, depth := 0) -> Dictionary:
 	var type = data.get("type")
 	if not type in ELEMENT_TYPES:
 		return {"error": "\"type\" must be one of %s" % [ELEMENT_TYPES]}
@@ -1105,17 +1206,56 @@ func _check_element(data: Dictionary, panel: Dictionary, check_actions: bool) ->
 		"box": ["type", "id", "at", "size", "color"],
 		"toggle": ["type", "id", "at", "size", "label", "action", "color", "on"],
 		"slider": ["type", "id", "at", "size", "label", "action", "color", "min", "max", "step", "value"],
+		"row": ["type", "id", "children", "gap"],
+		"column": ["type", "id", "children", "gap"],
+		"grid": ["type", "id", "children", "gap", "columns"],
 	}
+	fields["text"].append_array(["scroll", "height"])
+	fields["button"].append("open")
 	for key in data:
-		if not key in fields[type] and key != "page":
+		if not key in fields[type] and not key in ["page", "grow"]:
 			return {"error": "unknown field \"%s\" for a %s (it has %s)" % [key, type, ", ".join(fields[type])]}
 	var element := {"type": type, "id": data["id"]}
 	if data.has("page"):
 		if typeof(data["page"]) != TYPE_STRING:
 			return {"error": "\"page\" must be the name of one of the panel's pages"}
 		element["page"] = data["page"]
+	if data.has("grow"):
+		if typeof(data["grow"]) != TYPE_BOOL:
+			return {"error": "\"grow\" (take the room left in its row) must be true or false"}
+		element["grow"] = data["grow"]
+	# In a row, column or grid, elements flow and have no "at".
+	var flowing: bool = depth > 0 or panel["layout"] in ["column", "row"]
+	if type in CONTAINERS:
+		if not flowing:
+			return {"error": "a %s goes in a panel with layout column or row, or inside another row, column or grid" % type}
+		if depth >= MAX_DEPTH:
+			return {"error": "rows, columns and grids go at most %d deep" % MAX_DEPTH}
+		var gap = data.get("gap", GAP)
+		if typeof(gap) not in [TYPE_INT, TYPE_FLOAT] or gap < 0.0 or gap > 0.2:
+			return {"error": "\"gap\" must be 0 to 0.2 metres"}
+		element["gap"] = float(gap)
+		if type == "grid":
+			element["columns"] = data.get("columns", 3)
+			if typeof(element["columns"]) not in [TYPE_INT, TYPE_FLOAT] or element["columns"] < 1 or element["columns"] > 20:
+				return {"error": "\"columns\" must be 1 to 20"}
+			element["columns"] = int(element["columns"])
+		var children = data.get("children", [])
+		if typeof(children) != TYPE_ARRAY:
+			return {"error": "\"children\" must be a list of elements"}
+		element["children"] = []
+		for child in children:
+			if typeof(child) != TYPE_DICTIONARY:
+				return {"error": "a child isn't an element: %s" % JSON.stringify(child).left(100)}
+			var checked := _check_element(child, panel, check_actions, depth + 1)
+			if checked.has("error"):
+				return {"error": "in %s: element %s: %s" % [data["id"], JSON.stringify(child.get("id")), checked["error"]]}
+			element["children"].append(checked["element"])
+		return {"element": element}
 	var in_grid: bool = panel["layout"] == "grid" and type == "button"
-	if not in_grid or data.has("at"):
+	if flowing:
+		pass
+	elif not in_grid or data.has("at"):
 		element["at"] = data.get("at", [0, 0])
 		if not _numbers(element["at"], 2, -3.0, 3.0):
 			return {"error": "\"at\" must be [x, y] in metres from the panel's centre, -3 to 3"}
@@ -1153,14 +1293,27 @@ func _check_element(data: Dictionary, panel: Dictionary, check_actions: bool) ->
 				if not problem.is_empty():
 					return {"error": problem}
 				element["source"] = data["source"]
+			if data.has("scroll"):
+				if typeof(data["scroll"]) != TYPE_BOOL:
+					return {"error": "\"scroll\" (keep the newest lines in view) must be true or false"}
+				element["scroll"] = data["scroll"]
+			if data.has("height"):
+				if typeof(data["height"]) not in [TYPE_INT, TYPE_FLOAT] or data["height"] < 0.01 or data["height"] > 3.0:
+					return {"error": "\"height\" must be 0.01 to 3 metres"}
+				element["height"] = float(data["height"])
 		"button", "toggle", "slider":
 			element["label"] = data.get("label")
 			if typeof(element["label"]) != TYPE_STRING or element["label"].is_empty() or element["label"].length() > 40:
 				return {"error": "\"label\" must be text of 1 to 40 characters"}
-			var problem := _check_action(data.get("action"), check_actions)
-			if not problem.is_empty():
-				return {"error": problem}
-			element["action"] = data["action"]
+			if data.has("open"):
+				if not _good_id(data["open"]):
+					return {"error": "\"open\" must be the id_panel of the menu it opens"}
+				element["open"] = data["open"]
+			if not (data.has("open") and not data.has("action")):
+				var problem := _check_action(data.get("action"), check_actions)
+				if not problem.is_empty():
+					return {"error": problem}
+				element["action"] = data["action"]
 			if type == "toggle":
 				element["on"] = data.get("on", false)
 				if typeof(element["on"]) != TYPE_BOOL:
@@ -1275,22 +1428,46 @@ func _index_of(id_panel: String) -> int:
 	return -1
 
 
-func _element_index(panel: Dictionary, id_element: String) -> int:
-	for i in panel["elements"].size():
-		if panel["elements"][i]["id"] == id_element:
-			return i
-	return -1
-
-
 func _element(id_panel: String, id_element: String) -> Dictionary:
 	var index := _index_of(id_panel)
-	if index == -1:
-		return {}
-	var at := _element_index(panels[index], id_element)
-	return {} if at == -1 else panels[index]["elements"][at]
+	return {} if index == -1 else _find_in(panels[index]["elements"], id_element)
+
+
+# Every element, including those inside rows, columns and grids.
+func _flat(elements: Array) -> Array:
+	var all := []
+	for element in elements:
+		all.append(element)
+		if element.has("children"):
+			all.append_array(_flat(element["children"]))
+	return all
+
+
+func _find_in(elements: Array, id_element: String) -> Dictionary:
+	for element in _flat(elements):
+		if element["id"] == id_element:
+			return element
+	return {}
+
+
+func _remove_in(elements: Array, id_element: String) -> bool:
+	for i in elements.size():
+		if elements[i]["id"] == id_element:
+			elements.remove_at(i)
+			return true
+		if elements[i].has("children") and _remove_in(elements[i]["children"], id_element):
+			return true
+	return false
 
 
 # --- Drawing -------------------------------------------------------------------------
+# Each panel is drawn the way the vrui draft drew its windows: a 2D picture
+# made of Godot's own panels and labels, in a SubViewport, shown on a flat
+# quad, with one box for the pointer to hit. The picture is drawn again only
+# when something on it changes (_redraw), never every frame, so a window that
+# isn't changing costs nothing on the Quest 1. The pointer finds the element
+# under the dot from where that element sits in the picture (_control_at),
+# so nothing in the picture reads the controllers.
 
 func _drop_holder(id_panel: String) -> void:
 	if _holders.has(id_panel):
@@ -1298,12 +1475,15 @@ func _drop_holder(id_panel: String) -> void:
 		_holders.erase(id_panel)
 		holder.get_parent().remove_child(holder)
 		holder.queue_free()
-	_hovered = null
+	_views.erase(id_panel)
+	if _pointing == id_panel:
+		_pointing = ""
+		_hovered = null
 
 
 # Draws a panel from its data, replacing what was there.
-# From the top: the title bar and its x (chrome), the tabs (pages), the
-# launcher's tiles (apps), then the background (size) with the elements on it.
+# From the top: the title bar (chrome), the tabs (pages), the launcher's
+# tiles (apps), the elements, and a line for notices.
 func _build(id_panel: String) -> void:
 	var panel: Dictionary = panels[_index_of(id_panel)]
 	var old_transform := Transform3D.IDENTITY
@@ -1314,56 +1494,226 @@ func _build(id_panel: String) -> void:
 
 	var holder := Node3D.new()
 	holder.name = "Panel_" + id_panel
-	if panel["place"] == "wrist":
-		# On the back of the left wrist, tilted to face you when you look at it.
-		holder.position = Vector3(0.0, 0.03, 0.08)
-		holder.rotation_degrees = Vector3(-60.0, 0.0, 0.0)
-		_left.add_child(holder)
-	else:
-		add_child(holder)
-		if panel["place"] == "world":
+	_place_holder(holder, panel, had_holder, old_transform)
+	_holders[id_panel] = holder
+	holder.visible = panel["visible"]
+
+	var viewport := SubViewport.new()
+	viewport.name = "Picture"
+	viewport.transparent_bg = true
+	viewport.disable_3d = true
+	viewport.gui_disable_input = true  # the pointer is worked out here, not by Godot's mouse
+	viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
+	holder.add_child(viewport)
+	var view := {"viewport": viewport, "controls": {}, "pointables": []}
+	_views[id_panel] = view
+
+	# The window: rounded, with an edge, like the vrui draft's.
+	var frame := PanelContainer.new()
+	frame.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var back := _to_color(panel["color"]) if panel.has("color") else _theme_color("panel")
+	frame.add_theme_stylebox_override("panel", _box(Color(back, PANEL_ALPHA), PANEL_RADIUS, _theme_color("border"), BORDER, PADDING))
+	viewport.add_child(frame)
+	var stack := VBoxContainer.new()
+	stack.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	stack.add_theme_constant_override("separation", _px(GAP))
+	frame.add_child(stack)
+	var above := 0  # pixels of title, tabs and tiles above the elements
+	for row in [_title_bar(panel, view) if panel["chrome"] else null,
+			_tabs(panel, view) if not panel["pages"].is_empty() else null,
+			_app_tiles(panel, view) if panel["apps"] and not _apps.is_empty() else null]:
+		if row != null:
+			stack.add_child(row)
+			above += int(row.get_combined_minimum_size().y) + _px(GAP)
+	var content := _content(panel, view)
+	stack.add_child(content)
+	var notice := _label("", theme_values["font_small"], _theme_color("notice"), false, "center")
+	notice.custom_minimum_size.y = _font_px(theme_values["font_small"]) * 1.4
+	notice.clip_text = true
+	stack.add_child(notice)
+	view["notice"] = notice
+
+	var px := frame.get_combined_minimum_size().ceil()
+	px.x = maxf(px.x, 16.0)
+	px.y = maxf(px.y, 16.0)
+	frame.size = px
+	viewport.size = Vector2i(px)
+
+	# Where the panel's own (0, 0) sits in the picture: the centre of its
+	# background for panels laid out by "at", the middle otherwise.
+	var origin := px / 2.0
+	if view.has("origin"):
+		var inner := px.x - 2 * _px(PADDING)
+		var content_x := _px(PADDING) + (inner - content.custom_minimum_size.x) / 2.0
+		origin = Vector2(content_x, _px(PADDING) + above) + view["origin"]
+	var scale: float = panel["scale"]
+	var size_m := px / PX_PER_M * scale
+	var offset := Vector3((px.x / 2.0 - origin.x) / PX_PER_M * scale, (origin.y - px.y / 2.0) / PX_PER_M * scale, 0)
+	view["quad"] = size_m
+	view["px"] = px
+
+	var screen := MeshInstance3D.new()
+	screen.name = "Screen"
+	var quad := QuadMesh.new()
+	quad.size = size_m
+	screen.mesh = quad
+	var material := StandardMaterial3D.new()
+	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR
+	material.albedo_texture = viewport.get_texture()
+	screen.material_override = material
+	screen.position = offset
+	holder.add_child(screen)
+
+	var body := StaticBody3D.new()
+	body.name = "Body"
+	body.collision_layer = UI_LAYER
+	body.collision_mask = 0
+	body.set_meta("panel", id_panel)
+	body.position = offset
+	var shape := CollisionShape3D.new()
+	var box := BoxShape3D.new()
+	box.size = Vector3(size_m.x, size_m.y, 0.004)
+	shape.shape = box
+	body.add_child(shape)
+	holder.add_child(body)
+
+	_set_pointable(holder, panel["visible"])
+	if panel["visible"]:
+		_since_poll = POLL_SECONDS
+
+
+func _place_holder(holder: Node3D, panel: Dictionary, had_holder: bool, old_transform: Transform3D) -> void:
+	match panel["place"]:
+		"wrist":
+			# On the back of the left wrist, tilted to face you when you look at it.
+			holder.position = Vector3(0.0, 0.03, 0.08)
+			holder.rotation_degrees = Vector3(-60.0, 0.0, 0.0)
+			_left.add_child(holder)
+		"hand":
+			# Held by a controller, where its position and rotation say
+			# (relative to the controller), like the vrui draft's hand window.
+			var p: Array = panel["position"]
+			var r: Array = panel["rotation"]
+			holder.position = Vector3(p[0], p[1], p[2])
+			holder.rotation_degrees = Vector3(r[0], r[1], r[2])
+			(_left if panel["hand"] == "left" else _right).add_child(holder)
+		"world":
+			add_child(holder)
 			var p: Array = panel["position"]
 			var r: Array = panel["rotation"]
 			holder.global_position = Vector3(p[0], p[1], p[2])
 			holder.global_rotation_degrees = Vector3(r[0], r[1], r[2])
-		elif had_holder:
-			holder.global_transform = old_transform  # a front panel stays where it opened
-	_holders[id_panel] = holder
-	holder.visible = panel["visible"]
+		_:
+			add_child(holder)
+			if had_holder:
+				holder.global_transform = old_transform  # a front panel stays where it opened
 
-	var top := 0.0
-	if panel.has("size"):
-		var size := Vector2(panel["size"][0], panel["size"][1])
-		top = size.y / 2.0
-		var back_color := _to_color(panel["color"]) if panel.has("color") else _theme_color("panel")
-		var back := _make_body(id_panel, "", size, Vector3(0, 0, -0.004), back_color)
-		back.set_meta("kind", "back")
-		holder.add_child(back)
-		if panel["apps"] and not _apps.is_empty():
-			top = _build_apps(holder, panel, top, size.x, back_color)
-		if not panel["pages"].is_empty():
-			top = _build_tabs(holder, panel, top, size.x)
-		if panel["chrome"]:
-			top = _build_title(holder, panel, top, size.x)
-		# A thin edge round the whole window, so it stands out from the world.
-		var edge := MeshInstance3D.new()
-		var quad := QuadMesh.new()
-		quad.size = Vector2(size.x + 0.008, top + size.y / 2.0 + 0.008)
-		edge.mesh = quad
-		edge.material_override = _flat_material(_theme_color("border"))
-		edge.position = Vector3(0, (top - size.y / 2.0) / 2.0, -0.006)
-		holder.add_child(edge)
-	elif panel["apps"] and not _apps.is_empty():
-		_build_apps(holder, panel, _top_of(panel) + 0.01, _apps_width(), Color.TRANSPARENT)
 
-	var grid_index := 0
+# The title bar: a back arrow when another menu opened this one, the title,
+# and a close x. Pull the trigger on the bar and move to carry the window.
+func _title_bar(panel: Dictionary, view: Dictionary) -> Control:
+	var id_panel: String = panel["id_panel"]
+	var bar := PanelContainer.new()
+	bar.custom_minimum_size.y = _px(TITLE_BAR)
+	_pointable(view, bar, id_panel, "", "title", "", _theme_color("title_bar"), BUTTON_RADIUS)
+	var row := HBoxContainer.new()
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_theme_constant_override("separation", _px(GAP))
+	bar.add_child(row)
+	var side := Vector2(_px(TITLE_BAR) * 0.8, _px(TITLE_BAR) * 0.8)
+	if _openers.has(id_panel):
+		row.add_child(_small_button(view, id_panel, "back", "<", side, _theme_color("button")))
+	var title := _label(panel["title"], theme_values["font_title"], _theme_color("title"), false, "left")
+	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	title.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	row.add_child(title)
+	var close := _small_button(view, id_panel, "close", "x", side, _theme_color("button"))
+	close.set_meta("hover", _theme_color("danger"))
+	row.add_child(close)
+	return bar
+
+
+func _small_button(view: Dictionary, id_panel: String, kind: String, text: String, size: Vector2, color: Color) -> Control:
+	var button := PanelContainer.new()
+	button.custom_minimum_size = size
+	button.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_pointable(view, button, id_panel, "", kind, "", color, BUTTON_RADIUS)
+	button.add_child(_label(text, theme_values["font_title"], _theme_color("text"), false, "center"))
+	return button
+
+
+func _tabs(panel: Dictionary, view: Dictionary) -> Control:
+	var row := HBoxContainer.new()
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_theme_constant_override("separation", _px(GAP))
+	for page in panel["pages"]:
+		var color := _theme_color("accent") if page == panel["page"] else _theme_color("button")
+		var tab := PanelContainer.new()
+		tab.custom_minimum_size = Vector2(_px(0.08), _px(TAB_BAR))
+		tab.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		_pointable(view, tab, panel["id_panel"], "", "tab", page, color, BUTTON_RADIUS)
+		tab.add_child(_label(page, theme_values["font_small"], _theme_color("text"), false, "center"))
+		row.add_child(tab)
+	return row
+
+
+# The launcher's tiles, in rows above the panel's own elements.
+func _app_tiles(panel: Dictionary, view: Dictionary) -> Control:
+	var grid := GridContainer.new()
+	grid.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	grid.columns = mini(_apps.size(), APP_COLUMNS)
+	grid.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	grid.add_theme_constant_override("h_separation", _px(GAP))
+	grid.add_theme_constant_override("v_separation", _px(GAP))
+	for app in _apps:
+		var open: bool = not app["panel"].is_empty() and _index_of(app["panel"]) != -1 and panels[_index_of(app["panel"])]["visible"]
+		var tile := PanelContainer.new()
+		tile.name = "App_" + app["id"]
+		tile.custom_minimum_size = APP_CELL * PX_PER_M
+		_pointable(view, tile, panel["id_panel"], "", "app", app["id"], _theme_color("accent") if open else _theme_color("button"), BUTTON_RADIUS)
+		tile.add_child(_label(app["label"], theme_values["font_body"], _theme_color("text"), false, "center"))
+		grid.add_child(tile)
+	view["apps"] = grid
+	return grid
+
+
+# The panel's elements: placed by their "at" (layout free or grid, as panels
+# always were), or flowing in a column or row (layout column or row), where
+# rows, columns and grids of elements can sit inside each other.
+func _content(panel: Dictionary, view: Dictionary) -> Control:
+	var id_panel: String = panel["id_panel"]
+	var shown: Array = panel["elements"].filter(func(e): return not e.has("page") or e["page"] == panel["page"])
+	if panel["layout"] in ["column", "row"]:
+		var flow: BoxContainer = VBoxContainer.new() if panel["layout"] == "column" else HBoxContainer.new()
+		flow.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		flow.add_theme_constant_override("separation", _px(GAP))
+		if panel.has("size"):
+			flow.custom_minimum_size = Vector2(panel["size"][0], panel["size"][1]) * PX_PER_M
+		for element in shown:
+			flow.add_child(_control_for(id_panel, element, view, Vector2.ZERO))
+		return flow
+
+	# Placed by "at": the content is the box round the background and every
+	# element, in metres from the panel's centre (y up).
+	var placed := []  # [element, at, size]
 	var grid_buttons: Array = panel["elements"].filter(func(e): return e["type"] == "button" and not e.has("at"))
+	var grid_index := 0
+	var left := 0.0
+	var right := 0.0
+	var top := 0.0
+	var bottom := 0.0
+	if panel.has("size"):
+		left = -panel["size"][0] / 2.0
+		right = -left
+		top = panel["size"][1] / 2.0
+		bottom = -top
 	for element in panel["elements"]:
-		var shown: bool = not element.has("page") or element["page"] == panel["page"]
-		var at := Vector3.ZERO
+		var at := Vector2.ZERO
 		var size := Vector2.ZERO
 		if element.has("at"):
-			at = Vector3(element["at"][0], element["at"][1], 0)
+			at = Vector2(element["at"][0], element["at"][1])
 		if element["type"] == "button" and not element.has("at"):
 			var cell := Vector2(panel["cell"][0], panel["cell"][1])
 			var per_row: int = panel["columns"]
@@ -1371,183 +1721,270 @@ func _build(id_panel: String) -> void:
 			var row := grid_index / per_row
 			var in_row := mini(per_row, grid_buttons.size() - row * per_row)
 			var col := grid_index % per_row
-			at = Vector3((col - (in_row - 1) / 2.0) * (cell.x + gap), -row * (cell.y + gap), 0)
+			at = Vector2((col - (in_row - 1) / 2.0) * (cell.x + gap), -row * (cell.y + gap))
 			size = cell
 			grid_index += 1
 		elif element.has("size"):
 			size = Vector2(element["size"][0], element["size"][1])
-		if shown:
-			holder.add_child(_make_element(id_panel, element, at, size))
-
-	var notice := _make_label(Vector3(0, _bottom_of(panel) - 0.03, 0.002), 0.6, theme_values["font_small"], _theme_color("notice"), false, "center")
-	notice.name = "Notice"
-	holder.add_child(notice)
-	_set_pointable(holder, panel["visible"])
-	if panel["visible"]:
-		_since_poll = POLL_SECONDS
-
-
-# The title bar: the title on the left, a close x on the right. Pull the
-# trigger on the bar and move the controller to carry the window.
-func _build_title(holder: Node3D, panel: Dictionary, top: float, width: float) -> float:
-	var id_panel: String = panel["id_panel"]
-	var bar := _make_body(id_panel, "", Vector2(width, TITLE_BAR), Vector3(0, top + TITLE_BAR / 2.0, -0.002), _theme_color("title_bar"))
-	bar.set_meta("kind", "title")
-	bar.set_meta("color", _theme_color("title_bar"))
-	var title := _make_label(Vector3(-width / 2.0 + 0.015, 0, 0.002), width - TITLE_BAR - 0.03, theme_values["font_title"], _theme_color("title"), false, "left")
-	title.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	title.text = panel["title"]
-	bar.add_child(title)
-	holder.add_child(bar)
-	var side := TITLE_BAR * 0.8
-	var close := _make_body(id_panel, "", Vector2(side, side), Vector3(width / 2.0 - TITLE_BAR / 2.0, top + TITLE_BAR / 2.0, 0.0), _theme_color("button"))
-	close.set_meta("kind", "close")
-	close.set_meta("color", _theme_color("button"))
-	close.set_meta("hover", _theme_color("danger"))
-	close.add_child(_button_label("x", Vector2(side, side), _theme_color("text")))
-	holder.add_child(close)
-	return top + TITLE_BAR
-
-
-func _build_tabs(holder: Node3D, panel: Dictionary, top: float, width: float) -> float:
-	var count: int = panel["pages"].size()
-	var gap := 0.006
-	var tab := Vector2((width - gap * (count + 1)) / count, TAB_BAR - gap)
-	for i in count:
-		var page: String = panel["pages"][i]
-		var active: bool = page == panel["page"]
-		var color := _theme_color("accent") if active else _theme_color("button")
-		var x := -width / 2.0 + gap + tab.x / 2.0 + i * (tab.x + gap)
-		var body := _make_body(panel["id_panel"], "", tab, Vector3(x, top + TAB_BAR / 2.0, -0.002), color)
-		body.set_meta("kind", "tab")
-		body.set_meta("value", page)
-		body.set_meta("color", color)
-		body.add_child(_button_label(page, tab, _theme_color("text")))
-		holder.add_child(body)
-	return top + TAB_BAR
+		elif element["type"] == "input":
+			size = Vector2(element["width"], element["font_size"] * TEXT_PIXEL * 1.6)
+		var box := Rect2(at.x - size.x / 2.0, at.y - size.y / 2.0, size.x, size.y)
+		if element["type"] == "text":
+			# "at" is the top-centre of a block of text "width" wide, one line
+			# or "height" tall.
+			var tall: float = element.get("height", element["font_size"] * TEXT_PIXEL * 1.4)
+			box = Rect2(at.x - element["width"] / 2.0, at.y - tall, element["width"], tall)
+		left = minf(left, box.position.x)
+		right = maxf(right, box.end.x)
+		bottom = minf(bottom, box.position.y)
+		top = maxf(top, box.end.y)
+		if not element.has("page") or element["page"] == panel["page"]:
+			placed.append([element, box])
+	var area := Control.new()
+	area.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	area.clip_contents = true
+	area.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	area.custom_minimum_size = Vector2(right - left, top - bottom) * PX_PER_M
+	for item in placed:
+		var box: Rect2 = item[1]
+		var control := _control_for(id_panel, item[0], view, box.size * PX_PER_M)
+		control.position = Vector2(box.position.x - left, top - box.end.y) * PX_PER_M
+		if item[0]["type"] == "text" and not item[0].has("height"):
+			# Text runs on down the panel, as Label3D text did; it's cut off
+			# at the bottom of the panel.
+			control.size = Vector2(box.size.x * PX_PER_M, (top - bottom) * PX_PER_M - control.position.y)
+			control.clip_text = true
+		else:
+			control.size = box.size * PX_PER_M
+		area.add_child(control)
+	view["origin"] = Vector2(-left, top) * PX_PER_M
+	return area
 
 
-# The launcher's tiles, a row (or more) above the panel's own elements.
-func _build_apps(holder: Node3D, panel: Dictionary, top: float, width: float, back_color: Color) -> float:
-	var gap := 0.01
-	var per_row := maxi(1, int((width + gap) / (APP_CELL.x + gap)))
-	var rows := ceili(_apps.size() / float(per_row))
-	var height := rows * (APP_CELL.y + gap) + gap
-	if back_color.a > 0.0:
-		var strip := _make_body(panel["id_panel"], "", Vector2(width, height), Vector3(0, top + height / 2.0, -0.004), back_color)
-		strip.set_meta("kind", "back")
-		holder.add_child(strip)
-	for i in _apps.size():
-		var app: Dictionary = _apps[i]
-		var row := i / per_row
-		var in_row := mini(per_row, _apps.size() - row * per_row)
-		var col := i % per_row
-		var at := Vector3((col - (in_row - 1) / 2.0) * (APP_CELL.x + gap), top + height - gap - APP_CELL.y / 2.0 - row * (APP_CELL.y + gap), 0)
-		var open: bool = not app["panel"].is_empty() and _index_of(app["panel"]) != -1 and panels[_index_of(app["panel"])]["visible"]
-		var color := _theme_color("accent") if open else _theme_color("button")
-		var body := _make_body(panel["id_panel"], "", APP_CELL, at, color)
-		body.name = "App_" + app["id"]
-		body.set_meta("kind", "app")
-		body.set_meta("value", app["id"])
-		body.set_meta("color", color)
-		body.add_child(_button_label(app["label"], APP_CELL, _theme_color("text")))
-		holder.add_child(body)
-	return top + height
-
-
-func _apps_width() -> float:
-	return mini(_apps.size(), 6) * (APP_CELL.x + 0.01) + 0.01
-
-
-# A hidden panel's buttons are still in the physics world; without this the
-# pointer would find (and press) them where the panel was.
-func _set_pointable(holder: Node3D, on: bool) -> void:
-	for body in holder.find_children("*", "StaticBody3D", true, false):
-		body.collision_layer = UI_LAYER if on else 0
-
-
-func _make_element(id_panel: String, element: Dictionary, at: Vector3, size: Vector2) -> Node3D:
-	var node: Node3D
-	var color := _color_of(element)
+# One element as a Control. `size` is its size in pixels when it's placed by
+# "at"; in a row or column it takes its own "size" (or what it needs).
+func _control_for(id_panel: String, element: Dictionary, view: Dictionary, size: Vector2) -> Control:
+	var control: Control
+	var own := Vector2(element["size"][0], element["size"][1]) * PX_PER_M if element.has("size") else Vector2.ZERO
+	if size == Vector2.ZERO:
+		size = own
+	var color := _color_of(element) if TYPE_COLORS.has(element["type"]) else Color.TRANSPARENT
 	match element["type"]:
-		"box":
-			node = MeshInstance3D.new()
-			var quad := QuadMesh.new()
-			quad.size = size
-			node.mesh = quad
-			node.material_override = _flat_material(color)
-			node.position = at + Vector3(0, 0, -0.002)
 		"text":
-			# A Label3D's text starts at its origin when left-aligned (ends there
-			# when right-aligned), so shift it to put the block's top-centre at "at".
-			var shift := {"left": -element["width"] / 2.0, "center": 0.0, "right": element["width"] / 2.0}
-			node = _make_label(at + Vector3(shift[element["align"]], 0, 0), element["width"], element["font_size"], color, element["mono"], element["align"])
-			node.text = element["text"] if not element.has("source") else element["source"].get("empty", "")
-			node.text = _live_text.get(id_panel + "/" + element["id"], node.text)
+			var label := _label(element["text"] if not element.has("source") else element["source"].get("empty", ""), element["font_size"], color, element["mono"], element["align"])
+			label.text = _live_text.get(id_panel + "/" + element["id"], label.text)
+			label.custom_minimum_size.x = element["width"] * PX_PER_M
+			if element.has("height"):
+				label.custom_minimum_size.y = element["height"] * PX_PER_M
+				label.clip_text = true
+			if element.get("scroll", false):
+				label.clip_text = true
+				label.resized.connect(func(): _fit_scroll(id_panel, element["id"]))
+			control = label
 		"button":
-			node = _make_body(id_panel, element["id"], size, at, color)
-			node.set_meta("color", color)
-			node.add_child(_button_label(element["label"], size, _theme_color("text")))
+			control = PanelContainer.new()
+			_pointable(view, control, id_panel, element["id"], "element", "", color, BUTTON_RADIUS)
+			control.add_child(_label(element["label"], _button_font(size), _theme_color("text"), false, "center"))
+		"input":
+			control = PanelContainer.new()
+			_pointable(view, control, id_panel, element["id"], "element", "", _theme_color("input_bg"), BUTTON_RADIUS * 0.5)
+			control.remove_meta("hover")  # an input box doesn't light up; the one being typed into has an edge
+			control.set_meta("still", true)
+			var text := _label("", element["font_size"], color, false, "left")
+			text.name = "Text"
+			text.clip_text = true
+			control.add_child(text)
+			if size == Vector2.ZERO:
+				size = Vector2(element["width"], element["font_size"] * TEXT_PIXEL * 1.6) * PX_PER_M
+		"box":
+			control = Panel.new()
+			control.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			control.add_theme_stylebox_override("panel", _box(color, BUTTON_RADIUS * 0.5))
 		"toggle":
 			# The label, and on the right a light that is lit while it's on.
-			node = _make_body(id_panel, element["id"], size, at, color)
-			node.set_meta("color", color)
-			var light_size := Vector2(size.y * 0.9, size.y * 0.5)
-			var label := _button_label(element["label"], Vector2(size.x - light_size.x - 0.02, size.y), _theme_color("text"))
-			label.position.x = -light_size.x / 2.0 - 0.005
-			node.add_child(label)
-			var light := MeshInstance3D.new()
-			var quad := QuadMesh.new()
-			quad.size = light_size
-			light.mesh = quad
-			light.material_override = _flat_material(_theme_color("ok") if element["on"] else _theme_color("input_bg"))
-			light.position = Vector3(size.x / 2.0 - light_size.x / 2.0 - 0.008, 0, 0.001)
-			node.add_child(light)
-			var state := _button_label("ON" if element["on"] else "OFF", light_size, _theme_color("text") if element["on"] else _theme_color("muted"))
-			state.position = light.position + Vector3(0, 0, 0.001)
-			node.add_child(state)
+			control = PanelContainer.new()
+			_pointable(view, control, id_panel, element["id"], "element", "", color, BUTTON_RADIUS)
+			var row := HBoxContainer.new()
+			row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			control.add_child(row)
+			var label := _label(element["label"], _button_font(size), _theme_color("text"), false, "left")
+			label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+			row.add_child(label)
+			var light := PanelContainer.new()
+			light.name = "Light"
+			light.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			light.custom_minimum_size = Vector2(_px(0.05), 0)
+			light.add_child(_label("", theme_values["font_small"], _theme_color("text"), false, "center"))
+			row.add_child(light)
+			_show_toggle(control, element)
 		"slider":
 			# The label and value on top, the track below with its filled part
 			# and a knob; the whole area takes the pointer.
-			node = _make_body(id_panel, element["id"], size, at, _theme_color("button"))
-			node.set_meta("color", _theme_color("button"))
-			var label := _make_label(Vector3(-size.x / 2.0 + 0.01, size.y / 2.0 - 0.004, 0.002), size.x - 0.02, theme_values["font_small"], _theme_color("text"), false, "left")
+			control = PanelContainer.new()
+			_pointable(view, control, id_panel, element["id"], "element", "", _theme_color("button"), BUTTON_RADIUS)
+			var inside := Control.new()
+			inside.name = "Inside"
+			inside.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			control.add_child(inside)
+			var label := _label("", theme_values["font_small"], _theme_color("text"), false, "left")
 			label.name = "Label"
-			node.add_child(label)
+			inside.add_child(label)
 			for part in [["Track", _theme_color("input_bg")], ["Fill", color], ["Knob", _theme_color("text")]]:
-				var mesh := MeshInstance3D.new()
-				mesh.name = part[0]
-				mesh.mesh = QuadMesh.new()
-				mesh.material_override = _flat_material(part[1])
-				node.add_child(mesh)
-			_show_slider(node, element, element["value"])
-		"input":
-			var height: float = element["font_size"] * TEXT_PIXEL * 1.6
-			node = _make_body(id_panel, element["id"], Vector2(element["width"], height), at, _theme_color("input_bg"))
-			var label := _make_label(Vector3(-element["width"] / 2.0 + 0.01, 0, 0.002), element["width"] - 0.02, element["font_size"], color, false, "left")
-			label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-			label.name = "Text"
-			node.add_child(label)
-	node.name = "E_" + element["id"]
+				var piece := Panel.new()
+				piece.name = part[0]
+				piece.mouse_filter = Control.MOUSE_FILTER_IGNORE
+				piece.add_theme_stylebox_override("panel", _box(part[1], 0.003))
+				inside.add_child(piece)
+			inside.resized.connect(func(): _show_slider(control, _element(id_panel, element["id"]), element["value"], id_panel))
+		"row", "column", "grid":
+			var box: Container
+			match element["type"]:
+				"row":
+					box = HBoxContainer.new()
+				"column":
+					box = VBoxContainer.new()
+				_:
+					box = GridContainer.new()
+					box.columns = element["columns"]
+			var gap := _px(element.get("gap", GAP))
+			if box is BoxContainer:
+				box.add_theme_constant_override("separation", gap)
+			else:
+				box.add_theme_constant_override("h_separation", gap)
+				box.add_theme_constant_override("v_separation", gap)
+			box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			for child in element["children"]:
+				box.add_child(_control_for(id_panel, child, view, Vector2.ZERO))
+			control = box
+	control.name = "E_" + element["id"]
+	control.custom_minimum_size = control.custom_minimum_size.max(size)
+	if element.get("grow", false):
+		control.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	view["controls"][element["id"]] = control
 	if element["type"] == "input":
-		_show_input_node(id_panel, element, node)
-	return node
+		_show_input_control(id_panel, element, control)
+	return control
 
 
-func _show_slider(node: Node3D, element: Dictionary, value: float) -> void:
-	var size := Vector2(element["size"][0], element["size"][1])
+# Makes a Control something the pointer can hover and press.
+func _pointable(view: Dictionary, control: Control, id_panel: String, id_element: String, kind: String, value: String, color: Color, radius: float) -> void:
+	control.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var style := _box(color, radius, Color.TRANSPARENT, 0.0, 0.006)
+	control.add_theme_stylebox_override("panel", style)
+	control.set_meta("panel", id_panel)
+	control.set_meta("element", id_element)
+	control.set_meta("kind", kind)
+	control.set_meta("value", value)
+	control.set_meta("color", color)
+	control.set_meta("hover", color.lightened(0.25))
+	control.set_meta("style", style)
+	view["pointables"].append(control)
+
+
+# The element under a point in a panel's picture, or null.
+func _control_at(id_panel: String, point: Vector2) -> Control:
+	if not _views.has(id_panel):
+		return null
+	var list: Array = _views[id_panel]["pointables"]
+	for i in range(list.size() - 1, -1, -1):
+		var control: Control = list[i]
+		if is_instance_valid(control) and control.is_visible_in_tree() and control.get_global_rect().has_point(point):
+			return control
+	return null
+
+
+# Where a point in the world falls in a panel's picture, in pixels.
+func _picture_point(id_panel: String, world: Vector3) -> Vector2:
+	var view: Dictionary = _views[id_panel]
+	var screen := _holders[id_panel].get_node("Screen") as Node3D
+	var local := screen.global_transform.affine_inverse() * world
+	var quad: Vector2 = view["quad"]
+	var px: Vector2 = view["px"]
+	return Vector2((local.x / quad.x + 0.5) * px.x, (0.5 - local.y / quad.y) * px.y)
+
+
+# Draws a panel's picture once more, on the next frame.
+func _redraw(id_panel: String) -> void:
+	if _views.has(id_panel):
+		(_views[id_panel]["viewport"] as SubViewport).render_target_update_mode = SubViewport.UPDATE_ONCE
+
+
+func _set_label_text(id_panel: String, id_element: String, text: String) -> void:
+	var label := _find_node(id_panel, id_element) as Label
+	if label and label.text != text:
+		label.text = text
+		_fit_scroll(id_panel, id_element)
+		_redraw(id_panel)
+
+
+# A text with "scroll" shows its newest lines (or as far back as it's been
+# scrolled), whatever its wrapped lines come to at its real width.
+func _fit_scroll(id_panel: String, id_element: String) -> void:
+	var label := _find_node(id_panel, id_element) as Label
+	var element := _element(id_panel, id_element)
+	if label == null or not element.get("scroll", false):
+		return
+	label.lines_skipped = 0
+	# A row is the font's height plus the theme's line spacing.
+	var spacing := label.get_theme_constant("line_spacing")
+	var shown := maxi(1, int((label.size.y + spacing) / maxf(label.get_line_height() + spacing, 1.0)))
+	var lines := label.get_line_count()
+	var back := clampi(_scroll.get(id_panel + "/" + id_element, 0), 0, maxi(0, lines - shown))
+	_scroll[id_panel + "/" + id_element] = back
+	label.lines_skipped = maxi(0, lines - shown - back)
+	label.max_lines_visible = shown
+
+
+# Scrolls a text element with "scroll": `lines` more goes back (older), less
+# goes forward, 0 returns to the newest. Returns how far back it now is.
+func scroll_text(id_panel: String, id_element: String, lines: int) -> int:
+	var key := id_panel + "/" + id_element
+	_scroll[key] = 0 if lines == 0 else maxi(0, _scroll.get(key, 0) + lines)
+	_fit_scroll(id_panel, id_element)
+	_redraw(id_panel)
+	return _scroll[key]
+
+
+func _scroll_command(request: Dictionary) -> Dictionary:
+	var id_panel := str(request.get("id_panel"))
+	var element := _element(id_panel, str(request.get("id_element")))
+	if not element.get("scroll", false):
+		return {"ok": false, "error": "no text with \"scroll\" called \"%s\" on panel \"%s\"" % [str(request.get("id_element")), id_panel]}
+	var lines = request.get("lines")
+	if typeof(lines) not in [TYPE_INT, TYPE_FLOAT]:
+		return {"ok": false, "error": "ui_scroll needs \"lines\": more to go back, fewer to go forward, 0 for the newest"}
+	return {"ok": true, "back": scroll_text(id_panel, element["id"], int(lines))}
+
+
+func _show_toggle(control: Control, element: Dictionary) -> void:
+	var light := control.find_child("Light", true, false) as PanelContainer
+	light.add_theme_stylebox_override("panel", _box(_theme_color("ok") if element["on"] else _theme_color("input_bg"), BUTTON_RADIUS * 0.5))
+	var word := light.get_child(0) as Label
+	word.text = "ON" if element["on"] else "OFF"
+	word.add_theme_color_override("font_color", _theme_color("text") if element["on"] else _theme_color("muted"))
+
+
+func _show_slider(control: Control, element: Dictionary, value: float, id_panel: String) -> void:
+	if element.is_empty() or not is_instance_valid(control):
+		return
+	var inside := control.get_node("Inside") as Control
+	var area := inside.size
 	var t: float = (value - element["min"]) / (element["max"] - element["min"])
-	var track := Vector2(size.x - 0.03, maxf(size.y * 0.18, 0.006))
-	var y := -size.y / 2.0 + track.y / 2.0 + size.y * 0.15
-	var left := -track.x / 2.0
-	(node.get_node("Track") as MeshInstance3D).mesh.size = track
-	node.get_node("Track").position = Vector3(0, y, 0.001)
-	(node.get_node("Fill") as MeshInstance3D).mesh.size = Vector2(maxf(track.x * t, 0.001), track.y)
-	node.get_node("Fill").position = Vector3(left + track.x * t / 2.0, y, 0.0015)
-	var knob := track.y * 2.2
-	(node.get_node("Knob") as MeshInstance3D).mesh.size = Vector2(knob * 0.6, knob)
-	node.get_node("Knob").position = Vector3(left + track.x * t, y, 0.002)
-	(node.get_node("Label") as Label3D).text = "%s  %s" % [element["label"], _value_text(element, value)]
+	var label := inside.get_node("Label") as Label
+	label.text = "%s  %s" % [element["label"], _value_text(element, value)]
+	label.position = Vector2.ZERO
+	label.size = Vector2(area.x, area.y * 0.5)
+	var track := Vector2(area.x, maxf(area.y * 0.18, 4.0))
+	var y := area.y * 0.72 - track.y / 2.0
+	(inside.get_node("Track") as Control).position = Vector2(0, y)
+	(inside.get_node("Track") as Control).size = track
+	(inside.get_node("Fill") as Control).position = Vector2(0, y)
+	(inside.get_node("Fill") as Control).size = Vector2(maxf(track.x * t, 1.0), track.y)
+	var knob := Vector2(track.y * 1.4, track.y * 2.4)
+	(inside.get_node("Knob") as Control).position = Vector2(track.x * t - knob.x / 2.0, y + track.y / 2.0 - knob.y / 2.0)
+	(inside.get_node("Knob") as Control).size = knob
+	_redraw(id_panel)
 
 
 func _value_text(element: Dictionary, value: float) -> String:
@@ -1556,78 +1993,68 @@ func _value_text(element: Dictionary, value: float) -> String:
 	return String.num(value, 2)
 
 
-# Draws a toggle or slider again after its state changed, in place.
+# Shows a toggle's or slider's state after it changed, in place.
 func _show_state(id_panel: String, element: Dictionary) -> void:
-	var old := _find_node(id_panel, element["id"]) as Node3D
-	if old == null:
+	var control := _find_node(id_panel, element["id"]) as Control
+	if control == null:
 		return
-	var index := _index_of(id_panel)
-	var fresh := _make_element(id_panel, element, old.position, Vector2(element["size"][0], element["size"][1]))
-	var holder := old.get_parent()
-	if _hovered == old:
-		_hovered = null
-	holder.remove_child(old)
-	old.queue_free()
-	holder.add_child(fresh)
-	if fresh is StaticBody3D:
-		fresh.collision_layer = UI_LAYER if index != -1 and panels[index]["visible"] else 0
+	if element["type"] == "toggle":
+		_show_toggle(control, element)
+		_redraw(id_panel)
+	else:
+		_show_slider(control, element, element["value"], id_panel)
 
 
-# A flat, pointable quad: the laser hits it, the trigger presses it.
-func _make_body(id_panel: String, id_element: String, size: Vector2, at: Vector3, color: Color) -> StaticBody3D:
-	var body := StaticBody3D.new()
-	body.position = at
-	body.collision_layer = UI_LAYER
-	body.collision_mask = 0
-	body.set_meta("panel", id_panel)
-	body.set_meta("element", id_element)
-	body.set_meta("z", at.z)
-	var shape := CollisionShape3D.new()
-	var box := BoxShape3D.new()
-	box.size = Vector3(size.x, size.y, 0.004)
-	shape.shape = box
-	body.add_child(shape)
-	var face := MeshInstance3D.new()
-	face.name = "Face"
-	var quad := QuadMesh.new()
-	quad.size = size
-	face.mesh = quad
-	face.material_override = _flat_material(color)
-	body.add_child(face)
-	return body
+# A hidden panel is still in the physics world; without this the pointer
+# would find (and press) it where the panel was.
+func _set_pointable(holder: Node3D, on: bool) -> void:
+	var body := holder.get_node_or_null("Body") as StaticBody3D
+	if body:
+		body.collision_layer = UI_LAYER if on else 0
 
 
-# A button's centred label, sized to the button.
-func _button_label(text: String, size: Vector2, color: Color) -> Label3D:
-	var label := Label3D.new()
-	label.name = "Label"
+func _label(text: String, font_size: int, color: Color, mono: bool, align: String) -> Label:
+	var label := Label.new()
 	label.text = text
-	label.pixel_size = minf(size.y, 0.07) / 140.0
-	label.font_size = 80 if text.length() == 1 and not text.is_valid_int() and size.y < 0.045 else 48  # a lone mark, like the close x
-	label.outline_size = 0
-	label.modulate = color
-	label.position = Vector3(0, 0, 0.002)
-	label.width = size.x / label.pixel_size * 0.95
-	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	return label
-
-
-func _make_label(at: Vector3, width: float, font_size: int, color: Color, mono: bool, align: String) -> Label3D:
-	var label := Label3D.new()
-	label.position = at
-	label.pixel_size = TEXT_PIXEL
-	label.font_size = font_size
-	label.outline_size = 0
-	label.width = width / TEXT_PIXEL
+	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	label.add_theme_font_size_override("font_size", _font_px(font_size))
+	label.add_theme_color_override("font_color", color)
 	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	label.horizontal_alignment = ALIGNS[align]
-	label.vertical_alignment = VERTICAL_ALIGNMENT_TOP
-	label.modulate = color
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER if align == "center" else VERTICAL_ALIGNMENT_TOP
 	if mono:
 		var font := SystemFont.new()
 		font.font_names = PackedStringArray(["monospace"])
-		label.font = font
+		label.add_theme_font_override("font", font)
 	return label
+
+
+# Rounded corners and an optional edge, sizes in metres.
+func _box(color: Color, radius: float, edge := Color.TRANSPARENT, edge_width := 0.0, padding := 0.0) -> StyleBoxFlat:
+	var style := StyleBoxFlat.new()
+	style.bg_color = color
+	style.set_corner_radius_all(_px(radius))
+	style.anti_aliasing = true
+	if edge_width > 0.0:
+		style.border_color = edge
+		style.set_border_width_all(maxi(1, _px(edge_width)))
+	style.set_content_margin_all(_px(padding))
+	return style
+
+
+func _px(metres: float) -> int:
+	return int(roundf(metres * PX_PER_M))
+
+
+# A text size as panels have always given it (Label3D's, at TEXT_PIXEL metres
+# a pixel) in this picture's pixels, so text stays the same size in the world.
+func _font_px(font_size: int) -> int:
+	return maxi(8, int(roundf(font_size * TEXT_PIXEL * PX_PER_M)))
+
+
+func _button_font(size: Vector2) -> int:
+	var fit: int = int(size.y / (TEXT_PIXEL * PX_PER_M) * 0.5) if size.y > 0.0 else theme_values["font_body"]
+	return clampi(fit, 16, theme_values["font_body"])
 
 
 func _flat_material(color: Color) -> StandardMaterial3D:
@@ -1637,101 +2064,69 @@ func _flat_material(color: Color) -> StandardMaterial3D:
 	return material
 
 
-# The lowest point of a panel's background or elements, for the notice line.
-func _bottom_of(panel: Dictionary) -> float:
-	var bottom := 0.0
-	if panel.has("size"):
-		bottom = -panel["size"][1] / 2.0
-	var grid_count := 0
-	for element in panel["elements"]:
-		if element.has("at"):
-			var half := 0.0
-			if element.has("size"):
-				half = element["size"][1] / 2.0
-			bottom = minf(bottom, element["at"][1] - half)
-		elif element["type"] == "button":
-			grid_count += 1
-	if grid_count > 0:
-		var rows := ceili(grid_count / float(panel["columns"]))
-		var cell_y: float = panel["cell"][1]
-		bottom = minf(bottom, -(rows - 1) * cell_y * 1.25 - cell_y / 2.0)
-	return bottom
-
-
-# The highest point of a panel without a background, for the launcher's row.
-func _top_of(panel: Dictionary) -> float:
-	var top := 0.0
-	for element in panel["elements"]:
-		var half := 0.0
-		if element.has("size"):
-			half = element["size"][1] / 2.0
-		elif element["type"] == "button":
-			half = panel["cell"][1] / 2.0
-		top = maxf(top, (element["at"][1] if element.has("at") else 0.0) + half)
-	return top
-
-
 func _find_node(id_panel: String, id_element: String) -> Node:
-	if not _holders.has(id_panel):
+	if not _views.has(id_panel):
 		return null
-	return _holders[id_panel].get_node_or_null("E_" + id_element)
+	return _views[id_panel]["controls"].get(id_element)
 
 
 func _show_input(id_panel: String, id_element: String) -> void:
-	var node := _find_node(id_panel, id_element)
+	var node := _find_node(id_panel, id_element) as Control
 	var element := _element(id_panel, id_element)
 	if node and not element.is_empty():
-		_show_input_node(id_panel, element, node)
+		_show_input_control(id_panel, element, node)
 
 
-func _show_input_node(id_panel: String, element: Dictionary, node: Node) -> void:
+func _show_input_control(id_panel: String, element: Dictionary, control: Control) -> void:
 	var key: String = id_panel + "/" + element["id"]
 	var text: String = element["prompt"] + _inputs.get(key, "")
 	if key == _focus:
 		text += "_" + (" (SHIFT)" if _shift else "")
-	(node.get_node("Text") as Label3D).text = text
+	(control.get_node("Text") as Label).text = text
 	# The box being typed into has a lit edge.
-	(node.get_node("Face") as MeshInstance3D).material_override.albedo_color = \
-		_theme_color("hover").darkened(0.4) if key == _focus else _theme_color("input_bg")
+	var style := control.get_meta("style") as StyleBoxFlat
+	style.border_color = _theme_color("accent")
+	style.set_border_width_all(maxi(2, _px(0.002)) if key == _focus else 0)
+	_redraw(id_panel)
 
 
 func _notice(id_panel: String, text: String) -> void:
-	if not _holders.has(id_panel):
+	if not _views.has(id_panel):
 		return
-	var notice := _holders[id_panel].get_node_or_null("Notice") as Label3D
-	if notice == null:
-		return
+	var notice := _views[id_panel]["notice"] as Label
 	notice.text = text.left(200)
+	_redraw(id_panel)
 	get_tree().create_timer(NOTICE_SECONDS).timeout.connect(func():
 		if is_instance_valid(notice) and notice.text == text.left(200):
-			notice.text = "")
+			notice.text = ""
+			_redraw(id_panel))
 
 
-# Pointing at something you can press lights it up and brings it a few
-# millimetres towards you, with a light tick; plain text and backgrounds
-# don't react.
-func _set_hover(body: StaticBody3D, on: bool) -> void:
-	if body == null or not is_instance_valid(body) or not body.has_meta("color"):
+# Pointing at something you can press lights it up, with a light tick;
+# plain text and backgrounds don't react.
+func _set_hover(control: Control, on: bool) -> void:
+	if control == null or not is_instance_valid(control) or not control.has_meta("hover"):
 		return
-	var face := body.get_node("Face") as MeshInstance3D
-	var hover: Color = body.get_meta("hover", _theme_color("hover"))
-	(face.material_override as StandardMaterial3D).albedo_color = hover if on else body.get_meta("color")
-	body.position.z = body.get_meta("z", 0.0) + (HOVER_LIFT if on else 0.0)
+	(control.get_meta("style") as StyleBoxFlat).bg_color = control.get_meta("hover") if on else control.get_meta("color")
+	_redraw(control.get_meta("panel"))
 	if on:
 		_pulse(0.1, 0.01)
 
 
 # A press flashes the button for a moment, so you see it went in.
-func _flash(body: StaticBody3D) -> void:
-	if body == null or not is_instance_valid(body) or not body.has_meta("color"):
+func _flash(control: Control) -> void:
+	if control == null or not is_instance_valid(control) or not control.has_meta("style"):
 		return
-	var material := (body.get_node("Face") as MeshInstance3D).material_override as StandardMaterial3D
-	material.albedo_color = _theme_color("press")
-	var id := body.get_instance_id()  # the press may redraw it (a toggle), so not the node itself
+	var style := control.get_meta("style") as StyleBoxFlat
+	var id_panel: String = control.get_meta("panel")
+	style.bg_color = _theme_color("press")
+	_redraw(id_panel)
+	var id := control.get_instance_id()  # the press may redraw the panel, so not the control itself
 	get_tree().create_timer(PRESS_SECONDS).timeout.connect(func():
-		var still := instance_from_id(id) as StaticBody3D
+		var still := instance_from_id(id) as Control
 		if still and is_instance_valid(still):
-			material.albedo_color = still.get_meta("hover", _theme_color("hover")) if still == _hovered else still.get_meta("color"))
+			style.bg_color = still.get_meta("hover", still.get_meta("color")) if still == _hovered else still.get_meta("color")
+			_redraw(id_panel))
 
 
 # --- Defaults and saving -----------------------------------------------------------------
