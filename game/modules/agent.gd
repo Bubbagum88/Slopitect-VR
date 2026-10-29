@@ -62,10 +62,10 @@ const DEFAULTS := {
 	# may use in one request; 0 turns it off. A search costs $0.01 on top of
 	# the tokens its results add; a fetched page costs only its tokens, at
 	# most web_fetch_max_tokens. A conversation keeps the ones it started with.
-	"web_search_max_uses": 3,
-	"web_fetch_max_uses": 3,
+	"web_search_max_uses": 5,
+	"web_fetch_max_uses": 5,
 	"web_fetch_max_tokens": 8000,
-	"max_searches_per_ask": 10,  # one question, all its rounds together; it stops there
+	"max_searches_per_ask": 25,  # one question, all its rounds together; it stops there
 	# Search through the net live module (net_search and net_read: DuckDuckGo,
 	# no cost) instead of Claude's tools. The agent gets one or the other.
 	"web_via_net": false,
@@ -73,13 +73,15 @@ const DEFAULTS := {
 	# (providers that can't show thinking ignore it).
 	"show_thinking": true,
 	# The agent's firewall: the only commands it may use. A name ending in *
-	# allows every command starting with it. A new module's commands are off
-	# for the agent until they're added here.
-	"allowed_tools": ["list", "spawn", "move", "color", "delete", "ui_*", "modules", "avatar_*", "files_*", "confirm_status", "tts_*", "vtt_*", "code_*", "view_*", "errors_*"],
+	# allows every command starting with it, and "*" alone every command
+	# (isaac's choice, 2026-10-29). Whatever it says, the agent never gets
+	# its own agent_ commands, any *_config or pair (see _allowed_tool), and
+	# files outside the Slopitect folder and new code still need your Yes.
+	"allowed_tools": ["*"],
 }
 # The lists allowed_tools had by default before (before the menu became
 # panels; before view_look and errors_recent; before voice became the tts and
-# stt live modules; before stt was renamed vtt). A saved copy of exactly one of them is moved to
+# stt live modules; before stt was renamed vtt; before "*"). A saved copy of exactly one of them is moved to
 # the new default; a list you changed is kept.
 const OLD_DEFAULT_TOOLS := [
 	["list", "spawn", "move", "color", "delete", "menu_*", "modules", "avatar_*"],
@@ -87,6 +89,7 @@ const OLD_DEFAULT_TOOLS := [
 	["list", "spawn", "move", "color", "delete", "ui_*", "modules", "avatar_*", "files_*", "confirm_status", "voice_*", "code_*", "view_*"],
 	["list", "spawn", "move", "color", "delete", "ui_*", "modules", "avatar_*", "files_*", "confirm_status", "voice_*", "code_*", "view_*", "errors_*"],
 	["list", "spawn", "move", "color", "delete", "ui_*", "modules", "avatar_*", "files_*", "confirm_status", "tts_*", "stt_*", "code_*", "view_*", "errors_*"],
+	["list", "spawn", "move", "color", "delete", "ui_*", "modules", "avatar_*", "files_*", "confirm_status", "tts_*", "vtt_*", "code_*", "view_*", "errors_*"],
 ]
 
 # What agent_budget may set (the Settings window), and in what range;
@@ -638,11 +641,12 @@ func _guess_tokens(text: String) -> int:
 
 
 func _allowed_tool(cmd: String) -> bool:
-	# Settings (any *_config command) are changed by the person, never the agent.
-	if cmd.begins_with("agent_") or cmd.ends_with("_config") or cmd == "help":
+	# Settings (any *_config command) are changed by the person, never the
+	# agent; pair would hand it a key to the command port.
+	if cmd.begins_with("agent_") or cmd.ends_with("_config") or cmd in ["help", "pair"]:
 		return false
 	for allowed in settings["allowed_tools"]:
-		if allowed == cmd or (allowed.ends_with("*") and cmd.begins_with(allowed.trim_suffix("*"))):
+		if allowed == "*" or allowed == cmd or (allowed.ends_with("*") and cmd.begins_with(allowed.trim_suffix("*"))):
 			return true
 	# A live module's commands: you said Yes to its code, which could do
 	# anything they do anyway.
@@ -870,8 +874,8 @@ func _check_setting(key: String, value: Variant) -> Array:
 			if typeof(value) != TYPE_ARRAY:
 				return ["\"allowed_tools\" must be a list of command names", null]
 			for item in value:
-				if typeof(item) != TYPE_STRING or item.is_empty() or item == "*" or item.begins_with("agent_"):
-					return ["\"allowed_tools\" entries must be command names (a trailing * is allowed, a lone * and agent_ commands are not): %s" % JSON.stringify(item), null]
+				if typeof(item) != TYPE_STRING or item.is_empty() or item.begins_with("agent_"):
+					return ["\"allowed_tools\" entries must be command names (a trailing * is allowed, and \"*\" alone allows all; agent_ commands are not): %s" % JSON.stringify(item), null]
 			return ["", value.duplicate()]
 		"max_tokens_per_ask", "max_context_tokens", "max_request_tokens", "max_tool_result_chars":
 			if typeof(value) not in [TYPE_INT, TYPE_FLOAT] or value != floorf(value) or value < 1000 or value > 10000000:
