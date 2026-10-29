@@ -54,7 +54,7 @@ All PC-tested, none yet on the headset. See
 | Module | What it does |
 | --- | --- |
 | controls | The only reader of buttons and thumbsticks; turns them into named actions, or runs a command; `value()` for how far a grip or trigger is pressed; `pulse()` buzzes a controller; bindings changed from the PC (`controls_config`) |
-| ui | Every window: panels of text, buttons, inputs, toggles and sliders that you or the agent can change live; title bars, tabs, a launcher Menu, one theme, hover and haptic feedback ([VR-UI.md](VR-UI.md)) |
+| ui | Every window: panels of text, buttons, inputs, toggles and sliders that you or the agent can change live, drawn the vrui way (rounded, wrapped text, redrawn only on change); title bars, tabs, a launcher Menu, a hand window on a controller, rows/columns/grids, menus inside menus with a back arrow, scrolling text, one theme, hover and haptic feedback ([VR-UI.md](VR-UI.md)). PC-tested; the vrui look was seen on the headset as the draft, this version not yet |
 | tools | Tool picker with shared undo |
 | landscape | Terrain |
 | paths | Paths |
@@ -73,9 +73,9 @@ All PC-tested, none yet on the headset. See
 | jelly | Squash and stretch on the avatar, volume kept; needs the live avatar module's `body()`. Tested on the PC with a stand-in avatar |
 | hands | Drawn hands with nails in place of the controller boxes; fingers curl with grip, trigger and thumb rest; colours from the PC (`hands_config`). Curling was checked on the PC with a stand-in for the controllers |
 
-Drafts waiting to be reworked: [live-modules/drafts/](../live-modules/drafts/)
-(vrui). The plan for
-them is in [MODULE-FRAMEWORK.md](MODULE-FRAMEWORK.md).
+Every draft has been reworked or dropped; what happened to each is in
+[live-modules/drafts/](../live-modules/drafts/) and
+[MODULE-FRAMEWORK.md](MODULE-FRAMEWORK.md).
 
 ### PC tools (in `tools/`)
 

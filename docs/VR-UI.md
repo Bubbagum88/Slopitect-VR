@@ -1,9 +1,12 @@
 # VR UI: how the windows work
 
-Written 2026-10-29. Covers `live-modules/ui.gd` (every window) and what it
-asks of other modules. Tested headless on a PC with Godot 4.7.2 (60 checks,
-opengl3 pictures); **not yet seen on the headset**. Hover, haptics, follow
-panels and readable text sizes can only be judged in the headset.
+Written 2026-10-29, updated the same day when ui.gd took over the vrui
+draft's look. Covers `live-modules/ui.gd` (every window) and what it asks of
+other modules. Tested headless on a PC with Godot 4.7.2 (about 90 checks,
+opengl3 pictures, and worlds.gd's window opening on it); **not yet seen on
+the headset**. Hover, haptics, the hand window, follow panels, text sizes
+and how fast a SubViewport panel draws on the Quest 1 can only be judged in
+the headset.
 
 ## The pieces
 
@@ -20,9 +23,11 @@ controls.gd ── actions ("point", "grab_right", toggles) ──► ui.gd ─�
 
 - **One window system.** Every window is a panel in `ui.gd`: data (a
   dictionary) that you, the agent or a module change with the `ui_*`
-  commands. Panels are drawn with plain quads and `Label3D`, no
-  SubViewport, so nothing is redrawn while nothing changes. That matters
-  on the Quest 1 (Snapdragon 835).
+  commands. Each panel is drawn the way the vrui draft drew its windows:
+  real 2D panels, rounded buttons and wrapped text in a SubViewport, shown
+  on a quad. The picture is drawn again only when something on it changes
+  (hover, press, a new text), never every frame, which matters on the
+  Quest 1 (Snapdragon 835). The vrui draft is gone; its look lives here.
 - **Input only through controls.gd.** ui.gd takes "point" (right trigger),
   "grab_right" (right grip) and any action a panel uses as its toggle.
   The Yes/No window still reads the trigger itself, and while it asks, the
@@ -34,18 +39,19 @@ controls.gd ── actions ("point", "grab_right", toggles) ──► ui.gd ─�
 
 | Field | What it does |
 | --- | --- |
-| `place` | `front` (opens in front of you), `follow` (opens in front, then catches up when you turn more than 35° away or walk 0.5 m), `wrist` (left wrist), `world` (fixed). A panel you carry becomes `world` where you let go |
-| `size`, `color` | The background. No colour means the theme's `panel` |
-| `chrome` | A title bar above the background: the title, a close x, and a handle. Pull the trigger on the bar and move the controller to carry the window. Needs `size` |
+| `place` | `front` (opens in front of you), `follow` (opens in front, then catches up when you turn more than 35° away or walk 0.5 m), `wrist` (left wrist), `hand` (held by a controller, see below), `world` (fixed). A panel you carry becomes `world` where you let go |
+| `hand`, `scale` | For `hand`: which controller holds it (`left`, the default, or `right`) and its size (0.5 by default; any panel can have a `scale` from 0.1 to 3) |
+| `size`, `color` | The area `at` elements sit in, and the background. No colour means the theme's `panel`. The window grows to fit what's in it |
+| `chrome` | A title bar: the title, a close x, a back arrow when another panel's button opened it, and a handle. Pull the trigger on the bar and move the controller to carry the window |
 | `pages`, `page` | Tabs under the title (up to 8). An element with `page` shows only on that tab. Needs `chrome` |
 | `apps` | Show the launcher's tiles at the top (the Menu has it) |
 | `menu` | A label: this panel gets a tile on the Menu that shows and hides it |
 | `toggle` | An action from controls that shows and hides it |
-| `layout` | `free` (each element at its `at`) or `grid` (buttons in rows) |
+| `layout` | `free` (each element at its `at`, as before), `grid` (buttons in rows of `columns`, each `cell` big), or `column` / `row`: the elements flow down or across in order, with no `at` |
 
 ## Elements
 
-`text`, `button`, `input`, `box` as before, and two new ones:
+`text`, `button`, `input`, `box` as before, and these:
 
 - **toggle**: `label`, `on`, `action`. A press runs the action with
   `"{on}"` replaced by what it's switching to, and switches only if the
@@ -54,6 +60,20 @@ controls.gd ── actions ("point", "grab_right", toggles) ──► ui.gd ─�
   trigger on it and move along it; the action runs once when you let go,
   with `"{value}"` replaced by the value. `ui_slide` sets it by command.
 
+- **row, column, grid**: containers. `children` is a list of elements laid
+  out across, down, or in `columns`, with `gap` metres between them. They
+  can sit inside each other (up to 6 deep), and every id must still be
+  unique in the panel. `ui_element_add` takes a `parent` to add into one.
+  Any element in a flow can have `grow: true` to take the spare room.
+- **text `scroll`**: the text wraps at the element's real width and keeps
+  its newest lines in view, like a terminal. `height` (metres) sets how
+  tall the box is. `ui_scroll` with `lines` moves it back (0 is the
+  newest); a module can call `ui.scroll_text(id_panel, id_element, lines)`.
+- **button `open`**: names another panel. A press hides this one and shows
+  that one in the same place, with a back arrow in its title bar that comes
+  back (`ui_back` does the same). A button can have `open`, an `action`, or
+  both. This is how menus inside menus are made: each menu is a panel.
+
 A colour can be a theme name (`accent`, `danger`, `ok`, `muted`, ...) as
 well as `#rrggbb`; leave it out to get the type's theme colour. Elements
 saved with the old fixed colours follow the theme too.
@@ -61,6 +81,21 @@ saved with the old fixed colours follow the theme too.
 A text `source` can name a `format` module: if that module is loaded and
 has `format(value, source)`, its String (or list of lines) is shown. The
 chat log uses `"format": "aimsg"`; without aimsg it shows the plain events.
+
+## The hand window
+
+`"place": "hand"` hangs a panel just above a controller, tipped towards
+you, like the vrui draft's hand window. `position` and `rotation` move it on
+the controller (defaults `[0, 0.12, -0.02]` and `[-35, 0, 0]`). Point at it
+with the other hand. Pull it off with the grip or its title bar and it
+stays in the world where you let go.
+
+```
+{"cmd":"ui_add","id_panel":"tools_hand","title":"Tools","place":"hand","chrome":true,
+ "layout":"column","elements":[
+   {"type":"button","id":"grab","label":"Grab","action":{"cmd":"modules"}},
+   {"type":"button","id":"more","label":"More","open":"tools_more"}]}
+```
 
 ## Feedback
 
@@ -83,7 +118,8 @@ do before you press:
 | `menu_info()` | any module | `{"id", "label", "order" (lower first, 100 default), "panel": id_panel}` or `{..., "action": a command}`: a tile on the Menu. A tile closes the Menu after opening its window |
 | `format(value, source)` | any module | Lays out a text source's value (aimsg for the chat log) |
 | `ui.theme()` | ui.gd | The theme: colours as `Color`, `font_title` / `font_body` / `font_small` as text sizes |
-| `ui.set_text(id_panel, id_element, text)` | ui.gd | Changes one text element now, without redrawing or saving (a terminal's screen). The text isn't saved, since it can be anything |
+| `ui.set_text(id_panel, id_element, text)` | ui.gd | Changes one text element now, without rebuilding the panel or saving (a terminal's screen). The text isn't saved, since it can be anything. A `scroll` text keeps its newest lines in view |
+| `ui.scroll_text(id_panel, id_element, lines)` | ui.gd | Scrolls a `scroll` text back by `lines` from the newest (0 = newest) |
 | `ui.press(id_panel, id_element)` | ui.gd | Presses a button or toggle |
 | `controls.pulse(hand, strength, seconds)` | controls.gd | A buzz on a controller |
 
@@ -105,8 +141,11 @@ Kept in `user://ui_config.json`. Every panel is drawn again when it changes.
 
 These are the defaults, picked for a panel about 0.6 m away:
 
-- Text: 24 is the smallest comfortable size (`font_small`), 28 for body
-  text, 30 for titles. At 0.0006 m per pixel, 24 is about 1.4 cm tall.
+- Text: a panel's picture has 1250 pixels per metre (about what the
+  Quest 1 shows at 0.6 m). `font_small` is 28, `font_body` 36, `font_title`
+  40 there, so body text is about 2.9 cm tall at full scale. A hand window
+  is drawn at half scale, so its text is half that and is meant to be
+  brought close.
 - Buttons at least 5 × 5 cm at arm's length (the keyboard's keys); 14 × 7 cm
   for menu buttons and launcher tiles.
 - Panels open 0.55 to 0.6 m away and 0.25 to 0.35 m below your eyes, tipped
@@ -118,11 +157,16 @@ These are the defaults, picked for a panel about 0.6 m away:
 
 ## What was decided, and why
 
-- **Not SubViewport panels (the vrui draft) for every window.** A
-  SubViewport per panel costs a render target and a redraw; vrui drew every
-  frame. Quads and Label3D cost nothing while still. vrui stays in
-  `drafts/` as a possible way to draw rich widgets later, if a need comes up
-  that quads can't meet.
+- **SubViewport panels, drawn only on change.** isaac liked the vrui
+  draft's look (and its hand window) better than the first quads-and-Label3D
+  version, so ui.gd now draws that way. The cost vrui had came from drawing
+  every frame; ui.gd draws a panel's picture once and again only when it
+  changes, and works out pointing itself (Godot's GUI input is off), so
+  input still comes only through controls.gd and stops while a Yes/No
+  question is up.
+- **Text wrapping lives in ui.gd**, not a separate module: only the window
+  knows its real width, so it wraps there, and the terminal and chat get it
+  through `set_text` and `scroll`.
 - **The launcher lives in ui.gd**, not a separate menu.gd as
   MODULE-FRAMEWORK.md first planned: the Menu bar was already ui.gd's, and
   one module avoids two panels fighting over the left menu button.
@@ -131,7 +175,8 @@ These are the defaults, picked for a panel about 0.6 m away:
 
 ## Open
 
-- Headset test: text sizes, hover lift, haptic strength, follow speed.
-- Rounded corners would need a shader; left out until the headset test says
-  the panels need them.
+- Headset test: text sizes, hover lift, haptic strength, follow speed, the
+  hand window's place on the controller, and frame time with several
+  panels changing at once (a busy terminal redraws its panel on each new
+  line).
 - The wrist panel has no title bar (it would be bigger than the buttons).
