@@ -124,8 +124,11 @@ Download the `slopitect-quest1-debug` artifact from the latest green
 "Quest 1 APK" run under the repo's **Actions** tab, unzip it, then:
 
 ```
-.\adb install -r slopitect-quest1-debug.apk
+.\adb install -r --no-streaming slopitect-quest1-debug.apk
 ```
+
+Over Wi-Fi, use `--no-streaming`: a streamed install of a large APK
+dropped the adb connection on this Quest, and this way it works.
 
 Every build is signed with `ci/debug.keystore`, so it installs over the
 last one and keeps the app's data and approvals.
