@@ -304,7 +304,7 @@ a speech engine app has to be installed on the headset (for example
 [SherpaTTS](https://f-droid.org/en/packages/org.woheller69.ttsengine/),
 not yet tried on a Quest 1).
 
-Hold-to-talk turns what you say into text in one of two ways.
+Hold-to-talk turns what you say into text in one of three ways.
 
 **On the headset** (nothing you say leaves it): whisper.cpp, through
 [godot-whisper](https://github.com/appsinacup/godot-whisper), built into
@@ -322,6 +322,29 @@ hears better and takes longer; set `vtt_local_model` to its name. On the
 Quest 1 the first try took 22 s for 2 s of speech, before English was
 forced for English-only models and the work cut to the recording's length;
 how fast it is since isn't measured yet. Each try logs how long it took.
+
+**On the headset, while you talk** (`vtt_engine` `"sherpa"`; nothing you
+say leaves the headset): [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx)'s
+Android library, built into the APK. It works on your words while you hold
+the trigger, so they should be ready about as soon as you let go (not yet
+tried on the headset). It needs a streaming model's folder in
+`/sdcard/Slopitect/models` (a transducer: `tokens.txt` and an encoder,
+decoder and joiner `.onnx`). The small English one,
+[sherpa-onnx-streaming-zipformer-en-20M-2023-02-17](https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-streaming-zipformer-en-20M-2023-02-17.tar.bz2),
+unpacked on the PC and copied over:
+
+```
+tar -xf "$env:USERPROFILE\Downloads\sherpa-onnx-streaming-zipformer-en-20M-2023-02-17.tar.bz2" -C "$env:USERPROFILE\Downloads"
+.\adb shell mkdir -p /sdcard/Slopitect/models
+.\adb push "$env:USERPROFILE\Downloads\sherpa-onnx-streaming-zipformer-en-20M-2023-02-17" /sdcard/Slopitect/models/
+.\slopi.ps1 '{"cmd":"vtt_config","vtt_engine":"sherpa"}'
+```
+
+Another model is another folder next to it; `vtt_sherpa_model` (from the
+PC) says which one is used, like
+`'{"cmd":"vtt_config","vtt_sherpa_model":"models/sherpa-onnx-streaming-zipformer-en-2023-06-26"}'`.
+Each try logs one line with how long the model took to load and how long
+the words took after you let go.
 
 **Through a service** (`vtt_engine` `"web"`). For OpenAI's (paid), with its key in a text file:
 
@@ -434,6 +457,7 @@ registering the plugin first.)
 - [Godot Engine](https://godotengine.org), MIT licence
 - [Godot OpenXR Vendors](https://github.com/GodotVR/godot_openxr_vendors), MIT licence
 - [godot-whisper](https://github.com/appsinacup/godot-whisper) and [whisper.cpp](https://github.com/ggml-org/whisper.cpp), MIT licence (on-headset speech to text)
+- [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx), Apache 2.0 licence, with [ONNX Runtime](https://github.com/microsoft/onnxruntime), MIT licence (on-headset streaming speech to text)
 - Made by Bubbagum88 with Claude
 
 ## Licence

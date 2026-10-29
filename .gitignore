@@ -6,6 +6,7 @@ game/addons/godotopenxrvendors/
 game/addons/godot_whisper/bin/
 game/addons/godot_whisper/LICENSE
 game/addons/godot_whisper/THIRDPARTY.txt
+game/addons/sherpa-onnx-*.aar
 # Build output
 *.apk
 *.aab
