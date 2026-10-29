@@ -298,15 +298,30 @@ func _build() -> String:
 
 func _elements(sections: Array) -> Array:
 	var out := []
+	var ui := _ui()
 	for section in sections:
 		var prefix := "%s_" % section["module"]
 		var page: String = PAGE_OF.get(section["module"], PAGE_OTHER)
-		var part := [_text(prefix + "title", section["title"], "accent")]
-		if section.has("problem"):
-			part.append(_text(prefix + "problem", "Its settings_info() %s." % section["problem"], "muted", 24))
-		else:
+		var part := []
+		if not section.has("problem"):
 			for setting in section["settings"]:
 				part.append_array(_setting_elements(section["module"], prefix + setting["id"], setting))
+			for element in part:
+				element["page"] = page
+			# Each module's part is checked alone, so one that the ui module
+			# won't take (a label too long) shows its problem instead of
+			# leaving the whole window empty.
+			var wrong: String = ui.call("check_panel", {"id_panel": PANEL, "chrome": true, "layout": "column", "pages": PAGES, "elements": part}) \
+				if ui != null and ui.has_method("check_panel") else ""
+			if not wrong.is_empty():
+				section["problem"] = "gave the window something it can't show (%s)" % wrong
+				var report := "Slopitect settings: %s's settings_info() %s" % [section["module"], section["problem"]]
+				if not _reported.has(report):
+					_reported[report] = true
+					push_error(report)
+		part.push_front(_text(prefix + "title", section["title"], "accent"))
+		if section.has("problem"):
+			part = [part[0], _text(prefix + "problem", "Its settings_info() %s." % section["problem"], "muted", 24)]
 		for element in part:
 			element["page"] = page
 			out.append(element)

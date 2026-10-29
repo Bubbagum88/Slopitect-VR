@@ -1423,6 +1423,13 @@ func _check_panel(data: Dictionary, is_new: bool, check_actions: bool) -> Dictio
 	return {"panel": panel}
 
 
+# What would be wrong with a panel, without adding it ("" if nothing): a
+# module that gathers others' parts (settings.gd) checks each part alone,
+# so one bad part can't stop the whole window.
+func check_panel(data: Dictionary) -> String:
+	return _check_panel(data, false, true).get("error", "")
+
+
 func _check_element(data: Dictionary, panel: Dictionary, check_actions: bool, depth := 0) -> Dictionary:
 	var type = data.get("type")
 	if not type in ELEMENT_TYPES:
