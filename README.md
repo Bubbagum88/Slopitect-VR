@@ -41,11 +41,15 @@ Working now:
   agent can write new modules that load into the running app, each only
   after you've seen the code and said Yes in the headset.
 
-- **The agent's avatar** *(built, waiting on a headset test)*: a little red
-  cube with a face and floating sphere hands. It bobs, blinks, faces you,
-  thinks while the agent works and shows replies in a speech bubble. It has
-  outfits (top hat, party hat, crown, headphones, bow tie), and new ones can
-  be made from simple shapes while the app runs.
+- **The agent's avatar** *(a live module, PC-tested, waiting on a headset
+  test)*: a little red cube with a face and floating sphere hands. It bobs,
+  blinks, faces you and thinks while the agent works. Its face shows
+  emotions (happy, sad, surprised, angry, confused, sleepy), and its mouth
+  follows the words while the speech engine talks. Replies show in a speech
+  bubble above its head (and hat), a page at a time, that waits at the edge
+  of your view when the avatar is out of sight. It has outfits (top hat,
+  party hat, crown, headphones, bow tie), and new ones can be made from
+  simple shapes while the app runs.
 
 What you can change live, what needs a new APK, and how the agent is kept
 safe: [docs/LIVE-CHANGES-AND-SAFETY.md](docs/LIVE-CHANGES-AND-SAFETY.md).
@@ -164,9 +168,12 @@ To talk to the agent from the PC and watch what it does, run
 | `agent_skills` | | `{"cmd":"agent_skills"}` |
 | `avatar_move` | `position` | `{"cmd":"avatar_move","position":[0,1.4,-1]}` |
 | `avatar_say` | `text` | `{"cmd":"avatar_say","text":"Hi!"}` |
-| `avatar_state` | `state` (idle, thinking, talking, happy, wave) | `{"cmd":"avatar_state","state":"wave"}` |
+| `avatar_state` | `state` (idle, thinking, talking, happy, wave), optional `seconds` | `{"cmd":"avatar_state","state":"wave","seconds":3}` |
+| `avatar_emotion` | `emotion` (neutral, happy, sad, surprised, angry, confused, sleepy), optional `seconds` | `{"cmd":"avatar_emotion","emotion":"happy"}` |
+| `avatar_status` | | `{"cmd":"avatar_status"}`: place, state, emotion, outfit, talking, what the bubble shows |
 | `avatar_outfit` | `name` | `{"cmd":"avatar_outfit","name":"top_hat"}` |
 | `avatar_outfits` | | `{"cmd":"avatar_outfits"}` |
+| `avatar_outfit_remove` | `name` (an added outfit) | `{"cmd":"avatar_outfit_remove","name":"wizard"}` |
 | `avatar_outfit_add` | `name`, `parts` (up to 12 of `shape`, `size`, `position`, optional `rotation`, `color`) | `{"cmd":"avatar_outfit_add","name":"wizard","parts":[{"shape":"cone","size":[0.18,0.25,0.18],"position":[0,0.23,0],"color":"purple"}]}` |
 
 Windows (panels):
@@ -350,7 +357,6 @@ registering the plugin first.)
 | `game/modules/voice.gd` | Speech out and hold-to-talk |
 | `game/modules/code.gd` | Live modules: new code loaded after your Yes |
 | `game/pending.gd` | A command's answer that comes later (after your Yes) |
-| `game/modules/avatar.gd` | The agent's avatar, its animations and outfits |
 | `game/agent/providers/` | One file per kind of AI service (`anthropic.gd`, `openai.gd`) |
 | `game/skills/` | The agent's shipped skills, one `SKILL.md` per folder |
 | `docs/LIVE-CHANGES-AND-SAFETY.md` | What changes live, what needs a new APK, and the safety rules |

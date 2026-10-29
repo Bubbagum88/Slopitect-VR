@@ -496,21 +496,6 @@ func _fill_action(value, id_panel: String, fill := {}):
 	return value
 
 
-# Changes what a text element shows, at once and without redrawing or saving
-# the panel: for windows that change many times a second (a terminal's
-# screen). The text isn't saved, since it can be anything a command replied;
-# a redraw keeps it. Returns false when there's no such text element.
-func set_text(id_panel: String, id_element: String, text: String) -> bool:
-	var element := _element(id_panel, id_element)
-	if element.is_empty() or element["type"] != "text":
-		return false
-	_live_text[id_panel + "/" + id_element] = text.left(MAX_TEXT)
-	var label := _find_node(id_panel, id_element) as Label3D
-	if label:
-		label.text = _live_text[id_panel + "/" + id_element]
-	return true
-
-
 # The theme, with the PC's changes: {name: Color or text size}.
 func theme() -> Dictionary:
 	return theme_values.duplicate()
@@ -696,6 +681,21 @@ func _key_command(request: Dictionary) -> Dictionary:
 			return {"ok": false, "error": "\"key\" must be shift, backspace or clear"}
 	_show_focus()
 	return {"ok": true}
+
+
+# Changes a text element's text live, for a module that updates often (the
+# terminal's screen, on every key): only the label changes, the panel isn't
+# redrawn or saved. The text is kept in memory (never in ui.json, since it
+# can be anything a command replied), so a later redraw still shows it.
+func set_text(id_panel: String, id_element: String, text: String) -> bool:
+	var element := _element(id_panel, id_element)
+	if element.get("type") != "text" or element.has("source"):
+		return false
+	_live_text[id_panel + "/" + id_element] = text.left(MAX_TEXT)
+	var label := _find_node(id_panel, id_element) as Label3D
+	if label:
+		label.text = _live_text[id_panel + "/" + id_element]
+	return true
 
 
 func _max_length(key: String) -> int:
