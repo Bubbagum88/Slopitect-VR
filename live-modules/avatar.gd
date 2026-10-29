@@ -580,8 +580,8 @@ func _show_page() -> void:
 func _theme() -> Dictionary:
 	var colours := DEFAULT_THEME.duplicate()
 	var ui = ctx["modules"].module("vrui")
-	if ui == null:
-		ui = ctx["modules"].module("ui")  # before the rename to vrui
+	if ui == null or not ui.has_method("theme"):
+		ui = ctx["modules"].module("ui")  # before the rename to vrui (or the old vrui draft)
 	if ui != null and ui.has_method("theme"):
 		var theme: Dictionary = ui.theme()
 		for key in colours:

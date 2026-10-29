@@ -107,8 +107,7 @@ func _has_panel() -> bool:
 
 
 func _ui() -> SlopitectModule:
-	var ui: SlopitectModule = ctx["modules"].module("vrui")
-	return ui if ui != null else ctx["modules"].module("ui")  # before the rename to vrui
+	return ctx["modules"].module("ui")
 
 
 # --- Running a line ------------------------------------------------------------------
