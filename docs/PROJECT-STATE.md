@@ -62,7 +62,7 @@ All PC-tested, none yet on the headset. See
 | save | Checkpoints with undo; shapes, models, landscape, paths and inspect switches |
 | projects | A folder (world) per project |
 | move | Walk (left stick) and turn (right stick) |
-| grab | Pick things up with the grip |
+| grab | Pick things up with the grip; grip with both hands and pull apart or together to resize (PC-tested with simulated hands) |
 | physics | Static or dynamic bodies |
 | inspect | Point at a thing to switch its physics, grabbing and hiding, or delete it |
 | avatar | The agent's avatar, moved out of the APK: animations, emotions, a mouth that follows speech, a paged speech bubble that docks at the edge of view, outfits; `body()` for other modules (jelly). The APK avatar it replaces was seen on the headset; this one is PC-tested only |

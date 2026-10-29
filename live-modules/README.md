@@ -18,7 +18,7 @@ unless its file has changed since.
 | `paths.gd` | Roads and trails: put down points with the trigger, then press Finish. Optionally levels the ground under the path |
 | `save.gd` | Keeps the shapes and models: saved by themselves when they change and put back at start. Checkpoints keep the whole world (ground and paths too) to go back to, with undo |
 | `move.gd` | Walk with the left stick (the way you look), turn with the right (30° steps, or smooth); you stand on the landscape's ground |
-| `grab.gd` | Hold the grip near a shape or model to pick it up; let go to drop it (or throw it, with physics). One undo per pick-up |
+| `grab.gd` | Hold the grip near a shape or model to pick it up; let go to drop it (or throw it, with physics). Grip it with the other hand too and pull your hands apart or together to resize it (2 cm to 20 m); let go with either hand and the other keeps it. One undo per pick-up, resizes included |
 | `physics.gd` | Makes shapes and models fall, bounce and collide (the engine's own physics) once you set them dynamic; the ground is the floor or the landscape |
 | `projects.gd` | A world per project (`projects/NAME/` in the Slopitect folder: its saves, notes, and the live modules it uses). Needs save.gd |
 | `hands.gd` | Drawn hands with coloured nails in place of the controller boxes; the fingers curl with the grip, trigger and where your thumb rests. Colours from the PC (`hands_config`). Needs controls.gd to move |
