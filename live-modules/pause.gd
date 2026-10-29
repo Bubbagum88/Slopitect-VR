@@ -17,7 +17,7 @@ extends SlopitectModule
 # - Hand menu shows or hides the hand menu.
 # - Files & modules opens worlds.gd's window, when it's loaded.
 # The hand menu sits above the left controller: Home (this menu), Save,
-# Load, Worlds, and Undo / Redo (tools.gd's one list for every change).
+# Load, Worlds, Settings, and Undo / Redo (tools.gd's one list for every change).
 # Each menu is a ui panel ("pause", "pause_load", "pause_worlds",
 # "pause_settings", "hand_menu"), kept by the window module like every
 # panel; this fills them again each time the menu opens.
@@ -281,6 +281,7 @@ func _build_hand() -> void:
 		buttons.append(_button("save", "Save", {"cmd": "pause_do", "act": "save"}, "ok", HAND_BUTTON))
 		buttons.append(_button("load", "Load", {"cmd": "pause_do", "act": "show", "page": "load"}, "button", HAND_BUTTON))
 	buttons.append(_button("worlds", "Worlds", {"cmd": "pause_do", "act": "show", "page": "worlds"}, "button", HAND_BUTTON))
+	buttons.append(_button("settings", "Settings", {"cmd": "pause_do", "act": "show", "page": "settings"}, "button", HAND_BUTTON))
 	if _has("tools"):
 		buttons.append(_button("undo", "Undo", {"cmd": "tools_undo"}, "button", HAND_BUTTON))
 		buttons.append(_button("redo", "Redo", {"cmd": "tools_redo"}, "button", HAND_BUTTON))
