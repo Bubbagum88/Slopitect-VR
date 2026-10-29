@@ -212,6 +212,7 @@ if ($Load) {
     }
     # Changed files, and ones the app has but isn't running.
     $toLoad = @($wanted | Where-Object { $changed -contains $_ -or ($app[$_] -and -not $app[$_].loaded) })
+    if ($toLoad.Count -eq 0) { Write-Host "Every one of these modules is already loaded." }
     foreach ($n in $toLoad) {
         $needsYes = -not ($app[$n] -and $app[$n].approved -and $changed -notcontains $n)
         Write-Host $(if ($needsYes) { "Loading ${n}: say Yes in the headset (the right stick scrolls the code)..." } else { "Loading $n (already has your Yes)..." })
