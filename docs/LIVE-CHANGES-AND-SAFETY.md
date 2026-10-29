@@ -54,8 +54,10 @@ In place:
   changing `base_url` or `provider` without giving the key again clears it.
   The same goes for the speech-to-text key and `vtt_url`.
 - **A firewall on what the agent can do:** it can only use the commands in
-  `allowed_tools`, plus the commands of live modules you said Yes to. It
-  can never use its own `agent_*` commands or any `*_config` command, so it
+  `allowed_tools` (by default `"*"`, every command, isaac's choice
+  2026-10-29), plus the commands of live modules you said Yes to. It
+  can never use its own `agent_*` commands, any `*_config` command or
+  `pair` (which would give it a key to the command port), so it
   can't change its key, its provider, its permissions, which folders are
   blocked, or where your voice goes. The check also covers commands run
   indirectly, like a button the agent presses.

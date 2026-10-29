@@ -22,7 +22,14 @@ extends SlopitectModule
 # Settings window's "Search through the net module" is on.
 
 const SETTINGS_PATH := "user://net.json"
-const DEFAULT_HOSTS := ["api.polyhaven.com", "dl.polyhaven.org"]
+# isaac's list, 2026-10-29: GitHub, and free 3D models and textures.
+const DEFAULT_HOSTS := [
+	"github.com", "api.github.com", "raw.githubusercontent.com", "codeload.github.com", "objects.githubusercontent.com",
+	"api.polyhaven.com", "dl.polyhaven.org", "polyhaven.com",
+	"ambientcg.com", "kenney.nl", "opengameart.org", "poly.pizza", "static.poly.pizza", "sketchfab.com",
+]
+# The default list before; a saved copy of exactly it moves to the new one.
+const OLD_DEFAULT_HOSTS := [["api.polyhaven.com", "dl.polyhaven.org"]]
 const USER_AGENT := "Slopitect/0.1"
 const MAX_BYTES := 50 * 1024 * 1024
 const MAX_REDIRECTS := 5
@@ -420,3 +427,6 @@ func _load() -> void:
 		push_error("Slopitect net: %s isn't readable; using the default hosts" % SETTINGS_PATH)
 		return
 	hosts = saved["hosts"].duplicate()
+	if hosts in OLD_DEFAULT_HOSTS:
+		hosts = DEFAULT_HOSTS.duplicate()
+		print("Slopitect net: the allowed hosts were the old default; moved to the new one")

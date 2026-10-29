@@ -403,8 +403,8 @@ started), and each round logs them. To keep them down:
   Anthropic's side, so the headset still only talks to the API. A search
   costs $0.01 plus the tokens its results add; a page costs only its tokens,
   at most `web_fetch_max_tokens` (8000). Per request it may search
-  `web_search_max_uses` (3) and fetch `web_fetch_max_uses` (3) times; one
-  question stops after `max_searches_per_ask` (10) searches. `0` turns a
+  `web_search_max_uses` (5) and fetch `web_fetch_max_uses` (5) times; one
+  question stops after `max_searches_per_ask` (25) searches. `0` turns a
   tool off. These change from the PC only (`agent_config`); `agent_status`
   counts the searches under `web_searches`, and the log shows each query.
   The Settings window's Agent budget section has a switch, "Search with

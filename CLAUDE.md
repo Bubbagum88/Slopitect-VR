@@ -29,6 +29,10 @@ module work, [docs/MODULE-FRAMEWORK.md](docs/MODULE-FRAMEWORK.md) and
 - Treat the in-app agent as something that can be talked into things: keep
   the tool firewall, the in-headset Yes for live code and outside files,
   pairing on the command port, and host allowlists for downloads.
+  The owner's choice, 2026-10-29: `allowed_tools` defaults to `"*"` (every
+  command but the agent's own `agent_*`, any `*_config`, and `pair`); the
+  two Yes prompts and net's host allowlist stay (its default list now has
+  GitHub and free 3D model and texture sites).
 - `NAME_config` settings change only from the PC, never from app buttons or
   the agent.
   Exception (the owner's choice, 2026-10-29): comfort settings have their own
