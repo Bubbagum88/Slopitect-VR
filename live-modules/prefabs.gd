@@ -1,11 +1,14 @@
 extends SlopitectModule
 
-# Prefabs: save a set of shapes and models (picked by name prefix) as a
-# reusable asset in prefabs/NAME.json, with their textures, doors and groups,
-# and place copies of it anywhere. Doors should be closed when saving.
+# Prefabs: save a set of shapes and models as a reusable asset in
+# prefabs/NAME.json, with their textures, doors and groups, and place copies
+# of it anywhere. The set is given by names, by name prefixes, or is what's
+# selected with the Multi tool (multi.gd). Shapes made with shapes.gd keep
+# their recipe. Doors should be closed when saving. The Library window's
+# Prefabs tab (library.gd) shows them with a picture and places them.
 
 func setup() -> String:
-	register("prefabs_save", _save_command, "save things as a prefab asset: name; optional prefixes [name starts, default [\"house_\", \"kitchen_\"]], origin [x, y, z] (default the middle of their footprint, on the floor)")
+	register("prefabs_save", _save_command, "save things as a prefab asset: name (letters, digits, _ and -); which things: names [..] and/or prefixes [name starts], or (neither given) what the Multi tool has selected; optional origin [x, y, z] (default the middle of their footprint, on the floor)")
 	register("prefabs_place", _place_command, "place a copy of a prefab: name, position [x, y, z] (where its origin goes); optional suffix for the new names (default _2, _3, ...)")
 	register("prefabs_list", _list_command, "the saved prefabs: name, how many shapes and models")
 	register("prefabs_delete", _delete_command, "delete a saved prefab: name")
@@ -25,8 +28,14 @@ func _run(req: Dictionary) -> Dictionary:
 	return r if typeof(r) == TYPE_DICTIONARY else {}
 
 
+# A prefab's name is its file's name and the Library's tile id.
 func _good_name(n) -> bool:
-	return typeof(n) == TYPE_STRING and not n.is_empty() and n.is_valid_filename() and n.validate_node_name() == n
+	if typeof(n) != TYPE_STRING or n.is_empty() or n.length() > 80:
+		return false
+	for c in n:
+		if not (c == "_" or c == "-" or (c >= "a" and c <= "z") or (c >= "A" and c <= "Z") or (c >= "0" and c <= "9")):
+			return false
+	return true
 
 
 func _starts(n: String, prefixes: Array) -> bool:
@@ -34,6 +43,23 @@ func _starts(n: String, prefixes: Array) -> bool:
 		if n.begins_with(String(p)):
 			return true
 	return false
+
+
+# What prefabs_save takes: [names, prefixes, error].
+func _chosen(request: Dictionary) -> Array:
+	var names = request.get("names", [])
+	var prefixes = request.get("prefixes", [])
+	if typeof(names) != TYPE_ARRAY or not names.all(func(n): return typeof(n) == TYPE_STRING):
+		return [[], [], "\"names\" must be a list of names"]
+	if typeof(prefixes) != TYPE_ARRAY or not prefixes.all(func(p): return typeof(p) == TYPE_STRING and not p.is_empty()):
+		return [[], [], "\"prefixes\" must be a list of name starts"]
+	if names.is_empty() and prefixes.is_empty():
+		if ctx["modules"].module("multi") == null:
+			return [[], [], "say which things: names or prefixes (or select them with the Multi tool, multi.gd)"]
+		names = _run({"cmd": "multi_status"}).get("selected", [])
+		if names.is_empty():
+			return [[], [], "nothing is selected with the Multi tool; select things, or give names or prefixes"]
+	return [names, prefixes, ""]
 
 
 func _vec(v) -> Vector3:
@@ -56,20 +82,26 @@ func _first_array(d: Dictionary) -> Array:
 func _save_command(request: Dictionary) -> Dictionary:
 	var name = request.get("name")
 	if not _good_name(name):
-		return {"ok": false, "error": "\"name\" must be letters, digits and _"}
-	var prefixes = request.get("prefixes", ["house_", "kitchen_"])
-	if typeof(prefixes) != TYPE_ARRAY or prefixes.is_empty():
-		return {"ok": false, "error": "\"prefixes\" must be a list of name starts"}
+		return {"ok": false, "error": "\"name\" must be letters, digits, _ and -"}
+	var chosen := _chosen(request)
+	if not chosen[2].is_empty():
+		return {"ok": false, "error": chosen[2]}
+	var names: Array = chosen[0]
+	var prefixes: Array = chosen[1]
+	var wanted := func(n: String) -> bool: return n in names or _starts(n, prefixes)
+	var shaper: SlopitectModule = ctx["modules"].module("shapes")
 	var shapes := []
 	for o in _first_array(_run({"cmd": "list"})):
-		if typeof(o) == TYPE_DICTIONARY and _starts(String(o.get("name", "")), prefixes):
+		if typeof(o) == TYPE_DICTIONARY and wanted.call(String(o.get("name", ""))):
+			if shaper != null and shaper.call("is_made", String(o["name"])):
+				o["recipe"] = shaper.call("recipe", String(o["name"]))  # placed again with shapes_make
 			shapes.append(o)
 	var models := []
 	for m in _run({"cmd": "assets_placed"}).get("placed", []):
-		if typeof(m) == TYPE_DICTIONARY and _starts(String(m.get("name", "")), prefixes):
+		if typeof(m) == TYPE_DICTIONARY and wanted.call(String(m.get("name", ""))):
 			models.append(m)
 	if shapes.is_empty() and models.is_empty():
-		return {"ok": false, "error": "nothing has a name starting with %s" % JSON.stringify(prefixes)}
+		return {"ok": false, "error": "none of those things are in the world: names %s, prefixes %s" % [JSON.stringify(names), JSON.stringify(prefixes)]}
 	var origin := Vector3.ZERO
 	if request.has("origin"):
 		if typeof(request["origin"]) != TYPE_ARRAY or request["origin"].size() != 3:
@@ -99,7 +131,7 @@ func _save_command(request: Dictionary) -> Dictionary:
 	var tex = _run({"cmd": "textures_status"}).get("textures", {})
 	if typeof(tex) == TYPE_DICTIONARY:
 		for n in tex:
-			if _starts(String(n), prefixes):
+			if wanted.call(String(n)):
 				textures[n] = tex[n]
 	var doors := {}
 	var ds = _run({"cmd": "doors_status"}).get("doors", {})
@@ -108,7 +140,7 @@ func _save_command(request: Dictionary) -> Dictionary:
 			var d = ds[id]
 			if typeof(d) != TYPE_DICTIONARY or typeof(d.get("parts")) != TYPE_ARRAY or d["parts"].is_empty():
 				continue
-			if not _starts(String(d["parts"][0]), prefixes):
+			if not wanted.call(String(d["parts"][0])):
 				continue
 			var h: Array = d.get("hinge", [0, 0])
 			var hv := Vector3(float(h[0]), float(h[1]) if h.size() == 3 else 0.0, float(h[h.size() - 1]))
@@ -120,7 +152,7 @@ func _save_command(request: Dictionary) -> Dictionary:
 		for g in gs:
 			var members := []
 			for n in gs[g]:
-				if _starts(String(n), prefixes):
+				if wanted.call(String(n)):
 					members.append(n)
 			if members.size() >= 2:
 				groups[g] = members
@@ -184,6 +216,14 @@ func _place_command(request: Dictionary) -> Dictionary:
 	var failed := []
 	for o in data.get("shapes", []):
 		var req := {"cmd": "spawn", "shape": o.get("shape", "box"), "name": String(o["name"]) + suffix, "position": _arr(_vec(o.get("position")) + at), "rotation": o.get("rotation", [0, 0, 0]), "scale": o.get("scale", [1, 1, 1])}
+		if typeof(o.get("recipe")) == TYPE_DICTIONARY:
+			# A shape made with shapes.gd: made again from its recipe.
+			if ctx["modules"].module("shapes") == null:
+				failed.append({"name": req["name"], "error": "it was made with shapes.gd, which isn't loaded"})
+				continue
+			req.erase("shape")
+			req["cmd"] = "shapes_make"
+			req.merge(o["recipe"])
 		if o.has("color"):
 			var c := String(o["color"])
 			req["color"] = c if c.begins_with("#") else "#" + c
