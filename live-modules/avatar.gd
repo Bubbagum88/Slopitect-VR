@@ -20,8 +20,10 @@ extends SlopitectModule
 # - Outfits: data (a list of simple shapes), so new ones can be added while
 #   the app runs, by you or the agent.
 #
-# For other modules: body() is the node that bobs and leans (jelly squashes
-# its scale; nothing here touches the scale), say(text), set_state(name),
+# For other modules: root() holds the whole avatar (holster.gd moves and
+# scales it; here it's only placed and turned to face you), body() is the
+# node that bobs and leans (jelly squashes its scale; nothing here touches
+# the scale), say(text), set_state(name),
 # set_emotion(name, seconds) and speaking().
 #
 # The agent's state comes from agent_status, read four times a second, until
@@ -187,6 +189,11 @@ func setup() -> String:
 
 
 # --- For other modules ----------------------------------------------------------
+
+# The node that holds the whole avatar: body and hands (not the bubble).
+func root() -> Node3D:
+	return _root
+
 
 # The node that bobs and leans, with the cube, face and outfit in it.
 func body() -> Node3D:
