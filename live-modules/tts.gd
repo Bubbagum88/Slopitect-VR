@@ -24,7 +24,7 @@ const SETTINGS_PATH := "user://tts.json"
 const OLD_SETTINGS_PATH := "user://voice.json"  # the APK's voice module kept these before
 const POLL_SECONDS := 0.5
 const FILE_POLL_SECONDS := 0.1
-const SENTENCE_CHARS := 200  # sentences are joined up to about this long; the first plays while the rest are written
+const SENTENCE_CHARS := 200  # sentences after the first are joined up to about this long; each plays while the next is written
 const ENGINE_NOT_HEARD := -99  # onInit hasn't come yet
 const MAX_SAY := 2000
 const SPEECH_GRACE_SECONDS := 15.0
@@ -72,6 +72,8 @@ var _waiting := []  # what to say once the engine is ready: [text, voice]
 var _jobs := []  # sentences being written, in order: {path, chars, since, stream}
 var _player: AudioStreamPlayer
 var _next_id := 0
+var _has_word := RegEx.create_from_string("\\w")  # a piece with no letters or digits ("...") isn't a sentence on its own
+var _last_written := 0  # when the engine last finished writing a piece (ms)
 var _since_files := 0.0
 var _voice_set := ""  # the voice the in-app engine was last set to
 
@@ -288,6 +290,13 @@ func _update_in_app() -> void:
 			if job["stream"] == null:
 				job["stream"] = false
 				_note("the speech engine wrote a sound file Godot couldn't read")
+			else:
+				# How fast the engine writes: it writes one piece at a time, so
+				# a piece takes from when the one before it was done.
+				var done := Time.get_ticks_msec()
+				var took := done - maxi(job["asked"], _last_written)
+				_last_written = done
+				print("Slopitect tts: wrote %d characters (%.1f s of speech) in %d ms; %d ms after it was asked for" % [job["chars"], job["stream"].get_length(), took, done - job["asked"]])
 	if _jobs.is_empty() or _player.playing:
 		return
 	var head: Dictionary = _jobs[0]
@@ -307,6 +316,8 @@ func _update_in_app() -> void:
 		_player.stream = head["stream"]
 		_player.volume_db = linear_to_db(maxf(float(settings["volume"]) / 100.0, 0.001))
 		_player.play()
+		if head["first"]:
+			print("Slopitect tts: started speaking %d ms after it was asked to" % (Time.get_ticks_msec() - head["asked"]))
 
 
 # Asks the engine to write each sentence of text to its own file.
@@ -321,6 +332,7 @@ func _write(text: String, voice: String) -> void:
 		if not voice.is_empty():
 			_set_java_voice(voice)
 	var now := Time.get_ticks_msec() / 1000.0
+	var first := true
 	for sentence in _sentences(text):
 		_next_id += 1
 		var path := OS.get_cache_dir().path_join("slopitect-speech-%d.wav" % _next_id)
@@ -329,7 +341,8 @@ func _write(text: String, voice: String) -> void:
 		if typeof(result) != TYPE_INT or result != 0:
 			_note("the speech engine wouldn't write the speech (synthesizeToFile gave %s; %s)" % [str(result), _java_error(wrapper)])
 			return
-		_jobs.append({"path": path, "chars": sentence.length(), "since": now, "stream": null})
+		_jobs.append({"path": path, "chars": sentence.length(), "since": now, "stream": null, "asked": Time.get_ticks_msec(), "first": first})
+		first = false
 
 
 func _set_java_voice(voice: String) -> void:
@@ -352,7 +365,9 @@ func _sentences(text: String) -> PackedStringArray:
 	var regex := RegEx.create_from_string("[^.!?\\n]*[.!?]+\\s*|[^.!?\\n]+|\\n+")
 	for m in regex.search_all(text):
 		var piece := m.get_string()
-		if not current.is_empty() and current.length() + piece.length() > SENTENCE_CHARS:
+		# The first sentence goes alone: nothing is heard until its whole
+		# file is written, so the shorter it is, the sooner speech starts.
+		if _has_word.search(current) and (out.is_empty() or current.length() + piece.length() > SENTENCE_CHARS):
 			out.append(current.strip_edges())
 			current = ""
 		current += piece
