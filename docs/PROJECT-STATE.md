@@ -14,7 +14,8 @@ Three levels of "works" are used, and kept apart on purpose:
 
 A VR sandbox for the Oculus Quest 1 that an AI agent changes while you
 stand in it. The APK is a small skeleton (command server, module loader,
-safety window, agent, voice). Everything else is a **live module**:
+safety window, agent; the whisper plugin and microphone permission for
+speech to text). Everything else is a **live module**:
 a GDScript file pushed to the headset and loaded while the app runs, after
 a Yes in the headset. Modules stay separate and swappable.
 
@@ -36,7 +37,6 @@ a Yes in the headset. Modules stay separate and swappable.
 | Agent | Claude (Anthropic) and OpenAI-style providers; tools are the app's commands; skills are `SKILL.md` files; `allowed_tools` firewall; prompt caching and token limits; short replies (caveman skill) | Headset with a real key (needs a workspace-scoped key) |
 | Chat window | Y opens a terminal-style window with keyboard, Send and STOP; left X always stops the agent | Headset (typing) |
 | Files | The agent's own `/sdcard/Slopitect` folder freely; anything else needs your Yes each time | Headset (`files_status`) |
-| Voice | Speech out through Android TTS; hold-to-talk speech to text on the headset (godot-whisper) | TTS returns ok with SherpaTTS; audible not confirmed; STT: the headset couldn't load the whisper library (a missing function, fixed in CI; new APK not yet on the headset) |
 | Live code | `code_load` loads a module after your Yes; `code_unload` turns it off | PC |
 | Confirm | The Yes/No window only you can answer; shows a module's whole code on its own sheet (right stick scrolls, 5 min wait) | PC |
 | View | `view_look` gives the agent a picture of the world | PC |
@@ -71,6 +71,8 @@ All PC-tested, none yet on the headset. See
 | net | Downloads, https only and only from hosts allowed on the PC (`net_config`), redirects checked; records each file's source |
 | worlds | The Worlds window (a tile on the Menu): tabs to open or make a project's world, keep and go back to checkpoints, look through the Slopitect folder, and load or unload live modules. Built on projects, save, files and code |
 | jelly | Squash and stretch on the avatar, volume kept; needs the live avatar module's `body()`. Tested on the PC with a stand-in avatar |
+| tts | Speech out, moved out of the APK: replies read aloud through Android TTS; speed, pitch, volume and voice in the Settings window (`tts_set`); a stuck utterance is reset. Headset: SherpaTTS synthesizes, but Slopitect's speech not heard yet |
+| stt | Hold-to-talk, moved out of the APK: whisper.cpp on the headset (local, the default) or a web service (`stt_config`, PC only); words go into the chat window's input box. Headset (old built-in version): heard "Hello." in 22 s, words didn't reach the chat box; English forcing, length-cut audio and chat delivery are PC-tested only |
 | hands | Drawn hands with nails in place of the controller boxes; fingers curl with grip, trigger and thumb rest; colours from the PC (`hands_config`). Curling was checked on the PC with a stand-in for the controllers |
 
 Every draft has been reworked or dropped; what happened to each is in
@@ -136,8 +138,10 @@ container).
   godot-whisper's own sgemm.cpp patch hid that function on CPUs without
   half-float vector maths (the Quest 1); `ci/patch-godot-whisper.py` keeps it,
   and CI now fails if the library is missing any of its own functions.
-  Needs the new APK on the headset, then `voice_config` with
-  `stt_engine` `"local"`. Whether speech out is audible is not confirmed.
+  Fixed and seen on the headset (it heard "Hello."). Speech moved into the
+  `stt` and `tts` live modules; they need the next APK (without the old
+  voice module) and a headset test. Speech out still isn't audible: the
+  engine (SherpaTTS) synthesizes, but nothing is heard from Slopitect.
 - **Module framework** ([MODULE-FRAMEWORK.md](MODULE-FRAMEWORK.md)): the
   owner's decisions, then the live-module steps, then the APK pieces.
 - **Roadmap** (README): Claude on the PC through MCP (step 4), backups to

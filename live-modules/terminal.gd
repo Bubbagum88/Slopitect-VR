@@ -9,7 +9,7 @@ extends SlopitectModule
 # A line is a command and its fields:
 #   spawn shape=box scale=0.3 position=[0,1,-1]
 #   agent_ask prompt="make the box red"
-# Commands that take text (agent_ask, voice_say, memory_note...) also take it
+# Commands that take text (agent_ask, tts_say, memory_note...) also take it
 # as the rest of the line: agent_ask make the box red.
 # A field's value is read as JSON when it can be (numbers, true/false,
 # [lists], "quoted text"), and as plain text otherwise. A line that starts
@@ -44,7 +44,7 @@ const ROWS := 13  # screen lines shown
 const MAX_LINES := 400  # scrollback kept
 # Commands whose main field is free text: "agent_ask can you..." needs no
 # prompt= or quotes.
-const TEXT_FIELDS := {"agent_ask": "prompt", "voice_say": "text", "avatar_say": "text", "ui_type": "text",
+const TEXT_FIELDS := {"agent_ask": "prompt", "tts_say": "text", "avatar_say": "text", "ui_type": "text",
 	"terminal_type": "text", "memory_note": "text", "memory_search": "query", "assets_search": "query"}
 const SCROLL_CHARS := 4000  # the most a text element holds (ui.gd's MAX_TEXT)
 const MAX_LINE := 400  # characters in the line being typed

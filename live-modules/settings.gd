@@ -62,7 +62,6 @@ func menu_info() -> Dictionary:
 func settings_info() -> Dictionary:
 	return {"title": "The agent", "order": 900, "settings": [
 		{"id": "new_conversation", "type": "button", "label": "New conversation", "set": {"cmd": "settings_do", "act": "new_conversation"}},
-		{"id": "hush", "type": "button", "label": "Stop speaking", "set": {"cmd": "voice_stop"}},
 	]}
 
 
@@ -303,7 +302,7 @@ func _elements(sections: Array) -> Array:
 			out.append_array(_setting_elements(section["module"], prefix + setting["id"], setting))
 	if sections.is_empty():
 		out.append(_text("none", "No loaded module has settings.", "muted", 26))
-	out.append(_text("pc_only", "Voice speed and the rest change from the PC (voice_config and the other *_config).", "muted", 24))
+	out.append(_text("pc_only", "Keys, services and the rest change from the PC (the *_config commands).", "muted", 24))
 	return out
 
 

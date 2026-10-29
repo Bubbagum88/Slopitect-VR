@@ -31,6 +31,8 @@ unless its file has changed since.
 | `jelly.gd` | The avatar squashes and stretches like jelly as it moves, keeping its volume; `jelly_poke` wobbles it. Needs the live avatar module (its `body()`); spring from the PC (`jelly_config`) |
 | `assets.gd` | 3D models from [Poly Haven](https://polyhaven.com) (all CC0): search, download to the headset, place in the world. Powered by Poly Haven |
 | `memory.gd` | The agent's memory between conversations: notes it keeps (facts, decisions, troubleshooting, coding techniques), each question you asked in a world with its answer, tools and errors, older ones folded into digests, and each tool's failures. One memory per world (project) plus a global one. Keys and personal info are cleaned out before anything is kept |
+| `tts.gd` | Speech out (it used to be the APK's voice module): the agent's replies read aloud by the headset's speech engine (an app such as SherpaTTS), and `tts_say` for anything else. Speed, pitch, volume, voice and reading replies on or off are comfort settings, in the Settings window or with `tts_set`. Speech the engine never finishes is stopped so the next can play. Other modules use `speak()` and `speaking()` |
+| `stt.gd` | Hold-to-talk (it used to be the APK's voice module): hold the talk button (the left trigger), talk, let go, and the words land in the chat window's input box for you to check and Send, or go straight to the agent (`send_to_agent`, in the Settings window or with `stt_set`). On the headset with whisper.cpp (the APK's godot-whisper plugin and a model in `models/`), or a service at `stt_url`; the engine, service and key change only from the PC (`stt_config`). A red dot on your left hand shows it's listening |
 
 A tool is any module with a `tool_info()` function, so a new tool is a new
 file; `tools.gd` explains what a tool gets. Tools work without the tools
@@ -64,6 +66,8 @@ From the platform-tools folder:
 .\adb push "C:\path\to\live-modules\worlds.gd" /sdcard/Slopitect/modules/
 .\adb push "C:\path\to\live-modules\pause.gd" /sdcard/Slopitect/modules/
 .\adb push "C:\path\to\live-modules\chat.gd" /sdcard/Slopitect/modules/
+.\adb push "C:\path\to\live-modules\tts.gd" /sdcard/Slopitect/modules/
+.\adb push "C:\path\to\live-modules\stt.gd" /sdcard/Slopitect/modules/
 .\slopi.ps1 '{"cmd":"code_load","name":"controls"}'
 .\slopi.ps1 '{"cmd":"code_load","name":"ui"}'
 .\slopi.ps1 '{"cmd":"code_load","name":"tools"}'
@@ -86,6 +90,8 @@ From the platform-tools folder:
 .\slopi.ps1 '{"cmd":"code_load","name":"worlds"}'
 .\slopi.ps1 '{"cmd":"code_load","name":"pause"}'
 .\slopi.ps1 '{"cmd":"code_load","name":"chat"}'
+.\slopi.ps1 '{"cmd":"code_load","name":"tts"}'
+.\slopi.ps1 '{"cmd":"code_load","name":"stt"}'
 ```
 
 Each `code_load` shows the code in the headset and waits for your Yes
