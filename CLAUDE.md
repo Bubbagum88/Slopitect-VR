@@ -42,6 +42,9 @@ module work, [docs/MODULE-FRAMEWORK.md](docs/MODULE-FRAMEWORK.md) and
   narrow ranges, and the model from a fixed Claude list. The agent itself
   can never use it (`agent_` commands are behind its firewall). The key,
   provider, address and allowed tools stay PC only.
+  Exception (the owner's choice, 2026-10-29): the switch between Claude's
+  web search and the net module's (`web_via_net`) is in the same section.
+  The web limits (`web_search_max_uses` and the rest) stay PC only.
 - Assets ripped from games on the headset stay local: never in the repo,
   GitHub or a backup.
 

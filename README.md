@@ -198,7 +198,7 @@ To talk to the agent from the PC and watch what it does, run
 | `agent_status` | | `{"cmd":"agent_status"}`: what it's doing, its reply, recent steps |
 | `agent_stop` | | `{"cmd":"agent_stop"}` |
 | `agent_reset` | | `{"cmd":"agent_reset"}` starts a new conversation |
-| `agent_config` | any of `provider`, `model`, `base_url`, `api_key`, `effort`, `max_tokens`, `max_tokens_field`, `max_tool_rounds`, `max_tokens_per_ask`, `max_context_tokens`, `max_tool_result_chars`, `web_search_max_uses`, `web_fetch_max_uses`, `web_fetch_max_tokens`, `max_searches_per_ask`, `fallbacks`, `show_thinking`, `allowed_tools` | `{"cmd":"agent_config"}` shows them |
+| `agent_config` | any of `provider`, `model`, `base_url`, `api_key`, `effort`, `max_tokens`, `max_tokens_field`, `max_tool_rounds`, `max_tokens_per_ask`, `max_context_tokens`, `max_tool_result_chars`, `web_search_max_uses`, `web_fetch_max_uses`, `web_fetch_max_tokens`, `max_searches_per_ask`, `web_via_net`, `fallbacks`, `show_thinking`, `allowed_tools` | `{"cmd":"agent_config"}` shows them |
 | `agent_skills` | | `{"cmd":"agent_skills"}` |
 | `avatar_move` | `position` | `{"cmd":"avatar_move","position":[0,1.4,-1]}` |
 | `avatar_say` | `text` | `{"cmd":"avatar_say","text":"Hi!"}` |
@@ -407,6 +407,11 @@ started), and each round logs them. To keep them down:
   question stops after `max_searches_per_ask` (10) searches. `0` turns a
   tool off. These change from the PC only (`agent_config`); `agent_status`
   counts the searches under `web_searches`, and the log shows each query.
+  The Settings window's Agent budget section has a switch, "Search with
+  the net module": on, the agent searches with the net module's
+  `net_search` (DuckDuckGo, free) and reads pages with `net_read` instead
+  (`web_via_net`; the agent gets one or the other). `net_read` only opens a
+  page a search found or one on net's allowed hosts.
 - Lower `effort` (`low`) thinks less; a cheaper model (like
   `claude-haiku-5-5`) costs far less per token, but is less capable. If
 Claude declines a request, the API runs it again on the model Anthropic

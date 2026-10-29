@@ -8,7 +8,8 @@ extends SlopitectModule
 # change goes through the APK's agent_budget command, which keeps the
 # numbers in narrow ranges and saves them in user://agent.json. With Claude,
 # the model can be picked too, from a fixed list (a new model starts a new
-# conversation).
+# conversation). A switch picks how it searches the web: Claude's own
+# search, or the net module's (net_search and net_read).
 #
 # The agent can't change these: it never gets an agent_ command, even when it
 # goes through settings_set (isaac's choice, 2026-10-29). The key, provider,
@@ -44,6 +45,10 @@ func settings_info() -> Dictionary:
 			options.append({"label": MODEL_LABELS.get(model, model), "value": model})
 		out.append({"id": "model", "type": "choice", "label": "Model", "value": budget["model"], "options": options, "columns": 1,
 			"set": {"cmd": "agent_budget", "model": "{value}"}})
+	# How the agent searches the web (an older APK has no switch).
+	if budget.has("web_via_net"):
+		out.append({"id": "web_via_net", "type": "toggle", "label": "Search with the net module (free), not Claude ($0.01 each)",
+			"value": budget["web_via_net"], "set": {"cmd": "agent_budget", "web_via_net": "{value}"}})
 	for key in SLIDERS:
 		var low: int = ranges[key][0]
 		var high: int = ranges[key][1]
