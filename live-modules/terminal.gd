@@ -32,6 +32,7 @@ const PANEL := "terminal"
 const COLS := 62  # characters per screen line at FONT on the screen's width
 const ROWS := 13  # screen lines shown
 const MAX_LINES := 400  # scrollback kept
+const SCROLL_CHARS := 4000  # the most a text element holds (ui.gd's MAX_TEXT)
 const MAX_LINE := 400  # characters in the line being typed
 const MAX_HISTORY := 50
 const FONT := 24
@@ -45,8 +46,8 @@ const ASK_POLL_SECONDS := 0.5
 
 var _line := ""
 var _shift := false
-var _screen: PackedStringArray = []  # wrapped lines, oldest first
-var _scroll := 0  # lines up from the newest
+var _screen: PackedStringArray = []  # printed lines, oldest first
+var _scroll := 0  # lines up from the newest (the plain window; the new ui.gd keeps its own)
 var _history: PackedStringArray = []  # lines run, oldest first
 var _history_at := -1  # -1: not stepping through the history
 var _last_run := ""  # the last line run and its reply, for Ask
@@ -84,19 +85,25 @@ func _process(delta: float) -> void:
 	_since_check += delta
 	if _since_check >= CHECK_SECONDS:
 		_since_check = 0.0
-		# ui.gd can be loaded after this module, or reloaded; the window is
-		# built on whichever one is there.
+		# ui.gd can be loaded after this module, or reloaded, and ui_reset
+		# takes the window away; it's built again on whichever ui.gd is there.
 		var ui := _ui()
 		var id := ui.get_instance_id() if ui != null else 0
-		if id != _ui_id:
-			_ui_id = id
-			if ui != null:
-				_build_panel()
+		if ui != null and (id != _ui_id or not _has_panel()):
+			_build_panel()
+		_ui_id = id
 	if _asking:
 		_since_ask_poll += delta
 		if _since_ask_poll >= ASK_POLL_SECONDS:
 			_since_ask_poll = 0.0
 			_check_ask()
+
+
+func _has_panel() -> bool:
+	for panel in ctx["server"].run({"cmd": "ui_list"}).get("panels", []):
+		if panel.get("id_panel") == PANEL:
+			return true
+	return false
 
 
 func _ui() -> SlopitectModule:
@@ -253,10 +260,28 @@ func _short(value) -> String:
 # --- The screen ----------------------------------------------------------------------
 
 func _print(text: String) -> void:
-	for raw in text.split("\n"):
+	_screen.append_array(text.split("\n"))
+	if _screen.size() > MAX_LINES:
+		_screen = _screen.slice(_screen.size() - MAX_LINES)
+	_scroll = 0  # new output brings you back to the end
+	_show_screen()
+
+
+# The new ui.gd (the vrui look) has a scrolling text area that wraps and
+# keeps to the newest lines by itself; with an older one, the terminal
+# wraps and scrolls its screen itself.
+func _scrolling_ui() -> bool:
+	var ui := _ui()
+	return ui != null and ui.has_method("scroll_text")
+
+
+# The screen's lines wrapped to COLS, for the older ui.gd.
+func _wrapped() -> PackedStringArray:
+	var wrapped := PackedStringArray()
+	for raw in _screen:
 		var line: String = raw
 		if line.is_empty():
-			_screen.append("")
+			wrapped.append("")
 		while not line.is_empty():
 			# Break after the last space or comma that fits, so words stay whole.
 			var cut := COLS
@@ -264,20 +289,26 @@ func _print(text: String) -> void:
 				var at := maxi(line.rfind(" ", COLS - 1), line.rfind(",", COLS - 1))
 				if at > COLS / 2:
 					cut = at + 1
-			_screen.append(line.left(cut))
+			wrapped.append(line.left(cut))
 			line = line.substr(cut)
-	if _screen.size() > MAX_LINES:
-		_screen = _screen.slice(_screen.size() - MAX_LINES)
-	_scroll = 0  # new output brings you back to the end
-	_show_screen()
+	return wrapped
 
 
 func _visible_lines() -> PackedStringArray:
-	var end := _screen.size() - _scroll
-	return _screen.slice(maxi(0, end - ROWS), end)
+	var wrapped := _wrapped()
+	var end := wrapped.size() - _scroll
+	return wrapped.slice(maxi(0, end - ROWS), end)
 
 
 func _show_screen() -> void:
+	if _scrolling_ui():
+		# The newest lines that fit in a text element; ui.gd wraps them.
+		var text := "\n".join(_screen).right(SCROLL_CHARS)
+		var first := text.find("\n")
+		if text.length() == SCROLL_CHARS and first != -1:
+			text = text.substr(first + 1)  # no half line at the top
+		_set_text("screen_text", text)
+		return
 	var text := "\n".join(_visible_lines())
 	if _scroll > 0:
 		text += "\n(%d more lines below: Down)" % _scroll
@@ -472,13 +503,17 @@ func _key_command(request: Dictionary) -> Dictionary:
 
 
 func _scroll_command(request: Dictionary) -> Dictionary:
-	if request.get("end", false) == true:
+	var by = request.get("by")
+	var to_end: bool = request.get("end", false) == true
+	if not to_end and typeof(by) not in [TYPE_INT, TYPE_FLOAT]:
+		return {"ok": false, "error": "terminal_scroll needs \"by\" (lines, + is back) or \"end\": true"}
+	if _scrolling_ui():
+		var offset: int = _ui().call("scroll_text", PANEL, "screen_text", 0 if to_end else int(by))
+		return {"ok": true, "scroll": offset}
+	if to_end:
 		_scroll = 0
 	else:
-		var by = request.get("by")
-		if typeof(by) not in [TYPE_INT, TYPE_FLOAT]:
-			return {"ok": false, "error": "terminal_scroll needs \"by\" (lines, + is back) or \"end\": true"}
-		_scroll = clampi(_scroll + int(by), 0, maxi(0, _screen.size() - ROWS))
+		_scroll = clampi(_scroll + int(by), 0, maxi(0, _wrapped().size() - ROWS))
 	_show_screen()
 	return {"ok": true, "scroll": _scroll}
 
@@ -522,6 +557,11 @@ func _build_panel() -> void:
 			"font_size": FONT, "color": "#8cff99", "mono": true, "text": ""},
 		{"type": "text", "id": "line", "at": [0, line_y + 0.012], "width": width, "font_size": LINE_FONT, "color": "#b3e6ff", "mono": true, "text": "$ |"},
 	]
+	if _scrolling_ui():
+		# The new ui.gd's text area: it wraps, clips at its box and keeps
+		# to the newest lines, and Up / Down scroll it.
+		elements[1]["height"] = screen_height - 0.02
+		elements[1]["scroll"] = true
 	for r in ROWS_OF_KEYS.size():
 		var row: String = ROWS_OF_KEYS[r]
 		for c in row.length():
@@ -560,11 +600,9 @@ func _build_panel() -> void:
 			"at": [tool_x, top - i * unit], "size": [0.11, KEY], "action": tools[i][2]})
 	var panel := {"cmd": "ui_add", "id_panel": PANEL, "title": "Terminal", "place": "front", "distance": 0.6, "height": -0.3,
 		"toggle": "right_a", "elements": elements}
-	var listed: Dictionary = ctx["server"].run({"cmd": "ui_list"})
-	for existing in listed.get("panels", []):
-		if existing.get("id_panel") == PANEL:
-			# Only the elements: where you put the window, and its toggle, stay.
-			panel = {"cmd": "ui_update", "id_panel": PANEL, "elements": elements}
+	if _has_panel():
+		# Only the elements: where you put the window, and its toggle, stay.
+		panel = {"cmd": "ui_update", "id_panel": PANEL, "elements": elements}
 	var reply: Dictionary = ctx["server"].run(panel)
 	if not reply.get("ok", false):
 		push_error("Slopitect terminal: the window could not be built: %s" % reply.get("error"))
