@@ -35,7 +35,7 @@ a Yes in the headset. Modules stay separate and swappable.
 | Empty room | Starts OpenXR on the Quest 1; logs GPU, runtime, resolution, frame rate, memory | Headset (72 Hz, about 71.7 fps, 34 MB) |
 | Command server | Port 7777 on loopback, JSON lines; modules register commands | Headset |
 | Modules | `game/modules.json`; a module that fails is logged and skipped | Headset |
-| Agent | Claude (Anthropic) and OpenAI-style providers; tools are the app's commands; skills are `SKILL.md` files; `allowed_tools` firewall; prompt caching and token limits; short replies (caveman skill) | Headset with a real key (needs a workspace-scoped key) |
+| Agent | Claude (Anthropic) and OpenAI-style providers; tools are the app's commands; skills are `SKILL.md` files; `allowed_tools` firewall; prompt caching and token limits; the caveman short-reply skill (off by default) | Headset with a real key (needs a workspace-scoped key) |
 | Chat window | Y opens a terminal-style window with keyboard, Send and STOP; left X always stops the agent | Headset (typing) |
 | Files | The agent's own `/sdcard/Slopitect` folder freely; anything else needs your Yes each time | Headset (`files_status`) |
 | Live code | `code_load` loads a module after your Yes; `code_unload` turns it off | PC |
@@ -73,7 +73,7 @@ All PC-tested. Most are now loaded on the headset; a module counts as Headset on
 | net | Downloads, https only and only from hosts allowed on the PC (`net_config`), redirects checked; records each file's source |
 | worlds | The Worlds window (a tile on the Menu): tabs to open or make a project's world, keep and go back to checkpoints, look through the Slopitect folder, and load or unload live modules. Built on projects, save, files and code |
 | jelly | Squash and stretch on the avatar, volume kept; needs the live avatar module's `body()`. Tested on the PC with a stand-in avatar |
-| tts | Speech out, moved out of the APK: replies read aloud through Android TTS; speed, pitch, volume and voice in the Settings window (`tts_set`); a stuck utterance is reset. On Android it plays the speech itself (synthesizeToFile through JavaClassWrapper, then an AudioStreamPlayer). Headset: the in-app playing is heard (PR #32); the voice is picked in the SherpaTTS app |
+| tts | Speech out, moved out of the APK: replies read aloud through Android TTS; speed, pitch, volume and voice in the Settings window (`tts_set`); a stuck utterance is reset. Says only the words of a reply (speakable(): no code, markdown, symbols, links or paths). On Android it plays the speech itself (synthesizeToFile through JavaClassWrapper, then an AudioStreamPlayer). Headset: the in-app playing is heard (PR #32); the voice is picked in the SherpaTTS app |
 | vtt | Hold-to-talk, moved out of the APK: whisper.cpp on the headset (local, the default) or a web service (`vtt_config`, PC only); words go into the chat window's input box. Short presses are ignored (`min_hold`); its recording status shows on the hand menu. Headset: works, still slow |
 | terminal | A command line window (`cmd field=value` or raw JSON), history, Tab, Help, Ask AI; also the chat window's Chat mode, so there's one window for typing and talking |
 | pause | The pause menu on the left home button: Resume, Save, Load, Worlds, Settings, All windows, Hand menu; and the one hand menu (Home, Settings, Undo, Redo, Tools, Terminal and each module's `hand_info()`), which snaps on and off the left hand |

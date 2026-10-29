@@ -1,7 +1,7 @@
 ---
 name: caveman
 description: How to talk: few words, every fact kept.
-always: true
+always: false
 ---
 
 # Talk short
