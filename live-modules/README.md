@@ -8,7 +8,7 @@ unless its file has changed since.
 
 | File | What it does |
 |---|---|
-| `controls.gd` | The only thing that reads the controllers: each button is bound to a named action (point, grab_left, grab_right, talk, left_menu, left_y, right_a, right_b) and each thumbstick to a stick (walk, turn). Other modules take the actions, and read how far a grip or trigger is pressed with `value()`. A button can also run a command (never a `*_config` or `agent_` one). `controls_status` shows the bindings; `controls_config` (PC only) changes them. X on the left controller always stops the agent and can't be bound |
+| `controls.gd` | The only thing that reads the controllers: each button is bound to a named action (point, grab_left, grab_right, talk, left_menu, left_y, right_a, right_b) and each thumbstick to a stick (walk, turn). Other modules take the actions, and read how far a grip or trigger is pressed with `value()`. A button can also run a command (never a `*_config` or `agent_` one) or show and hide a window. `controls_status` shows the bindings; `controls_config` (PC only) changes them. X on the left controller always stops the agent and can't be bound |
 | `ui.gd` | Every window: the Menu (a launcher with a tile for every window), wrist panel, the agent's chat window and keyboard, and any panel you or the agent add (`ui_*` commands). Title bars to carry and close windows, tabs, toggles and sliders, one theme. Needs controls.gd for its buttons. See [docs/VR-UI.md](../docs/VR-UI.md) |
 | `tools.gd` | The tool window (B on the right controller): a button for each loaded tool, the chosen tool's buttons, and one Undo / Redo list for every tool |
 | `landscape.gd` | Ground you can shape, 20 × 20 m: raise, lower, smooth and flatten brushes. It stands in for the flat floor while it's loaded |
@@ -185,7 +185,7 @@ The first time projects.gd loads, the existing saves become project `start`.
 | `physics_status` | |
 | `physics_config` (PC only) | `gravity` |
 | `controls_status` | |
-| `controls_config` (PC only) | `buttons` {"hand/button": an action, a command like `{"cmd": "spawn", "shape": "box", "position": "in_front"}`, or ""}, `sticks` {hand: name or ""}, or `reset` true |
+| `controls_config` (PC only) | `buttons` {"hand/button": an action, a command like `{"cmd": "spawn", "shape": "box", "position": "in_front"}`, a window to show and hide like `{"panel": "worlds"}`, or ""}, `sticks` {hand: name or ""}, or `reset` true |
 | `hands_status` | |
 | `aimsg_status` | |
 | `aimsg_config` (PC only) | any of `cols` (20–80 characters), `rows` (4–40 lines) |

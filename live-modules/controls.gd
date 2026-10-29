@@ -19,7 +19,9 @@ extends SlopitectModule
 # A button can also run a command instead of giving an action: bound to
 # {"cmd": ...} in controls_config, a press runs that command (with
 # "position": "in_front" turned into the point 1 m in front of you). Never
-# a *_config or agent_ command, so no button changes a setting.
+# a *_config or agent_ command, so no button changes a setting. Bound to
+# {"panel": id_panel}, a press shows that window, or hides it if it's shown
+# (any ui.gd panel, such as "chat" or "worlds").
 #
 # Two things never go through here, so no module can take them away: X on
 # the left controller always stops the agent (the agent module's), and the
@@ -58,7 +60,7 @@ func setup() -> String:
 		ctx[hand].button_pressed.connect(_on_button.bind(hand, true))
 		ctx[hand].button_released.connect(_on_button.bind(hand, false))
 	register("controls_status", _status, "what each button and thumbstick does, and the last action")
-	register("controls_config", _config, "from the PC only: buttons {\"hand/button\": action, a command {\"cmd\": ...} or \"\"}, sticks {hand: name or \"\"}, or reset true")
+	register("controls_config", _config, "from the PC only: buttons {\"hand/button\": action, a command {\"cmd\": ...}, a window {\"panel\": id_panel} or \"\"}, sticks {hand: name or \"\"}, or reset true")
 	return ""
 
 
@@ -134,6 +136,11 @@ func _on_button(button: String, hand: String, down: bool) -> void:
 
 
 func _run_bound(key: String, command: Dictionary) -> void:
+	if command.has("panel"):
+		var got: Dictionary = ctx["server"].run({"cmd": "ui_get", "id_panel": command["panel"]})
+		var request := {"cmd": "ui_show", "id_panel": command["panel"], "visible": not got.get("panel", {}).get("visible", false)}
+		_report(key, "show/hide " + command["panel"], ctx["server"].run(request) if got.get("ok", false) else got)
+		return
 	var request := command.duplicate(true)
 	if request.get("position") is String and request["position"] == "in_front":
 		var head: Transform3D = (ctx["camera"] as Node3D).global_transform
@@ -143,11 +150,14 @@ func _run_bound(key: String, command: Dictionary) -> void:
 			forward = Vector3(0, 0, -1)
 		var at := head.origin + forward.normalized()
 		request["position"] = [at.x, at.y, at.z]
-	var reply: Dictionary = ctx["server"].run(request)
-	_last = "%s (%s)" % [request["cmd"], key]
+	_report(key, request["cmd"], ctx["server"].run(request))
+
+
+func _report(key: String, what: String, reply: Dictionary) -> void:
+	_last = "%s (%s)" % [what, key]
 	if not reply.get("ok", false):
 		_last += " failed: %s" % reply.get("error", "?")
-		push_error("Slopitect controls: %s ran %s, which failed: %s" % [key, request["cmd"], reply.get("error", "?")])
+		push_error("Slopitect controls: %s ran %s, which failed: %s" % [key, what, reply.get("error", "?")])
 
 
 func _release(key: String) -> void:
@@ -221,11 +231,15 @@ func _check_button(key, action) -> String:
 	if typeof(action) == TYPE_DICTIONARY:
 		return _check_command(action)
 	if typeof(action) != TYPE_STRING or not (action.is_empty() or _good_name(action)):
-		return "an action is a name of 1 to 40 letters, digits and _ (or \"\" for none), or a command {\"cmd\": ...}"
+		return "an action is a name of 1 to 40 letters, digits and _ (or \"\" for none), a command {\"cmd\": ...} or a window {\"panel\": id_panel}"
 	return ""
 
 
 func _check_command(command: Dictionary) -> String:
+	if command.has("panel"):
+		if command.size() != 1 or not _good_name(command["panel"]):
+			return "a window binding is {\"panel\": its id_panel} and nothing else (ui_list shows the ids)"
+		return ""
 	var cmd = command.get("cmd")
 	if typeof(cmd) != TYPE_STRING or not _good_name(cmd):
 		return "a bound command needs \"cmd\": a command's name (help lists them)"

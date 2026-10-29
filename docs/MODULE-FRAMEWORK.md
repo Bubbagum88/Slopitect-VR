@@ -108,7 +108,6 @@ Needs the next APK:
 - The INFO header that code.gd reads, so a module's needs load first.
 - The avatar out of the APK: live-modules/avatar.gd (with `body()`) takes
   its place, and can only load once the built-in one is gone.
-- avatar.gd's `body()` accessor. *(Coming with the live avatar module; jelly.gd uses it.)*
 
 Until those land, the live modules use small stand-ins, marked as such in
 the code.

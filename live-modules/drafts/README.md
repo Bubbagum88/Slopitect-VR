@@ -17,7 +17,7 @@ Already reworked or dropped: `hands.gd` moved up into `live-modules/`;
 avatar already shows the agent's state); `web.gd` became
 `live-modules/net.gd` (only hosts allowed on the PC); `jelly.gd` became
 `live-modules/jelly.gd` (uses the live avatar's `body()`); `world.gd` became `live-modules/worlds.gd` (its windows as tabs, on top of `save.gd` and `projects.gd`, without its own save format);
-`controller.gd`'s "button runs a command" is now a binding kind in
+`controller.gd`'s "button runs a command" and "button shows a window" are binding kinds in
 `controls_config`, and right-stick walking is
 `{"sticks": {"right": "walk", "left": "turn"}}` there, so `controller.gd` and
 `stick_move.gd` are gone (still in git history). Panel attaching from
