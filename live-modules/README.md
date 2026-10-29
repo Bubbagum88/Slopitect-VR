@@ -16,6 +16,7 @@ unless its file has changed since.
 | `grab.gd` | Hold the grip near a shape or model to pick it up; let go to drop it (or throw it, with physics). One undo per pick-up |
 | `physics.gd` | Makes shapes and models fall, bounce and collide (the engine's own physics) once you set them dynamic; the ground is the floor or the landscape |
 | `projects.gd` | A world per project (`projects/NAME/` in the Slopitect folder: its saves, notes, and the live modules it uses). Needs save.gd |
+| `inspect.gd` | A tool for one thing at a time: point and pull the trigger to select a shape or model, then switch its physics (none, static, dynamic), whether it can be grabbed, hide it, or delete it (one undo). Show hidden brings hidden things back. The switches are kept with each project's world |
 | `assets.gd` | 3D models from [Poly Haven](https://polyhaven.com) (all CC0): search, download to the headset, place in the world. Powered by Poly Haven |
 
 A tool is any module with a `tool_info()` function, so a new tool is a new
@@ -37,6 +38,7 @@ From the platform-tools folder:
 .\adb push "C:\path\to\live-modules\grab.gd" /sdcard/Slopitect/modules/
 .\adb push "C:\path\to\live-modules\physics.gd" /sdcard/Slopitect/modules/
 .\adb push "C:\path\to\live-modules\projects.gd" /sdcard/Slopitect/modules/
+.\adb push "C:\path\to\live-modules\inspect.gd" /sdcard/Slopitect/modules/
 .\slopi.ps1 '{"cmd":"code_load","name":"tools"}'
 .\slopi.ps1 '{"cmd":"code_load","name":"landscape"}'
 .\slopi.ps1 '{"cmd":"code_load","name":"paths"}'
@@ -46,6 +48,7 @@ From the platform-tools folder:
 .\slopi.ps1 '{"cmd":"code_load","name":"grab"}'
 .\slopi.ps1 '{"cmd":"code_load","name":"physics"}'
 .\slopi.ps1 '{"cmd":"code_load","name":"projects"}'
+.\slopi.ps1 '{"cmd":"code_load","name":"inspect"}'
 ```
 
 Each `code_load` shows the code in the headset and waits for your Yes.
@@ -62,6 +65,11 @@ right trigger is the tool's.
 - **Path:** pull the trigger on the ground for each point, then press
   Finish ("Back a point" and Cancel fix mistakes). Narrower / Wider and
   Flatten are in the window.
+- **Inspect:** point at a shape or model and pull the trigger; a white
+  box shows round the one selected, and the window gets its switches:
+  No physics / Static / Dynamic (with physics.gd loaded), Grab: on/off,
+  Hide, Delete and Unselect. Hidden things can't be pointed at, so
+  "Show hidden" appears while any are hidden.
 - **Undo / Redo** in the window, or `tools_undo` / `tools_redo`, cover
   every stroke and path, including ones the agent made with commands.
 

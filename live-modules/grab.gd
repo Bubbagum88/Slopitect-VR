@@ -65,6 +65,8 @@ func _grip(hand: String, down: bool) -> void:
 	for thing in _grabbable():
 		if _held.values().any(func(h): return h["node"] == thing):
 			continue
+		if not thing.is_visible_in_tree() or thing.get_meta("slopitect_no_grab", false):
+			continue  # hidden, or made ungrabbable with the inspect tool
 		var distance := _distance_to(thing, at)
 		if distance <= best_distance:
 			best = thing
