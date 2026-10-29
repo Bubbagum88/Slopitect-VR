@@ -1,8 +1,9 @@
 extends SlopitectModule
 
 # Slopitect live module: tools.
-# A small tool window (B on the right controller shows and hides it) with a
-# button for each tool, the chosen tool's own buttons, and Undo / Redo.
+# A small tool window (B on the right controller, or its tile on the Menu,
+# shows and hides it) with a button for each tool, the chosen tool's own
+# buttons, and Undo / Redo.
 #
 # A tool is any other loaded module with a tool_info() function, so a tool
 # is its own file: load it and its button appears, unload it and it goes.
@@ -214,9 +215,10 @@ func _build_panel(infos: Dictionary) -> void:
 			var y := top - (r + 1) * (CELL.y + GAP)
 			elements.append({"type": "button", "id": "b%d_%d" % [r, c], "label": str(button.get("label", "?")).left(40),
 				"at": [x, y], "size": [CELL.x, CELL.y], "action": button["action"],
-				"color": "#2a4f8f" if r == 0 and c > 0 and ids[c - 1] == _active else "#1f2128"})
+				"color": "accent" if r == 0 and c > 0 and ids[c - 1] == _active else "button"})
+	# A title bar to carry and close it, and a tile on the Menu (ui.gd).
 	var panel := {"cmd": "ui_add", "id_panel": PANEL, "title": "Tools", "place": "front", "distance": 0.5, "height": -0.2,
-		"toggle": "right_b", "size": [width, height], "elements": elements}
+		"toggle": "right_b", "chrome": true, "menu": "Tools", "size": [width, height], "elements": elements}
 	var listed: Dictionary = ctx["server"].run({"cmd": "ui_list"})
 	for existing in listed.get("panels", []):
 		if existing.get("id_panel") == PANEL:
