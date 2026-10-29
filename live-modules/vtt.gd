@@ -10,11 +10,15 @@ extends SlopitectModule
 # command turns it on, not the agent's, not a panel button's; only the
 # controls module does.
 #
-# Two ways to turn speech into text (vtt_engine, set with vtt_config from
+# Three ways to turn speech into text (vtt_engine, set with vtt_config from
 # the PC):
 # - "local" (the default): whisper.cpp on the headset itself (the
 #   godot-whisper plugin built into the APK), with a model file in the
 #   Slopitect folder. Nothing you say leaves the headset.
+# - "sherpa": sherpa-onnx on the headset itself (its library is built into
+#   the APK), with a streaming model folder in the Slopitect folder. It
+#   works on your words while you talk, so they are ready about as soon as
+#   you let go. Nothing you say leaves the headset either.
 # - "web": a service at vtt_url that takes the OpenAI-style upload (a "file"
 #   and a "model" in a multipart form, "text" in the JSON reply): OpenAI,
 #   Groq, or a whisper.cpp server on your PC (its /inference address).
@@ -31,6 +35,10 @@ const MIN_SPEECH_SECONDS := 0.25  # less loud sound than this is a bump or a bre
 const HTTP_TIMEOUT := 60.0
 const LOCAL_CLASS := "SpeechToText"  # from the godot-whisper plugin
 const LOCAL_LANGUAGES := {"": 0, "en": 1}  # its Language enum: 0 Auto, 1 English
+const SHERPA_PACKAGE := "com.k2fsa.sherpa.onnx."  # the sherpa-onnx library's Java classes, built into the APK
+const SHERPA_THREADS := 2  # of the Quest 1's four fast cores; the game keeps the rest
+const SHERPA_RATE := 16000  # the rate its models hear at, for the quiet added at the end
+const SHERPA_TAIL_SECONDS := 0.5  # quiet added after the last word, so it is worked out too
 const TRIM_FRAME := 320  # 20 ms at 16 kHz, the steps quiet is measured in
 const TRIM_RELATIVE := 0.1  # quieter than a tenth of the loudest 20 ms counts as quiet
 const TRIM_FLOOR := 0.002  # and so does anything this quiet, however quiet the rest
@@ -40,6 +48,7 @@ const CHAT_INPUT := ["chat", "line"]  # the chat window's input box, where your 
 const DEFAULTS := {
 	"vtt_engine": "local",  # "local": on the headset itself; "web": the service at vtt_url
 	"vtt_local_model": "models/ggml-tiny.en.bin",  # for "local": a whisper.cpp model, in the Slopitect folder
+	"vtt_sherpa_model": "models/sherpa-onnx-streaming-zipformer-en-20M-2023-02-17",  # for "sherpa": a streaming model's folder, in the Slopitect folder
 	"vtt_url": "",  # for "web"; "" means hold-to-talk is off there
 	"vtt_key": "",
 	"vtt_model": "whisper-1",
@@ -59,6 +68,16 @@ var _frames := PackedVector2Array()
 var _local: Node  # godot-whisper's SpeechToText, made on first use
 var _local_model := ""  # the model file _local has loaded
 var _local_thread: Thread
+var _sherpa  # sherpa-onnx's OnlineRecognizer (a Java object), made on first use
+var _sherpa_model := ""  # the model folder _sherpa has loaded
+var _sherpa_thread: Thread  # hears one recording, from the press to the words
+var _sherpa_wake := Semaphore.new()  # posted when there is sound for it, or the press ended
+var _sherpa_lock := Mutex.new()  # guards the three below
+var _sherpa_sound := PackedFloat32Array()  # heard since the thread last took it
+var _sherpa_ending := false  # the button was let go
+var _sherpa_dropped := false  # and the press was too short: the words aren't wanted
+var _sherpa_in_build := -1  # whether the APK has sherpa-onnx: -1 not checked yet, 0 no, 1 yes
+var _lone_i := RegEx.create_from_string("\\bi\\b")  # "i", "i'm": back to capitals after lower-casing
 var _mic_player: AudioStreamPlayer
 var _http: HTTPRequest
 var _busy := false  # a recording is being turned into text
@@ -108,6 +127,11 @@ func _exit_tree() -> void:
 		_local_thread.wait_to_finish()
 	if _local:
 		_local.free()
+	if _sherpa_thread and _sherpa_thread.is_started():
+		_sherpa_end(true)
+		_sherpa_thread.wait_to_finish()
+	if _sherpa:
+		_sherpa.release()
 
 
 func settings_info() -> Dictionary:
@@ -159,7 +183,11 @@ func _process(_delta: float) -> void:
 		_stop_listening()
 		return
 	if _capture.get_frames_available() > 0:
-		_frames.append_array(_capture.get_buffer(_capture.get_frames_available()))
+		var frames := _capture.get_buffer(_capture.get_frames_available())
+		if settings["vtt_engine"] == "sherpa":
+			_sherpa_hear(frames)
+		else:
+			_frames.append_array(frames)
 
 
 # Why hold-to-talk can't work now, or "" when it can.
@@ -172,17 +200,26 @@ func _vtt_problem() -> String:
 		if not LOCAL_LANGUAGES.has(settings["vtt_language"]):
 			return "on the headset, vtt_language can only be \"en\" or \"\" (any) for now"
 		return ""
+	if settings["vtt_engine"] == "sherpa":
+		if not _sherpa_built_in():
+			return "this build has no sherpa-onnx (its library isn't in the APK)"
+		return _sherpa_files(_home_path(settings["vtt_sherpa_model"])).get("error", "")
 	if String(settings["vtt_url"]).is_empty():
 		return "set a speech-to-text service with vtt_config from the PC"
 	return ""
 
 
 func _local_model_path() -> String:
+	return _home_path(settings["vtt_local_model"])
+
+
+# A path inside the Slopitect folder.
+func _home_path(path: String) -> String:
 	var files: SlopitectModule = ctx["modules"].module("files")
 	var home: String = files.get("_home") if files else ""
 	if home.is_empty():
 		home = "/sdcard/Slopitect" if OS.get_name() == "Android" else OS.get_user_data_dir() + "/files_home"
-	return home.path_join(settings["vtt_local_model"])
+	return home.path_join(path)
 
 
 # The controls module's "talk" action: held, it records.
@@ -213,6 +250,8 @@ func _start_listening() -> void:
 	_mic_player.stream = AudioStreamMicrophone.new()
 	_capture.clear_buffer()
 	_frames = PackedVector2Array()
+	if settings["vtt_engine"] == "sherpa":
+		_sherpa_start()
 	_mic_player.play()
 	_record.set_recording_active(true)
 	_recording = true
@@ -228,11 +267,23 @@ func _stop_listening() -> void:
 	_mic_player.stop()
 	var seconds := Time.get_ticks_msec() / 1000.0 - _started_at
 	var recording := _record.get_recording()
+	var sherpa: bool = settings["vtt_engine"] == "sherpa"
 	if _capture.get_frames_available() > 0:
-		_frames.append_array(_capture.get_buffer(_capture.get_frames_available()))
+		var frames := _capture.get_buffer(_capture.get_frames_available())
+		if sherpa:
+			_sherpa_hear(frames)
+		else:
+			_frames.append_array(frames)
 	if recording == null or seconds < float(settings["min_hold"]):
 		# Nothing is turned into text: the press was too short to be talking.
+		if sherpa:
+			_busy = true  # until its thread has stopped
+			_sherpa_end(true)
 		_note("ignored a %.1f s press (shorter than min_hold, %.1f s); hold the trigger while you talk" % [seconds, float(settings["min_hold"])])
+		return
+	if sherpa:
+		_busy = true
+		_sherpa_end(false)
 		return
 	if settings["vtt_engine"] == "local":
 		_transcribe_local(_frames, seconds)
@@ -370,6 +421,212 @@ func _local_done(report: Dictionary, words: String) -> void:
 	_deliver(words)
 
 
+# --- On the headset with sherpa-onnx (vtt_engine "sherpa") ---------------------
+# One thread per recording: it loads the model if it isn't loaded yet, then
+# works on the sound as it comes in while the button is held, so when it's
+# let go only the last moment is left. The model stays loaded. Everything
+# about the attempt is logged in one line when it's done.
+
+func _sherpa_built_in() -> bool:
+	if _sherpa_in_build == -1:
+		_sherpa_in_build = 0
+		if OS.get_name() == "Android" and Engine.has_singleton("JavaClassWrapper"):
+			var found = Engine.get_singleton("JavaClassWrapper").wrap(SHERPA_PACKAGE + "OnlineRecognizer")
+			_sherpa_in_build = 1 if found != null else 0
+	return _sherpa_in_build == 1
+
+
+# The model's files in its folder: tokens.txt, and a transducer's encoder,
+# decoder and joiner (*.onnx). Where a part comes both ways, the int8
+# encoder and joiner and the full decoder are used, as in sherpa-onnx's own
+# Android app. {"error": why} when the folder doesn't have them.
+func _sherpa_files(folder: String) -> Dictionary:
+	if not DirAccess.dir_exists_absolute(folder):
+		return {"error": "no model folder at %s: put a sherpa-onnx streaming model there (like sherpa-onnx-streaming-zipformer-en-20M-2023-02-17), or set vtt_sherpa_model" % folder}
+	var names := DirAccess.get_files_at(folder)
+	if not "tokens.txt" in names:
+		return {"error": "the model folder %s has no tokens.txt" % folder}
+	var found := {"tokens": folder.path_join("tokens.txt")}
+	for part in ["encoder", "decoder", "joiner"]:
+		var full := []
+		var int8 := []
+		for name in names:
+			if name.begins_with(part) and name.ends_with(".onnx"):
+				(int8 if name.ends_with(".int8.onnx") else full).append(name)
+		full.sort()
+		int8.sort()
+		var choice: Array = full if part == "decoder" else int8
+		if choice.is_empty():
+			choice = int8 if part == "decoder" else full
+		if choice.is_empty():
+			return {"error": "the model folder %s has no %s*.onnx (only streaming transducer models, with an encoder, decoder and joiner, work for now)" % [folder, part]}
+		found[part] = folder.path_join(choice[0])
+	return found
+
+
+# The press began: a thread starts hearing it.
+func _sherpa_start() -> void:
+	_sherpa_lock.lock()
+	_sherpa_sound = PackedFloat32Array()
+	_sherpa_ending = false
+	_sherpa_dropped = false
+	_sherpa_lock.unlock()
+	_sherpa_thread = Thread.new()
+	_sherpa_thread.start(_sherpa_work.bind(_home_path(settings["vtt_sherpa_model"]), int(AudioServer.get_mix_rate())))
+
+
+# Hands the microphone's new sound to the thread, as one channel.
+func _sherpa_hear(frames: PackedVector2Array) -> void:
+	var sound := PackedFloat32Array()
+	sound.resize(frames.size())
+	for i in frames.size():
+		sound[i] = (frames[i].x + frames[i].y) * 0.5
+	_sherpa_lock.lock()
+	_sherpa_sound.append_array(sound)
+	_sherpa_lock.unlock()
+	_sherpa_wake.post()
+
+
+# The press ended; dropped: its words aren't wanted.
+func _sherpa_end(dropped: bool) -> void:
+	_sherpa_lock.lock()
+	_sherpa_ending = true
+	_sherpa_dropped = dropped
+	_sherpa_lock.unlock()
+	_sherpa_wake.post()
+
+
+# Runs on the thread: touches only _sherpa, _sherpa_model and the guarded values.
+func _sherpa_work(folder: String, rate: int) -> void:
+	var report := {"engine": "sherpa", "model": folder, "mix_rate": rate, "threads": SHERPA_THREADS}
+	if folder != _sherpa_model:
+		var started := Time.get_ticks_msec()
+		var problem := _sherpa_load(folder, report)
+		report["load_ms"] = Time.get_ticks_msec() - started
+		if not problem.is_empty():
+			report["error"] = problem
+			_sherpa_wait_end()
+			call_deferred("_sherpa_done", report, "")
+			return
+	var stream = _sherpa.createStream("")
+	var heard := 0
+	var peak := 0.0
+	var decode_ms := 0
+	var ended_at := 0
+	var dropped := false
+	while true:
+		_sherpa_wake.wait()
+		_sherpa_lock.lock()
+		var sound := _sherpa_sound
+		_sherpa_sound = PackedFloat32Array()
+		var ending := _sherpa_ending
+		dropped = _sherpa_dropped
+		_sherpa_lock.unlock()
+		if dropped:
+			break
+		if ending and ended_at == 0:
+			ended_at = Time.get_ticks_msec()
+		if not sound.is_empty():
+			for sample in sound:
+				peak = maxf(peak, absf(sample))
+			heard += sound.size()
+			stream.acceptWaveform(sound, rate)
+		if ending:
+			var tail := PackedFloat32Array()
+			tail.resize(int(SHERPA_TAIL_SECONDS * SHERPA_RATE))
+			stream.acceptWaveform(tail, SHERPA_RATE)
+			stream.inputFinished()
+		var started := Time.get_ticks_msec()
+		while _sherpa.isReady(stream):
+			_sherpa.decode(stream)
+		decode_ms += Time.get_ticks_msec() - started
+		if ending:
+			break
+	var words := ""
+	if not dropped:
+		words = String(_sherpa.getResult(stream).getText())
+	stream.release()
+	report["heard_s"] = snappedf(heard / float(maxi(rate, 1)), 0.01)
+	report["peak"] = snappedf(peak, 0.001)  # how loud it got (0 to 1): near 0 means the microphone gave silence
+	report["decode_ms"] = decode_ms
+	if heard > 0:
+		report["x_realtime"] = snappedf(decode_ms / (heard * 1000.0 / rate), 0.01)  # under 1 keeps up with you
+	if ended_at > 0:
+		report["after_letting_go_ms"] = Time.get_ticks_msec() - ended_at  # how long the words took once you let go
+	report["dropped"] = dropped
+	call_deferred("_sherpa_done", report, words)
+
+
+# Runs on the thread: makes the recognizer for the model in folder; "" when
+# it worked, or why not.
+func _sherpa_load(folder: String, report: Dictionary) -> String:
+	var files := _sherpa_files(folder)
+	if files.has("error"):
+		return files["error"]
+	report["files"] = files.values().map(func(path: String) -> String: return path.get_file())
+	var wrapper = Engine.get_singleton("JavaClassWrapper")
+	var config = wrapper.wrap(SHERPA_PACKAGE + "OnlineRecognizerConfig").OnlineRecognizerConfig()
+	if config == null:
+		return "couldn't make an OnlineRecognizerConfig (%s)" % _java_error(wrapper)
+	var model = config.getModelConfig()
+	var transducer = model.getTransducer()
+	transducer.setEncoder(files["encoder"])
+	transducer.setDecoder(files["decoder"])
+	transducer.setJoiner(files["joiner"])
+	model.setTokens(files["tokens"])
+	model.setNumThreads(SHERPA_THREADS)
+	# The press marks where talking ends, not a pause.
+	config.setEnableEndpoint(false)
+	if _sherpa:
+		_sherpa.release()
+		_sherpa = null
+		_sherpa_model = ""
+	_sherpa = wrapper.wrap(SHERPA_PACKAGE + "OnlineRecognizer").OnlineRecognizer(null, config)
+	if _sherpa == null:
+		return "couldn't load the model (%s)" % _java_error(wrapper)
+	_sherpa_model = folder
+	return ""
+
+
+# Runs on the thread: when the model didn't load, waits out the press.
+func _sherpa_wait_end() -> void:
+	while true:
+		_sherpa_wake.wait()
+		_sherpa_lock.lock()
+		var ending := _sherpa_ending
+		_sherpa_sound = PackedFloat32Array()
+		_sherpa_lock.unlock()
+		if ending:
+			return
+
+
+func _java_error(wrapper) -> String:
+	var e = wrapper.get_exception()
+	return "no Java exception" if e == null else String(e.toString())
+
+
+func _sherpa_done(report: Dictionary, words: String) -> void:
+	_sherpa_thread.wait_to_finish()
+	_sherpa_thread = null
+	_busy = false
+	print("Slopitect vtt: on-headset speech-to-text: ", JSON.stringify(report))
+	if report.has("error"):
+		_note("on-headset speech-to-text (sherpa) failed: " + String(report["error"]))
+		return
+	if report["dropped"]:
+		return
+	words = words.strip_edges()
+	if words.is_empty():
+		_note("on-headset speech-to-text heard nothing")
+		return
+	# Its English models write in capitals.
+	if words == words.to_upper():
+		words = _lone_i.sub(words.to_lower(), "I", true)
+		words = words.left(1).to_upper() + words.substr(1)
+	_note("heard: " + words)
+	_deliver(words)
+
+
 func _transcribe(recording: AudioStreamWAV) -> void:
 	_busy = true
 	var path := OS.get_cache_dir().path_join("slopitect-speech.wav") if OS.get_cache_dir() != "" else "user://speech.wav"
@@ -466,6 +723,10 @@ func _status(_request: Dictionary) -> Dictionary:
 		"local_model": _local_model_path(),
 		"local_model_found": FileAccess.file_exists(_local_model_path()),
 		"local_model_loaded": not _local_model.is_empty(),
+		"sherpa_in_build": _sherpa_built_in(),
+		"sherpa_model": _home_path(settings["vtt_sherpa_model"]),
+		"sherpa_model_problem": _sherpa_files(_home_path(settings["vtt_sherpa_model"])).get("error", ""),
+		"sherpa_model_loaded": not _sherpa_model.is_empty(),
 		"listening": _recording,
 		"transcribing": _busy,
 		"last": _last,
@@ -509,6 +770,11 @@ func _change(request: Dictionary) -> Dictionary:
 		_local = null
 		_local_model = ""
 		print("Slopitect vtt: on-headset speech-to-text model unloaded")
+	if settings["vtt_engine"] != "sherpa" and _sherpa and not _busy and not _recording:
+		_sherpa.release()
+		_sherpa = null
+		_sherpa_model = ""
+		print("Slopitect vtt: sherpa-onnx speech-to-text model unloaded")
 	var shown := settings.duplicate()
 	shown["vtt_key"] = "(set)" if not String(settings["vtt_key"]).is_empty() else "(not set)"
 	return {"ok": true, "settings": shown}
@@ -526,8 +792,11 @@ func _check_setting(key: String, value) -> String:
 			if typeof(value) != TYPE_STRING or value.length() > 300:
 				return "\"%s\" must be text" % key
 		"vtt_engine":
-			if not value in ["web", "local"]:
-				return "\"vtt_engine\" must be \"local\" (on the headset) or \"web\" (the service at vtt_url)"
+			if not value in ["web", "local", "sherpa"]:
+				return "\"vtt_engine\" must be \"local\" (whisper.cpp on the headset), \"sherpa\" (sherpa-onnx on the headset) or \"web\" (the service at vtt_url)"
+		"vtt_sherpa_model":
+			if typeof(value) != TYPE_STRING or value.is_empty() or value.begins_with("/") or ".." in value or "\\" in value or "://" in value:
+				return "\"vtt_sherpa_model\" must be a model's folder inside the Slopitect folder, like \"models/sherpa-onnx-streaming-zipformer-en-20M-2023-02-17\""
 		"vtt_local_model":
 			if typeof(value) != TYPE_STRING or not value.ends_with(".bin") or value.begins_with("/") or ".." in value or "\\" in value or "://" in value:
 				return "\"vtt_local_model\" must be a .bin file inside the Slopitect folder, like \"models/ggml-tiny.en.bin\""

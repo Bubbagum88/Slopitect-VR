@@ -14,7 +14,7 @@ Three levels of "works" are used, and kept apart on purpose:
 
 A VR sandbox for the Oculus Quest 1 that an AI agent changes while you
 stand in it. The APK is a small skeleton (command server, module loader,
-safety window, agent; the whisper plugin and microphone permission for
+safety window, agent; the whisper plugin, the sherpa-onnx library and microphone permission for
 speech to text). Everything else is a **live module**:
 a GDScript file pushed to the headset and loaded while the app runs, after
 a Yes in the headset. Modules stay separate and swappable.
@@ -74,7 +74,7 @@ All PC-tested. Most are now loaded on the headset; a module counts as Headset on
 | worlds | The Worlds window (a tile on the Menu): tabs to open or make a project's world, keep and go back to checkpoints, look through the Slopitect folder, and load or unload live modules. Built on projects, save, files and code |
 | jelly | Squash and stretch on the avatar, volume kept; needs the live avatar module's `body()`. Tested on the PC with a stand-in avatar |
 | tts | Speech out, moved out of the APK: replies read aloud through Android TTS; speed, pitch, volume and voice in the Settings window (`tts_set`); a stuck utterance is reset. Says only the words of a reply (speakable(): no code, markdown, symbols, links or paths). On Android it plays the speech itself (synthesizeToFile through JavaClassWrapper, then an AudioStreamPlayer). Headset: the in-app playing is heard (PR #32); the voice is picked in the SherpaTTS app |
-| vtt | Hold-to-talk, moved out of the APK: whisper.cpp on the headset (local, the default) or a web service (`vtt_config`, PC only); words go into the chat window's input box. Short presses are ignored (`min_hold`); its recording status shows on the hand menu. Headset: works, still slow |
+| vtt | Hold-to-talk, moved out of the APK: whisper.cpp on the headset (local, the default), sherpa-onnx streaming on the headset (`sherpa`: built and tested on the PC with a stand-in for the library, not yet on the headset; needs the new APK) or a web service (`vtt_config`, PC only); words go into the chat window's input box. Short presses are ignored (`min_hold`); its recording status shows on the hand menu. Headset: works, still slow |
 | terminal | A command line window (`cmd field=value` or raw JSON), history, Tab, Help, Ask AI; also the chat window's Chat mode, so there's one window for typing and talking |
 | pause | The pause menu on the left home button: Resume, Save, Load, Worlds, Settings, All windows, Hand menu; and the one hand menu (Home, Settings, Undo, Redo, Tools, Terminal and each module's `hand_info()`), which snaps on and off the left hand |
 | settings | The Settings window, built from each loaded module's `settings_info()`; nothing in it names a module |
