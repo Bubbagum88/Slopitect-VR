@@ -19,6 +19,7 @@ unless its file has changed since.
 | `physics.gd` | Makes shapes and models fall, bounce and collide (the engine's own physics) once you set them dynamic; the ground is the floor or the landscape |
 | `projects.gd` | A world per project (`projects/NAME/` in the Slopitect folder: its saves, notes, and the live modules it uses). Needs save.gd |
 | `inspect.gd` | A tool for one thing at a time: point and pull the trigger to select a shape or model, then switch its physics (none, static, dynamic), whether it can be grabbed, hide it, or delete it (one undo). Show hidden brings hidden things back. The switches are kept with each project's world |
+| `avatar.gd` | The agent's avatar (it used to be built into the APK): a red cube with a face that thinks while the agent works, shows emotions (`avatar_emotion`), moves its mouth with the words while the speech engine talks, and shows replies a page at a time in a speech bubble above its head, which waits at the edge of your view when the avatar is out of sight. Outfits are made of simple shapes (`avatar_outfit_add`). Other modules use `body()`, `say()`, `set_state()`, `set_emotion()` and `speaking()` |
 | `assets.gd` | 3D models from [Poly Haven](https://polyhaven.com) (all CC0): search, download to the headset, place in the world. Powered by Poly Haven |
 
 A tool is any module with a `tool_info()` function, so a new tool is a new
@@ -43,6 +44,7 @@ From the platform-tools folder:
 .\adb push "C:\path\to\live-modules\physics.gd" /sdcard/Slopitect/modules/
 .\adb push "C:\path\to\live-modules\projects.gd" /sdcard/Slopitect/modules/
 .\adb push "C:\path\to\live-modules\inspect.gd" /sdcard/Slopitect/modules/
+.\adb push "C:\path\to\live-modules\avatar.gd" /sdcard/Slopitect/modules/
 .\slopi.ps1 '{"cmd":"code_load","name":"controls"}'
 .\slopi.ps1 '{"cmd":"code_load","name":"ui"}'
 .\slopi.ps1 '{"cmd":"code_load","name":"tools"}'
@@ -55,6 +57,7 @@ From the platform-tools folder:
 .\slopi.ps1 '{"cmd":"code_load","name":"physics"}'
 .\slopi.ps1 '{"cmd":"code_load","name":"projects"}'
 .\slopi.ps1 '{"cmd":"code_load","name":"inspect"}'
+.\slopi.ps1 '{"cmd":"code_load","name":"avatar"}'
 ```
 
 Each `code_load` shows the code in the headset and waits for your Yes

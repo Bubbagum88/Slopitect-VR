@@ -98,7 +98,8 @@ Needs the next APK:
   and is PC only.
 - Signals from agent.gd (reply, busy, error), so modules stop polling.
 - The INFO header that code.gd reads, so a module's needs load first.
-- avatar.gd's `body()` accessor.
+- The avatar out of the APK: live-modules/avatar.gd (with `body()`) takes
+  its place, and can only load once the built-in one is gone.
 
 Until those land, the live modules use small stand-ins, marked as such in
 the code.
