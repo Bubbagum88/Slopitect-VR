@@ -31,6 +31,7 @@ unless its file has changed since.
 | `aimsg.gd` | Makes the chat log easier to read: "you>" and "ai>" tags, the agent's words wrapped, markdown marks taken out, code marked with "\|", tool calls and thinking on one short line. It changes no window: the chat log's source asks for it (`"format": "aimsg"`, which needs the vrui.gd from the VR UI work), and shows plain lines when it isn't loaded. Width and height from the PC (`aimsg_config`) |
 | `net.gd` | Downloads from the internet, only https and only from hosts allowed on the PC (`net_config`; Poly Haven's to start). Files go in `downloads/HOST/` with a `.source.json` saying where they came from. Other modules download through its `fetch()` |
 | `worlds.gd` | The Worlds window, from its tile on the Menu. Tabs: Worlds (open a project's world or make a new one), Checkpoints (keep the world now, go back, delete), Files (look through the Slopitect folder), Modules (load, reload or unload live modules). It keeps nothing itself; it shows and runs projects, save, files and code. Needs vrui.gd; a tab whose module is missing says so |
+| `perf.gd` | How well the app runs, from inside it: `perf_status` (frame rate, frame times and hitches over 10 s, script and physics CPU time, draw calls, objects, memory), `perf_watch` then `perf_modules` (each module's `_process`/`_physics_process` cost per frame, costliest first), `perf_load` (compile time of each live module's file). Timing is off until `perf_watch` |
 | `jelly.gd` | The avatar squashes and stretches like jelly as it moves, keeping its volume; `jelly_poke` wobbles it. Needs the live avatar module (its `body()`); spring from the PC (`jelly_config`) |
 | `assets.gd` | 3D models from [Poly Haven](https://polyhaven.com) (all CC0): search, download to the headset, place in the world. Powered by Poly Haven |
 | `memory.gd` | The agent's memory between conversations: notes it keeps (facts, decisions, troubleshooting, coding techniques), each question you asked in a world with its answer, tools and errors, older ones folded into digests, and each tool's failures. One memory per world (project) plus a global one. Keys and personal info are cleaned out before anything is kept |
@@ -243,6 +244,10 @@ The first time projects.gd loads, the existing saves become project `start`.
 | `net_config` (PC only) | `hosts` [names], or `add` / `remove` (a host) |
 | `worlds_do` | `act`: toggle, show (optional `page`: Worlds, Checkpoints, Files, Modules), refresh, new_project / open_project (`name`), checkpoint (optional `label`), restore / delete_checkpoint (`checkpoint`), load_module / unload_module (`name`), folder (`path`, optional `page`), modules_page (`page`) |
 | `worlds_status` | |
+| `perf_status` | |
+| `perf_watch` | `on` (true/false, default true) |
+| `perf_modules` | optional `reset` true |
+| `perf_load` | optional `name` (one module) |
 | `jelly_poke` | optional `strength` (0.1–1) |
 | `jelly_status` | |
 | `jelly_config` (PC only) | any of `stiffness` (20–400), `damping` (1–30) |
