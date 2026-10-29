@@ -271,22 +271,24 @@ func _worlds_elements() -> Array:
 
 # The hand menu: a few big buttons above the left controller, at the hand
 # window's half scale: Home, Settings, Undo / Redo, then a button for each
-# loaded module with hand_info() (the terminal, the Tools menu; later
-# textures, assets...). hand_info() returns {"id", "label", "order"
-# (optional, lower first), and "panel": an id_panel it shows and hides, or
-# "action": a command}. Only the elements change after the menu is first
-# added, so a hand menu you carried off stays where you put it.
+# loaded module with hand_info() (the terminal, the Tools menu, the
+# Library's Textures / Assets / Prefabs). hand_info() returns {"id", "label",
+# "order" (optional, lower first), and "panel": an id_panel it shows and
+# hides, or "action": a command}, or a list of those for several buttons.
+# Only the elements change after the menu is first added, so a hand menu
+# you carried off stays where you put it.
 func _hand_items() -> Array:
 	var items := []
 	for child in ctx["modules"].get_children():
 		if child == self or not child.has_method("hand_info"):
 			continue
-		var info = child.call("hand_info")
-		if typeof(info) != TYPE_DICTIONARY or typeof(info.get("id")) != TYPE_STRING or typeof(info.get("label")) != TYPE_STRING \
-				or not (typeof(info.get("panel")) == TYPE_STRING or typeof(info.get("action")) == TYPE_DICTIONARY):
-			push_error("Slopitect pause: %s's hand_info() needs id, label, and panel or action" % child.name)
-			continue
-		items.append(info)
+		var infos = child.call("hand_info")
+		for info in (infos if typeof(infos) == TYPE_ARRAY else [infos]):
+			if typeof(info) != TYPE_DICTIONARY or typeof(info.get("id")) != TYPE_STRING or typeof(info.get("label")) != TYPE_STRING \
+					or not (typeof(info.get("panel")) == TYPE_STRING or typeof(info.get("action")) == TYPE_DICTIONARY):
+				push_error("Slopitect pause: %s's hand_info() needs id, label, and panel or action" % child.name)
+				continue
+			items.append(info)
 	items.sort_custom(func(a, b): return [a.get("order", 100), a["id"]] < [b.get("order", 100), b["id"]])
 	return items
 

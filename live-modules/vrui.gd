@@ -47,7 +47,9 @@ extends SlopitectModule
 # "at", so a menu is a list of what's in it. A button with "open" opens
 # another panel in its place, with a back arrow: menus inside menus.
 # A text element with "scroll" keeps its newest lines in view (a terminal);
-# ui_scroll moves it back and forth. Docs: docs/VR-UI.md.
+# ui_scroll moves it back and forth. A button with an "image" (a picture
+# file in the Slopitect folder) shows it over its label: a tile in a
+# browser. Docs: docs/VR-UI.md.
 
 const SAVE_PATH := "user://ui.json"
 const CONFIG_PATH := "user://ui_config.json"  # the theme, from the PC only
@@ -117,6 +119,9 @@ const FOLLOW_SPEED := 4.0
 const APPS_SECONDS := 0.5
 const APP_CELL := Vector2(0.15, 0.07)
 const TEXT_PIXEL := 0.0006
+const IMAGE_TYPES := ["png", "jpg", "jpeg", "webp"]
+const IMAGE_PX := 160  # a button's picture is shrunk to this many pixels across, at most
+const MAX_IMAGES := 120  # pictures kept loaded; more and the oldest go
 
 var panels: Array = []  # [panel dictionaries], see _check_panel
 # While a question from the confirm module is up, the pointer only works on
@@ -152,6 +157,7 @@ var _apps_signature := ""
 var _since_apps := APPS_SECONDS
 var _following := {}  # id_panel -> the Transform3D a follow panel is easing to
 var _home_ghost: MeshInstance3D  # the outline of a hand panel's spot while you carry it near
+var _images := {}  # path -> {"time": modified, "texture": ImageTexture or null}, see _image
 
 
 func setup() -> String:
@@ -921,6 +927,27 @@ func set_text(id_panel: String, id_element: String, text: String) -> bool:
 	return true
 
 
+# A button's picture file changed (a thumbnail finished downloading): every
+# button showing it is drawn again, without rebuilding its panel.
+func reload_image(path: String) -> void:
+	_images.erase(path)
+	for id_panel in _views:
+		var changed := false
+		for control in _views[id_panel]["controls"].values():
+			var picture := _picture_of(control)
+			if picture and picture.get_meta("image", "") == path:
+				picture.texture = _image(path)
+				changed = true
+		if changed:
+			_redraw(id_panel)
+
+
+func _picture_of(control: Control) -> TextureRect:
+	if control.get_child_count() == 0 or not control.get_child(0) is VBoxContainer:
+		return null
+	return control.get_child(0).get_node_or_null("Image") as TextureRect
+
+
 func _max_length(key: String) -> int:
 	var parts := key.split("/")
 	var element := _element(parts[0], parts[1])
@@ -1380,7 +1407,7 @@ func _check_element(data: Dictionary, panel: Dictionary, check_actions: bool, de
 		"grid": ["type", "id", "children", "gap", "columns"],
 	}
 	fields["text"].append_array(["scroll", "height"])
-	fields["button"].append("open")
+	fields["button"].append_array(["open", "image"])
 	for key in data:
 		if not key in fields[type] and not key in ["page", "grow"]:
 			return {"error": "unknown field \"%s\" for a %s (it has %s)" % [key, type, ", ".join(fields[type])]}
@@ -1499,6 +1526,10 @@ func _check_element(data: Dictionary, panel: Dictionary, check_actions: bool, de
 				if typeof(element["value"]) not in [TYPE_INT, TYPE_FLOAT]:
 					return {"error": "\"value\" must be a number"}
 				element["value"] = clampf(element["value"], element["min"], element["max"])
+			if data.has("image"):
+				if type != "button" or not _good_image_path(data["image"]):
+					return {"error": "\"image\" must be a .png, .jpg or .webp file in the Slopitect folder (%s/...) or user://" % _slopitect_home()}
+				element["image"] = data["image"]
 			if data.has("clear_input"):
 				if not _good_id(data["clear_input"]):
 					return {"error": "\"clear_input\" must be the id of an input box on this panel"}
@@ -1980,9 +2011,28 @@ func _control_for(id_panel: String, element: Dictionary, view: Dictionary, size:
 		"button":
 			control = PanelContainer.new()
 			_pointable(view, control, id_panel, element["id"], "element", "", color, BUTTON_RADIUS)
-			var label := _label(element["label"], _button_font(size), _theme_color("text"), false, "center")
+			var font := _button_font(size) if not element.has("image") else mini(_button_font(size), theme_values["font_small"])
+			var label := _label(element["label"], font, _theme_color("text"), false, "center")
 			_one_line(label, size.x - 2 * _px(BUTTON_PADDING) if size.x > 0.0 else 0.0)
-			control.add_child(label)
+			if element.has("image"):
+				# The picture fills what the label leaves; until its file is
+				# there (a thumbnail still downloading) the space stays empty.
+				var stack := VBoxContainer.new()
+				stack.mouse_filter = Control.MOUSE_FILTER_IGNORE
+				stack.add_theme_constant_override("separation", _px(BUTTON_PADDING) / 2)
+				var picture := TextureRect.new()
+				picture.name = "Image"
+				picture.mouse_filter = Control.MOUSE_FILTER_IGNORE
+				picture.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+				picture.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+				picture.size_flags_vertical = Control.SIZE_EXPAND_FILL
+				picture.texture = _image(element["image"])
+				picture.set_meta("image", element["image"])
+				stack.add_child(picture)
+				stack.add_child(label)
+				control.add_child(stack)
+			else:
+				control.add_child(label)
 		"input":
 			control = PanelContainer.new()
 			_pointable(view, control, id_panel, element["id"], "element", "", _theme_color("input_bg"), BUTTON_RADIUS * 0.5)
@@ -2272,6 +2322,49 @@ func _font_px(font_size: int) -> int:
 func _button_font(size: Vector2) -> int:
 	var fit: int = int(size.y / (TEXT_PIXEL * PX_PER_M) * 0.5) if size.y > 0.0 else theme_values["font_body"]
 	return clampi(fit, 16, theme_values["font_body"])
+
+
+# The Slopitect folder, where every module keeps its files.
+func _slopitect_home() -> String:
+	return "/sdcard/Slopitect" if OS.get_name() == "Android" else OS.get_user_data_dir() + "/files_home"
+
+
+func _good_image_path(path) -> bool:
+	if typeof(path) != TYPE_STRING or path.length() > 300 or ".." in path or not path.get_extension().to_lower() in IMAGE_TYPES:
+		return false
+	return path.begins_with("user://") or path.begins_with(_slopitect_home() + "/")
+
+
+# A picture file as a small texture, or null while it isn't there or isn't
+# a picture. Kept until the file changes, and shrunk to IMAGE_PX so a page
+# of thumbnails stays light on the Quest 1. The file's first bytes say what
+# it is, whatever its name.
+func _image(path: String) -> ImageTexture:
+	var time := FileAccess.get_modified_time(path) if FileAccess.file_exists(path) else 0
+	if _images.has(path) and _images[path]["time"] == time:
+		return _images[path]["texture"]
+	var texture: ImageTexture = null
+	if time != 0:
+		var bytes := FileAccess.get_file_as_bytes(path)
+		var image := Image.new()
+		var loaded := ERR_FILE_UNRECOGNIZED
+		if bytes.size() > 8 and bytes[0] == 0x89 and bytes[1] == 0x50:
+			loaded = image.load_png_from_buffer(bytes)
+		elif bytes.size() > 3 and bytes[0] == 0xFF and bytes[1] == 0xD8:
+			loaded = image.load_jpg_from_buffer(bytes)
+		elif bytes.size() > 12 and bytes.slice(8, 12).get_string_from_ascii() == "WEBP":
+			loaded = image.load_webp_from_buffer(bytes)
+		if loaded == OK and not image.is_empty():
+			var longest := maxi(image.get_width(), image.get_height())
+			if longest > IMAGE_PX:
+				image.resize(maxi(1, image.get_width() * IMAGE_PX / longest), maxi(1, image.get_height() * IMAGE_PX / longest), Image.INTERPOLATE_BILINEAR)
+			texture = ImageTexture.create_from_image(image)
+		else:
+			push_error("Slopitect ui: %s isn't a picture it can read" % path)
+	if _images.size() >= MAX_IMAGES and not _images.has(path):
+		_images.erase(_images.keys()[0])
+	_images[path] = {"time": time, "texture": texture}
+	return texture
 
 
 func _flat_material(color: Color) -> StandardMaterial3D:
