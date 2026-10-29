@@ -208,6 +208,15 @@ func hold(node: Node3D, on: bool) -> void:
 		body.freeze = on
 
 
+# For the joints module: the body standing in for a thing (null when its
+# physics is off). Frozen means static, or held in a hand (kinematic).
+func body(node: Node3D) -> RigidBody3D:
+	if node == null or not _bodies.has(String(node.name)) or _bodies[String(node.name)]["node"] != node:
+		return null
+	var found: RigidBody3D = _bodies[String(node.name)]["body"]
+	return found if is_instance_valid(found) else null
+
+
 func throw(node: Node3D, velocity: Vector3) -> void:
 	var node_name := String(node.name)
 	if _bodies.has(node_name) and _settings[node_name]["mode"] == "dynamic":
