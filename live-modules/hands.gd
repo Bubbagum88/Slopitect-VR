@@ -11,8 +11,13 @@ extends SlopitectModule
 # from the controls module (value()); without it the hands stay open. The
 # boxes come back when the module is unloaded.
 # Hide hands: a switch in the Settings window (hands_hide, also usable by the
-# agent). The hands also hide by themselves while the beatsaber module is
-# loaded, and come back when it is unloaded.
+# agent); it hides the beatsaber module's sabers too.
+# Hands or sabers: a choice in the Settings window (hands_style, also usable
+# by the agent; isaac's choice, 2026-10-29, taking over from the headset
+# agent's hand_style.gd). With sabers chosen and the beatsaber module
+# loaded, its sabers show and the hands hide; with hands chosen, the hands
+# show and beatsaber's sabers hide (and cut nothing). Without beatsaber the
+# hands show either way. beatsaber asks sabers_shown().
 # The colours and the hide switch are kept in the app's own storage (user://hands.json).
 # How the hands sit on the controllers (grip_angle, grip_offset, rest_curl) is
 # tuned from the PC with hands_config and kept there too.
@@ -23,6 +28,7 @@ const DEFAULTS := {
 	"nails_left": ["#ff3b7a", "#ff3b7a", "#ff3b7a", "#ff3b7a", "#ff3b7a"],
 	"nails_right": ["#ff3b7a", "#ff3b7a", "#ff3b7a", "#ff3b7a", "#ff3b7a"],
 	"hidden": false,
+	"style": "hand",
 	"grip_angle": 45.0,
 	"grip_offset": [0.0, -1.8, 1.8],
 	"rest_curl": 0.5,
@@ -89,8 +95,9 @@ func setup() -> String:
 	_apply_visible()
 	register("hands_status", _status, "the hands' colours")
 	register("hands_colours", _colours_command, "change the hands' colours in the headset (a comfort setting): any of skin (#rrggbb), nails (#rrggbb, every nail)")
+	register("hands_style", _style_command, "hands or the beatsaber sabers in the headset (a comfort setting): style (hand or saber)")
 	register("hands_hide", _hide_command, "show or hide the hands in the headset (a comfort setting): hidden (true or false)")
-	register("hands_config", _config, "from the PC only: any of skin (#rrggbb), nails (#rrggbb, or 1 to 5 of them thumb to pinky, for both hands), nails_left, nails_right, hidden (true/false), grip_angle (degrees the handle tilts up, -30 to 90), grip_offset ([x, y, z] cm from the controller's point to the handle, right hand), rest_curl (0 to 1, how far the fingers wrap with nothing pressed), or reset true")
+	register("hands_config", _config, "from the PC only: any of skin (#rrggbb), nails (#rrggbb, or 1 to 5 of them thumb to pinky, for both hands), nails_left, nails_right, hidden (true/false), style (hand or saber), grip_angle (degrees the handle tilts up, -30 to 90), grip_offset ([x, y, z] cm from the controller's point to the handle, right hand), rest_curl (0 to 1, how far the fingers wrap with nothing pressed), or reset true")
 	return ""
 
 
@@ -143,12 +150,18 @@ func _process(delta: float) -> void:
 
 # --- Hiding ----------------------------------------------------------------------------
 
-# The hands show unless the person hid them in Settings or beatsaber is loaded.
+# The hands show unless the person hid them in Settings or chose sabers while
+# beatsaber is loaded.
 func _apply_visible() -> void:
-	var show: bool = not (settings["hidden"] == true or _beat)
+	var show: bool = not (settings["hidden"] == true or (_beat and settings["style"] == "saber"))
 	for h in _hands:
 		if is_instance_valid(h["node"]):
 			(h["node"] as Node3D).visible = show
+
+
+# For the beatsaber module: whether its sabers should show.
+func sabers_shown() -> bool:
+	return settings["style"] == "saber" and settings["hidden"] != true
 
 
 # --- Building a hand -------------------------------------------------------------------
@@ -264,6 +277,9 @@ func settings_info() -> Dictionary:
 			options.append({"label": colour_name, "value": part[2][colour_name], "color": part[2][colour_name]})
 		out.append({"id": part[0], "type": "choice", "label": part[1], "value": part[3], "options": options, "columns": 3,
 			"set": {"cmd": "hands_colours", part[0]: "{value}"}})
+	out.append({"id": "style", "type": "choice", "label": "Hands or sabers", "value": settings["style"], "columns": 2,
+		"options": [{"label": "Hands", "value": "hand"}, {"label": "Sabers", "value": "saber"}],
+		"set": {"cmd": "hands_style", "style": "{value}"}})
 	out.append({"id": "hidden", "type": "toggle", "label": "Hide hands", "value": settings["hidden"],
 		"set": {"cmd": "hands_hide", "hidden": "{value}"}})
 	return {"title": "Hands", "order": 30, "settings": out}
@@ -280,6 +296,13 @@ func _colours_command(request: Dictionary) -> Dictionary:
 			return {"ok": false, "error": "hands_colours changes skin or nails, each a colour like \"#e0ac80\""}
 		changes[key] = request[key]
 	return _config(changes)
+
+
+# Hands or sabers, in the headset and from the agent.
+func _style_command(request: Dictionary) -> Dictionary:
+	if not request.get("style") in ["hand", "saber"]:
+		return {"ok": false, "error": "hands_style needs style: hand or saber"}
+	return _config({"style": request["style"]})
 
 
 # The hide switch, in the headset and from the agent.
@@ -326,6 +349,10 @@ func _config(request: Dictionary) -> Dictionary:
 				if typeof(on) != TYPE_BOOL:
 					return {"ok": false, "error": "\"hidden\" must be true or false"}
 				changed["hidden"] = on
+			"style":
+				if not request[key] in ["hand", "saber"]:
+					return {"ok": false, "error": "\"style\" must be hand or saber"}
+				changed["style"] = request[key]
 			"grip_angle":
 				if not _number(request[key]) or float(request[key]) < GRIP_ANGLE_RANGE[0] or float(request[key]) > GRIP_ANGLE_RANGE[1]:
 					return {"ok": false, "error": "\"grip_angle\" must be %d to %d degrees" % GRIP_ANGLE_RANGE}
@@ -339,7 +366,7 @@ func _config(request: Dictionary) -> Dictionary:
 					return {"ok": false, "error": "\"rest_curl\" must be 0 to 1"}
 				changed["rest_curl"] = float(request[key])
 			_:
-				return {"ok": false, "error": "unknown setting \"%s\" (one of: skin, nails, nails_left, nails_right, hidden, grip_angle, grip_offset, rest_curl, reset)" % key}
+				return {"ok": false, "error": "unknown setting \"%s\" (one of: skin, nails, nails_left, nails_right, hidden, style, grip_angle, grip_offset, rest_curl, reset)" % key}
 	settings = changed
 	_apply_colours()
 	_apply_visible()
@@ -385,6 +412,8 @@ func _load() -> void:
 			settings[key] = colours.duplicate()
 	if typeof(saved.get("hidden")) == TYPE_BOOL:
 		settings["hidden"] = saved["hidden"]
+	if saved.get("style") in ["hand", "saber"]:
+		settings["style"] = saved["style"]
 	var angle = saved.get("grip_angle")
 	if _number(angle) and angle >= GRIP_ANGLE_RANGE[0] and angle <= GRIP_ANGLE_RANGE[1]:
 		settings["grip_angle"] = float(angle)
