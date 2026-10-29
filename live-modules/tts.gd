@@ -15,6 +15,13 @@ extends SlopitectModule
 # front. Where that can't work (not Android, or the Java calls fail; the
 # reason is in tts_status and the log), the engine speaks for itself as before.
 #
+# Or (tts_engine "sherpa", set with tts_config from the PC) Slopitect makes
+# the speech itself with sherpa-onnx, built into the APK, from a Piper voice
+# folder in the Slopitect folder (tts_sherpa_voice). A thread makes one
+# sentence at a time while the one before it plays, and the sound goes
+# straight into one continuous stream: no files, no gap between sentences
+# while the voice is faster than real time. Pitch doesn't apply to it.
+#
 # Then Godot's Android speech sends the next utterance only after the engine
 # says the last one is done. An engine that never says so (its process
 # closed, or it dropped one) would hold everything after it silent, so
@@ -30,13 +37,20 @@ const MAX_SAY := 2000
 const SPEECH_GRACE_SECONDS := 15.0
 const SPEECH_SECONDS_PER_CHAR := 0.2  # far slower than any voice at rate 1
 
+const SHERPA_PACKAGE := "com.k2fsa.sherpa.onnx."  # the sherpa-onnx library's Java classes, built into the APK
+const SHERPA_THREADS := 2  # of the Quest 1's four fast cores; the game keeps the rest
+const SHERPA_BUFFER_SECONDS := 0.5  # sound handed to the player ahead of what it is playing
+
 const DEFAULTS := {
 	"speak_replies": true,  # read the agent's replies aloud
 	"voice": "",  # a voice id from tts_voices; "" picks the first
 	"rate": 1.0,
 	"pitch": 1.0,
 	"volume": 80,
+	"tts_engine": "app",  # "app": the headset's speech engine app; "sherpa": sherpa-onnx in Slopitect
+	"tts_sherpa_voice": "voices/vits-piper-en_US-amy-low",  # for "sherpa": a Piper voice's folder, in the Slopitect folder
 }
+const COMFORT := ["speak_replies", "voice", "rate", "pitch", "volume"]  # settings tts_set may change in the headset
 
 # How replies are made sayable (speakable()).
 var _speech_drop := [
@@ -72,9 +86,29 @@ var _waiting := []  # what to say once the engine is ready: [text, voice]
 var _jobs := []  # sentences being written, in order: {path, chars, since, stream}
 var _player: AudioStreamPlayer
 var _next_id := 0
+var _has_word := RegEx.create_from_string("\\w")  # a piece with no letters or digits ("...") isn't a sentence on its own
 var _last_written := 0  # when the engine last finished writing a piece (ms)
 var _since_files := 0.0
 var _voice_set := ""  # the voice the in-app engine was last set to
+
+# Speech made by sherpa-onnx (tts_engine "sherpa"; see the top).
+var _sherpa  # its OfflineTts (a Java object); made and used only on _sherpa_thread
+var _sherpa_voice := ""  # the voice folder _sherpa has loaded
+var _sherpa_thread: Thread  # makes the speech, one sentence at a time
+var _sherpa_wake := Semaphore.new()  # posted when there is a sentence for it, or it should end
+var _sherpa_lock := Mutex.new()  # guards the five below
+var _sherpa_queue := []  # sentences waiting to be made: [text, speed]
+var _sherpa_made := []  # made, waiting to play: [samples, sample rate]
+var _sherpa_turn := 0  # goes up on each stop, so speech made for what was stopped is dropped
+var _sherpa_making := false  # the thread is making a sentence
+var _sherpa_quit := false
+var _sherpa_unload := false  # give the voice's memory back (the engine was switched away)
+var _sherpa_sound := PackedFloat32Array()  # the sentence being played, from _sherpa_at on
+var _sherpa_at := 0
+var _sherpa_rate := 0  # the sample rate the player's stream is set up for
+var _sherpa_ends_at := 0.0  # when the sound handed to the player runs out
+var _sherpa_in_build := -1  # whether the APK has sherpa-onnx: -1 not checked yet, 0 no, 1 yes
+var _sherpa_problem := ""  # why the voice couldn't be loaded last time, for tts_status
 
 
 func setup() -> String:
@@ -92,12 +126,19 @@ func setup() -> String:
 	register("tts_stop", _stop_command, "stop speaking, and drop anything waiting to be said")
 	register("tts_voices", _voices_command, "the voices the headset's speech engine has")
 	register("tts_status", _status, "whether the headset can speak, what it's saying, the settings, and what happened last")
-	register("tts_set", _set_command, "a comfort setting, so it changes in the headset too: any of %s" % ", ".join(DEFAULTS.keys()))
+	register("tts_set", _set_command, "a comfort setting, so it changes in the headset too: any of %s" % ", ".join(COMFORT))
+	register("tts_config", _config, "from the PC only: show or change any of: %s" % ", ".join(DEFAULTS.keys()))
 	print("Slopitect tts: %d speech voices; reading replies %s" % [_voice_list().size(), "on" if settings["speak_replies"] else "off"])
 	return ""
 
 
 func _exit_tree() -> void:
+	if _sherpa_thread and _sherpa_thread.is_started():
+		_sherpa_lock.lock()
+		_sherpa_quit = true
+		_sherpa_lock.unlock()
+		_sherpa_wake.post()
+		_sherpa_thread.wait_to_finish()
 	DisplayServer.tts_stop()
 	if _java_tts != null:
 		_stop_in_app()
@@ -131,6 +172,8 @@ func _process(delta: float) -> void:
 	if _since_files >= FILE_POLL_SECONDS:
 		_since_files = 0.0
 		_update_in_app()
+	if settings["tts_engine"] == "sherpa":
+		_sherpa_play()
 	_since_poll += delta
 	if _since_poll < POLL_SECONDS:
 		return
@@ -164,6 +207,8 @@ func speak(text: String, voice := "", interrupt := false) -> String:
 	text = speakable(text).left(MAX_SAY)
 	if text.is_empty():
 		return ""
+	if settings["tts_engine"] == "sherpa":
+		return _sherpa_speak(text, interrupt)
 	if _in_app_problem.is_empty():
 		if interrupt:
 			_stop_in_app()
@@ -227,9 +272,243 @@ func _speech_line(line: String) -> String:
 
 # For other modules: whether something is being said (or about to be).
 func speaking() -> bool:
+	if settings["tts_engine"] == "sherpa":
+		_sherpa_lock.lock()
+		var busy := _sherpa_making or not _sherpa_queue.is_empty() or not _sherpa_made.is_empty()
+		_sherpa_lock.unlock()
+		return busy or _sherpa_at < _sherpa_sound.size() or Time.get_ticks_msec() / 1000.0 < _sherpa_ends_at
 	if _in_app_problem.is_empty():
 		return _player.playing or not _jobs.is_empty() or not _waiting.is_empty()
 	return _speech_deadline > 0.0 and DisplayServer.tts_is_speaking()
+
+
+# --- Speech made by sherpa-onnx (tts_engine "sherpa") ------------------------------
+
+func _sherpa_built_in() -> bool:
+	if _sherpa_in_build == -1:
+		_sherpa_in_build = 0
+		if OS.get_name() == "Android" and Engine.has_singleton("JavaClassWrapper"):
+			var found = Engine.get_singleton("JavaClassWrapper").wrap(SHERPA_PACKAGE + "OfflineTts")
+			_sherpa_in_build = 1 if found != null else 0
+	return _sherpa_in_build == 1
+
+
+# A path inside the Slopitect folder.
+func _home_path(path: String) -> String:
+	var files: SlopitectModule = ctx["modules"].module("files")
+	var home: String = files.get("_home") if files else ""
+	if home.is_empty():
+		home = "/sdcard/Slopitect" if OS.get_name() == "Android" else OS.get_user_data_dir() + "/files_home"
+	return home.path_join(path)
+
+
+# A Piper voice's files in its folder: one .onnx model, tokens.txt, and how
+# words become sounds (an espeak-ng-data folder, or a lexicon.txt).
+# {"error": why} when the folder doesn't have them.
+func _sherpa_files(folder: String) -> Dictionary:
+	if not DirAccess.dir_exists_absolute(folder):
+		return {"error": "no voice folder at %s: put a Piper voice there (like vits-piper-en_US-amy-low), or set tts_sherpa_voice" % folder}
+	var names := DirAccess.get_files_at(folder)
+	if not "tokens.txt" in names:
+		return {"error": "the voice folder %s has no tokens.txt" % folder}
+	var models := Array(names).filter(func(name: String) -> bool: return name.ends_with(".onnx"))
+	if models.size() != 1:
+		return {"error": "the voice folder %s should have one .onnx model; it has %s" % [folder, "none" if models.is_empty() else ", ".join(models)]}
+	var found := {"model": folder.path_join(models[0]), "tokens": folder.path_join("tokens.txt")}
+	if DirAccess.dir_exists_absolute(folder.path_join("espeak-ng-data")):
+		found["data"] = folder.path_join("espeak-ng-data")
+	if "lexicon.txt" in names:
+		found["lexicon"] = folder.path_join("lexicon.txt")
+	if not found.has("data") and not found.has("lexicon"):
+		return {"error": "the voice folder %s has neither an espeak-ng-data folder nor a lexicon.txt" % folder}
+	return found
+
+
+func _sherpa_speak(text: String, interrupt: bool) -> String:
+	if not _sherpa_built_in():
+		return "this build has no sherpa-onnx speech (its library isn't in the APK, or this isn't the headset)"
+	var folder := _home_path(settings["tts_sherpa_voice"])
+	var problem: String = _sherpa_files(folder).get("error", "")
+	if not problem.is_empty():
+		return problem
+	if interrupt:
+		_sherpa_stop()
+	_sherpa_lock.lock()
+	for sentence in _sherpa_sentences(text):
+		_sherpa_queue.append([sentence, float(settings["rate"]), folder])
+	_sherpa_lock.unlock()
+	if _sherpa_thread == null:
+		_sherpa_thread = Thread.new()
+		_sherpa_thread.start(_sherpa_work)
+	_sherpa_wake.post()
+	return ""
+
+
+# One piece per sentence: each is made while the one before it plays. A
+# piece with no letters or digits ("...") goes with the next.
+func _sherpa_sentences(text: String) -> PackedStringArray:
+	var out := PackedStringArray()
+	var current := ""
+	var regex := RegEx.create_from_string("[^.!?\\n]*[.!?]+\\s*|[^.!?\\n]+|\\n+")
+	for m in regex.search_all(text):
+		current += m.get_string()
+		if _has_word.search(current):
+			out.append(current.strip_edges())
+			current = ""
+	if not current.strip_edges().is_empty():
+		out.append(current.strip_edges())
+	return out
+
+
+# Drops what is waiting and being played; a sentence being made is dropped
+# when it's done.
+func _sherpa_stop() -> void:
+	_sherpa_lock.lock()
+	_sherpa_turn += 1
+	_sherpa_queue.clear()
+	_sherpa_made.clear()
+	_sherpa_lock.unlock()
+	_sherpa_sound = PackedFloat32Array()
+	_sherpa_at = 0
+	_sherpa_ends_at = 0.0
+	if _player.stream is AudioStreamGenerator:
+		_player.stop()
+
+
+# Runs on the thread: the only place _sherpa is made or used.
+func _sherpa_work() -> void:
+	while true:
+		_sherpa_wake.wait()
+		while true:
+			_sherpa_lock.lock()
+			if _sherpa_quit:
+				_sherpa_lock.unlock()
+				if _sherpa:
+					_sherpa.release()
+				return
+			if _sherpa_unload:
+				_sherpa_unload = false
+				if _sherpa:
+					_sherpa.release()
+					_sherpa = null
+					_sherpa_voice = ""
+			if _sherpa_queue.is_empty():
+				_sherpa_lock.unlock()
+				break
+			var item: Array = _sherpa_queue.pop_front()
+			var turn := _sherpa_turn
+			_sherpa_making = true
+			_sherpa_lock.unlock()
+			_sherpa_make(item, turn)
+			_sherpa_lock.lock()
+			_sherpa_making = false
+			_sherpa_lock.unlock()
+
+
+# Runs on the thread: makes one sentence's sound, loading the voice first
+# if it isn't loaded.
+func _sherpa_make(item: Array, turn: int) -> void:
+	var text: String = item[0]
+	var folder: String = item[2]
+	if folder != _sherpa_voice:
+		var started := Time.get_ticks_msec()
+		var problem := _sherpa_load(folder)
+		if not problem.is_empty():
+			_sherpa_lock.lock()
+			_sherpa_queue.clear()
+			_sherpa_lock.unlock()
+			call_deferred("_sherpa_failed", "couldn't load the voice %s: %s" % [folder, problem])
+			return
+		print("Slopitect tts: loaded the voice %s in %d ms" % [folder, Time.get_ticks_msec() - started])
+	var wrapper = Engine.get_singleton("JavaClassWrapper")
+	var started := Time.get_ticks_msec()
+	var audio = _sherpa.generate(text, 0, float(item[1]))
+	var took := Time.get_ticks_msec() - started
+	if audio == null:
+		call_deferred("_sherpa_failed", "couldn't make speech for \"%s\" (%s)" % [text.left(60), _java_error(wrapper)])
+		return
+	var samples: PackedFloat32Array = audio.getSamples()
+	var rate := int(audio.getSampleRate())
+	var seconds := samples.size() / float(maxi(rate, 1))
+	print("Slopitect tts: made %d characters (%.1f s of speech) in %d ms (x%.2f)" % [text.length(), seconds, took, took / maxf(seconds * 1000.0, 1.0)])
+	_sherpa_lock.lock()
+	if turn == _sherpa_turn and not samples.is_empty():
+		_sherpa_made.append([samples, rate])
+	_sherpa_lock.unlock()
+
+
+# Runs on the thread: makes the OfflineTts for the voice in folder; "" when
+# it worked, or why not.
+func _sherpa_load(folder: String) -> String:
+	var files := _sherpa_files(folder)
+	if files.has("error"):
+		return files["error"]
+	var wrapper = Engine.get_singleton("JavaClassWrapper")
+	var config = wrapper.wrap(SHERPA_PACKAGE + "OfflineTtsConfig").OfflineTtsConfig()
+	if config == null:
+		return "couldn't make an OfflineTtsConfig (%s)" % _java_error(wrapper)
+	var model = config.getModel()
+	var vits = model.getVits()
+	vits.setModel(files["model"])
+	vits.setTokens(files["tokens"])
+	if files.has("data"):
+		vits.setDataDir(files["data"])
+	if files.has("lexicon"):
+		vits.setLexicon(files["lexicon"])
+	model.setNumThreads(SHERPA_THREADS)
+	if _sherpa:
+		_sherpa.release()
+		_sherpa = null
+		_sherpa_voice = ""
+	_sherpa = wrapper.wrap(SHERPA_PACKAGE + "OfflineTts").OfflineTts(null, config)
+	if _sherpa == null:
+		return "the library wouldn't load it (%s)" % _java_error(wrapper)
+	_sherpa_voice = folder
+	return ""
+
+
+func _sherpa_failed(problem: String) -> void:
+	_sherpa_problem = problem
+	_note(problem)
+
+
+# Every frame: keeps the player's stream topped up with the sentences made.
+func _sherpa_play() -> void:
+	var now := Time.get_ticks_msec() / 1000.0
+	if _sherpa_at >= _sherpa_sound.size():
+		_sherpa_lock.lock()
+		var next: Array = _sherpa_made.pop_front() if not _sherpa_made.is_empty() else []
+		_sherpa_lock.unlock()
+		if next.is_empty():
+			# Nothing more to say: the player stops once its sound has run out.
+			if _player.playing and _player.stream is AudioStreamGenerator and now > _sherpa_ends_at + SHERPA_BUFFER_SECONDS:
+				_player.stop()
+			return
+		_sherpa_sound = next[0]
+		_sherpa_at = 0
+		if next[1] != _sherpa_rate or not _player.stream is AudioStreamGenerator or not _player.playing:
+			var stream := AudioStreamGenerator.new()
+			stream.mix_rate = next[1]
+			stream.buffer_length = SHERPA_BUFFER_SECONDS
+			_player.stream = stream
+			_player.play()
+			_sherpa_rate = next[1]
+	_player.volume_db = linear_to_db(maxf(float(settings["volume"]) / 100.0, 0.001))
+	var playback := _player.get_stream_playback() as AudioStreamGeneratorPlayback
+	if playback == null:
+		return
+	var count := mini(playback.get_frames_available(), _sherpa_sound.size() - _sherpa_at)
+	if count <= 0:
+		return
+	var frames := PackedVector2Array()
+	frames.resize(count)
+	for i in count:
+		var sample := _sherpa_sound[_sherpa_at + i]
+		frames[i] = Vector2(sample, sample)
+	playback.push_buffer(frames)
+	_sherpa_at += count
+	var queued := int(SHERPA_BUFFER_SECONDS * _sherpa_rate) - playback.get_frames_available()
+	_sherpa_ends_at = now + maxi(queued, 0) / float(_sherpa_rate)
 
 
 # --- Playing in the app ---------------------------------------------------------
@@ -421,6 +700,7 @@ func _say(request: Dictionary) -> Dictionary:
 
 
 func _stop_command(_request: Dictionary) -> Dictionary:
+	_sherpa_stop()
 	DisplayServer.tts_stop()
 	if _in_app_problem.is_empty():
 		_stop_in_app()
@@ -446,11 +726,29 @@ func _status(_request: Dictionary) -> Dictionary:
 		"sentences_waiting": _jobs.size() + _waiting.size(),
 		"speech_should_end_in": maxf(_speech_deadline - Time.get_ticks_msec() / 1000.0, 0.0) if _speech_deadline > 0.0 else 0.0,
 		"settings": settings,
+		"sherpa_in_build": _sherpa_built_in(),
+		"sherpa_voice": _home_path(settings["tts_sherpa_voice"]),
+		"sherpa_voice_problem": _sherpa_files(_home_path(settings["tts_sherpa_voice"])).get("error", ""),
+		"sherpa_voice_loaded": not _sherpa_voice.is_empty(),
+		"sherpa_last_problem": _sherpa_problem,
 		"last": _last,
 	}
 
 
 func _set_command(request: Dictionary) -> Dictionary:
+	for key in request:
+		if key in ["cmd", "id"]:
+			continue
+		if not key in COMFORT:
+			return {"ok": false, "error": "tts_set changes only %s; \"%s\" changes from the PC with tts_config" % [", ".join(COMFORT), key]}
+	return _change(request)
+
+
+func _config(request: Dictionary) -> Dictionary:
+	return _change(request)
+
+
+func _change(request: Dictionary) -> Dictionary:
 	var changes := {}
 	for key in request:
 		if key in ["cmd", "id"]:
@@ -470,6 +768,13 @@ func _set_command(request: Dictionary) -> Dictionary:
 		_save_settings()
 	if changes.has("speak_replies") and not settings["speak_replies"]:
 		_stop_command({})
+	if changes.has("tts_engine") or changes.has("tts_sherpa_voice"):
+		_stop_command({})
+		if settings["tts_engine"] != "sherpa" and _sherpa_thread:
+			_sherpa_lock.lock()
+			_sherpa_unload = true
+			_sherpa_lock.unlock()
+			_sherpa_wake.post()
 	return {"ok": true, "settings": settings}
 
 
@@ -490,6 +795,12 @@ func _check_setting(key: String, value) -> String:
 		"volume":
 			if typeof(value) not in [TYPE_INT, TYPE_FLOAT] or value < 0 or value > 100:
 				return "\"volume\" must be 0 to 100"
+		"tts_engine":
+			if not value in ["app", "sherpa"]:
+				return "\"tts_engine\" must be \"app\" (the headset's speech engine app) or \"sherpa\" (sherpa-onnx in Slopitect)"
+		"tts_sherpa_voice":
+			if typeof(value) != TYPE_STRING or value.is_empty() or value.begins_with("/") or ".." in value or "\\" in value or "://" in value:
+				return "\"tts_sherpa_voice\" must be a voice's folder inside the Slopitect folder, like \"voices/vits-piper-en_US-amy-low\""
 	return ""
 
 

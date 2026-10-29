@@ -17,10 +17,12 @@ env:
   # (whisper.cpp v1.8.4 as its submodule), with the NDK its godot-cpp asks for.
   WHISPER_COMMIT: e490cbbb74b0f79abc787b34970f18dc15b258f3
   WHISPER_NDK: 23.2.8568313
-  # sherpa-onnx (Apache-2.0): fast streaming speech to text on the headset
-  # (vtt.gd's "sherpa" engine). Its released Android library, used as it is.
-  SHERPA_ONNX_VERSION: 2.0.1
-  SHERPA_AAR_SHA256: a8d09d1d32f3eb8520482c6d3d43fae674681c5b050385967c70a3c2c9bf0ee7
+  # sherpa-onnx (Apache-2.0): speech to text and speech on the headset
+  # (vtt.gd's and tts.gd's "sherpa" engines). Its released Android library,
+  # used as it is. 1.13.8 is the last with espeak-ng, which Piper voices
+  # need to turn text into sounds (2.0 removed it).
+  SHERPA_ONNX_VERSION: 1.13.8
+  SHERPA_AAR_SHA256: 633c24321e06b1fe79feafa03ea16cbc0f8a286641e2da3559bac91bdb13bd96
 
 jobs:
   whisper:
@@ -193,9 +195,9 @@ jobs:
             lib/arm64-v8a/libsherpa-onnx-jni.so lib/arm64-v8a/libonnxruntime.so; do
             unzip -l "$apk" "$lib" > /dev/null && echo "has $lib" || { echo "::error::missing $lib"; fail=1; }
           done
-          # vtt.gd reaches sherpa-onnx's Java classes by these names.
+          # vtt.gd and tts.gd reach sherpa-onnx's Java classes by these names.
           unzip -o -q "$apk" 'classes*.dex' -d dex
-          for cls in OnlineRecognizer OnlineRecognizerConfig OnlineStream; do
+          for cls in OnlineRecognizer OnlineRecognizerConfig OnlineStream OfflineTts OfflineTtsConfig GeneratedAudio; do
             grep -q -a "Lcom/k2fsa/sherpa/onnx/$cls;" dex/classes*.dex && echo "has com.k2fsa.sherpa.onnx.$cls" || { echo "::error::missing the class com.k2fsa.sherpa.onnx.$cls"; fail=1; }
           done
           # Signed with ci/debug.keystore, so it installs over earlier builds.
