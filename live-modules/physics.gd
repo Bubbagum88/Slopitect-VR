@@ -271,7 +271,9 @@ func _status(_request: Dictionary) -> Dictionary:
 			item["in_world"] = false
 		listed.append(item)
 	return {"ok": true, "things": listed, "ground": "landscape" if _ground_landscape else "floor",
-		"gravity": PhysicsServer3D.area_get_param(get_world_3d().space, PhysicsServer3D.AREA_PARAM_GRAVITY)}
+		"gravity": PhysicsServer3D.area_get_param(get_world_3d().space, PhysicsServer3D.AREA_PARAM_GRAVITY),
+		# Jolt's server class only exists when Jolt is the running engine.
+		"engine": "Jolt" if ClassDB.class_exists("JoltPhysicsServer3D") else "Godot Physics"}
 
 
 func _config(request: Dictionary) -> Dictionary:
