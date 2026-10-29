@@ -1072,6 +1072,21 @@ func _config(request: Dictionary) -> Dictionary:
 	return _theme_status({})
 
 
+# Its section of the Settings window (settings.gd): the text size, the one
+# part of the theme that changes in the headset.
+func settings_info() -> Dictionary:
+	var now := ""
+	for size in TEXT_SIZES:
+		if int(theme_values.get("font_body", 0)) == TEXT_SIZES[size]["font_body"]:
+			now = size
+	var options := []
+	for size in TEXT_SIZES:
+		options.append({"label": size.capitalize(), "value": size})
+	return {"title": "Text size", "order": 20, "settings": [
+		{"id": "text_size", "type": "choice", "value": now, "options": options, "set": {"cmd": "ui_text_size", "size": "{value}"}},
+	]}
+
+
 # Text size is a comfort setting, so unlike the rest of the theme it can
 # change in the headset (isaac's choice, 2026-10-29); colours stay PC only.
 func _text_size_command(request: Dictionary) -> Dictionary:

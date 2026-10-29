@@ -108,6 +108,29 @@ func _vec_out(v: Vector3) -> Array:
 
 # --- Settings ------------------------------------------------------------------------
 
+# Its section of the Settings window (settings.gd): the comfort settings,
+# in move_comfort's ranges. The angle shown is the one the turn uses.
+func settings_info() -> Dictionary:
+	var snap: bool = settings["turn"] == "snap"
+	var out := [
+		{"id": "turn", "type": "choice", "value": settings["turn"], "set": {"cmd": "move_comfort", "turn": "{value}"},
+			"options": [{"label": "Snap turn", "value": "snap"}, {"label": "Smooth turn", "value": "smooth"}]},
+		_comfort_slider("speed", "Walk speed (m/s)", 0.25),
+	]
+	if snap:
+		out.append(_comfort_slider("snap_degrees", "Snap angle (°)", 15.0))
+	else:
+		out.append(_comfort_slider("smooth_degrees", "Turn speed (°/s)", 15.0))
+	return {"title": "Moving", "order": 10, "settings": out}
+
+
+func _comfort_slider(key: String, label: String, step: float) -> Dictionary:
+	return {"id": key, "type": "slider", "label": label, "min": COMFORT[key][0], "max": COMFORT[key][1], "step": step,
+		"value": settings[key], "set": {"cmd": "move_comfort", key: "{value}"}}
+
+
+# --- Settings ------------------------------------------------------------------------
+
 # The comfort settings can change in the headset (isaac's choice,
 # 2026-10-29); follow_ground and wider ranges stay with move_config.
 func _comfort(request: Dictionary) -> Dictionary:

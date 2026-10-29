@@ -22,6 +22,10 @@ const SPLIT := [0.45, 0.3, 0.25]  # how a finger's length splits into its three 
 const CURL := [75.0, 95.0, 70.0]  # degrees each bone bends when fully curled
 const FOLLOW := 18.0  # how fast a finger catches up with the press
 
+# The colours the Settings window offers (isaac's comfort settings, 2026-10-29).
+const SKINS := {"Light": "#f1c9a5", "Tan": "#e0ac80", "Brown": "#a86b45", "Dark": "#5c3a24", "Blue": "#5b7bd6"}
+const NAILS := {"Pink": "#ff3b7a", "Red": "#d1263b", "Blue": "#3b6bff", "Black": "#16161c", "Clear": "#f4e6e0"}
+
 var settings := DEFAULTS.duplicate(true)
 var _hands := []  # {"node", "hand", "side", "fingers", "thumb", "tbase", "curl"}
 var _skin: StandardMaterial3D
@@ -177,6 +181,19 @@ func _apply_colours() -> void:
 
 func _status(_request: Dictionary) -> Dictionary:
 	return {"ok": true, "settings": settings, "controls": ctx["modules"].module("controls") != null}
+
+
+# Its section of the Settings window (settings.gd): a few skin and nail
+# colours to pick from; any other colour is hands_colours or hands_config.
+func settings_info() -> Dictionary:
+	var out := []
+	for part in [["skin", "Skin", SKINS, settings["skin"]], ["nails", "Nails", NAILS, settings["nails_left"][0]]]:
+		var options := []
+		for colour_name in part[2]:
+			options.append({"label": colour_name, "value": part[2][colour_name], "color": part[2][colour_name]})
+		out.append({"id": part[0], "type": "choice", "label": part[1], "value": part[3], "options": options, "columns": 3,
+			"set": {"cmd": "hands_colours", part[0]: "{value}"}})
+	return {"title": "Hands", "order": 30, "settings": out}
 
 
 # Skin and nail colours can change in the headset (isaac's choice,
