@@ -92,7 +92,7 @@ var _left: XRController3D
 var _right: XRController3D
 var _holders := {}  # id_panel -> Node3D
 var _inputs := {}  # "panel/element" -> typed text (not saved)
-var _live_text := {}  # "panel/element" -> text set with set_text (not saved: it can be anything)
+var _live_text := {}  # "panel/element" -> text from set_text (not saved)
 var _focus := ""  # "panel/element" of the input box that typing goes to
 var _shift := false
 var _ray: RayCast3D
@@ -698,6 +698,21 @@ func _key_command(request: Dictionary) -> Dictionary:
 	return {"ok": true}
 
 
+# Changes a text element's text live, for a module that updates often (the
+# terminal's screen, on every key): only the label changes, the panel isn't
+# redrawn or saved. The text is kept in memory (never in ui.json, since it
+# can be anything a command replied), so a later redraw still shows it.
+func set_text(id_panel: String, id_element: String, text: String) -> bool:
+	var element := _element(id_panel, id_element)
+	if element.get("type") != "text" or element.has("source"):
+		return false
+	_live_text[id_panel + "/" + id_element] = text.left(MAX_TEXT)
+	var label := _find_node(id_panel, id_element) as Label3D
+	if label:
+		label.text = _live_text[id_panel + "/" + id_element]
+	return true
+
+
 func _max_length(key: String) -> int:
 	var parts := key.split("/")
 	var element := _element(parts[0], parts[1])
@@ -825,6 +840,9 @@ func _remove(request: Dictionary) -> Dictionary:
 		return {"ok": false, "error": "no panel \"%s\" (ui_list shows them)" % str(request.get("id_panel"))}
 	var removed: Dictionary = panels.pop_at(index)
 	_drop_holder(removed["id_panel"])
+	for key in _live_text.keys():
+		if key.begins_with(removed["id_panel"] + "/"):
+			_live_text.erase(key)
 	if _focus.begins_with(removed["id_panel"] + "/"):
 		_focus = ""
 	for key in _live_text.keys():
