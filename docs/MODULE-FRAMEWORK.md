@@ -92,7 +92,10 @@ Live modules only (no new APK):
    changes no window; that ui.gd part comes with the VR UI work.)*
 5. vrui.gd: take "point" from controls, respect the Yes/No window, redraw
    only on change, save panels, take over panel attaching.
-6. world.gd: keep the windows, on top of save and projects.
+6. world.gd: keep the windows, on top of save and projects. *(Done,
+   PC-tested: worlds.gd, one window with Worlds, Checkpoints, Files and
+   Modules tabs, opened from its tile on the Menu; world's own save format
+   is dropped.)*
 7. web.gd: fold into a net helper with an allowed-sites list. *(Done,
    PC-tested against a local https server: net.gd, hosts in net_config,
    redirects checked hop by hop. Poly Haven's two hosts to start.)*
