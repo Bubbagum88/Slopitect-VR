@@ -14,6 +14,9 @@
 #   .\slopi-sync.ps1 -Tools D:\quest1-root-project\tools\platform-tools -Load
 #   .\slopi-sync.ps1 move,grab -Load
 #   .\slopi-sync.ps1 -Status
+# A module changed on the headset (by the agent) is never pushed over: it is
+# kept in live-modules\drafts and named in a warning; -Overwrite NAME
+# replaces it anyway. Modules only the headset has are kept there too.
 # After a headset restart the Wi-Fi adb port changes; give just the IP and
 # the port is found (or give the port yourself, like 192.168.1.95:41024):
 #   .\slopi-sync.ps1 -Device 192.168.1.95
@@ -21,6 +24,7 @@ param(
     [Parameter(Position = 0)][string[]]$Name,
     [switch]$Load,
     [switch]$Status,
+    [string[]]$Overwrite,
     [string]$Device,
     [string]$Tools = $env:SLOPI_TOOLS,
     [string]$From,
@@ -29,7 +33,7 @@ param(
 
 $remoteDir = "/sdcard/Slopitect/modules"
 # The order modules need each other in; any others load after, by name.
-$order = @("controls", "ui", "tools", "landscape", "paths", "assets", "save", "move", "grab", "physics", "projects", "inspect")
+$order = @("controls", "ui", "vrui", "tools", "landscape", "paths", "assets", "save", "move", "grab", "physics", "projects", "inspect")
 
 # --- Finding adb and slopi.ps1 ----------------------------------------------------
 
@@ -129,6 +133,9 @@ function Get-RemoteHashes {
     return $hashes
 }
 
+# With powershell -File, "a,b" arrives as one string.
+$Name = @($Name | ForEach-Object { $_ -split "," } | Where-Object { $_ })
+$Overwrite = @($Overwrite | ForEach-Object { $_ -split "," } | Where-Object { $_ })
 $local = @{}
 foreach ($file in Get-ChildItem (Join-Path $From "*.gd")) {
     $local[$file.BaseName] = $file
@@ -146,6 +153,35 @@ if ($Name) {
 }
 $wanted = @($wanted | Sort-Object { $i = [array]::IndexOf($order, $_); if ($i -lt 0) { 1000 } else { $i } }, { $_ })
 
+# True when the headset's copy is a version the repo once had: then the PC's
+# is newer. If it isn't, something on the headset (the agent) changed it.
+function Test-KnownVersion([string]$path, [string]$sha256) {
+    $dir = Split-Path $path
+    if (-not (git -C $dir rev-parse --is-inside-work-tree 2>$null)) { return $true }
+    $rel = git -C $dir ls-files --full-name (Split-Path $path -Leaf)
+    if (-not $rel) { return $true }
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    foreach ($commit in (git -C $dir log --format=%H -- (Split-Path $path -Leaf))) {
+        $tmp = [System.IO.Path]::GetTempFileName()
+        cmd /c "git -C `"$dir`" show ${commit}:$rel > `"$tmp`" 2>nul"
+        $h = (Get-FileHash $tmp -Algorithm SHA256).Hash.ToLower()
+        Remove-Item $tmp
+        if ($h -eq $sha256) { return $true }
+    }
+    return $false
+}
+
+# Keeps a headset copy on the PC, next to the drafts.
+$keepDir = Join-Path $From "drafts"
+function Save-HeadsetCopy([string]$n, [string]$sha256) {
+    New-Item -ItemType Directory -Force $keepDir | Out-Null
+    $same = Join-Path $keepDir "$n.gd"
+    if ((Test-Path $same) -and (Get-FileHash $same -Algorithm SHA256).Hash.ToLower() -eq $sha256) { return $same }
+    $target = if (Test-Path $same) { Join-Path $keepDir ("$n.headset-" + (Get-Date -Format "yyyyMMdd-HHmm") + ".gd") } else { $same }
+    Adb pull "$remoteDir/$n.gd" $target 2>&1 | Out-Null
+    return $target
+}
+
 $remote = Get-RemoteHashes
 $changed = @()
 $rows = @()
@@ -153,7 +189,13 @@ foreach ($n in $wanted) {
     $file = $local[$n]
     $hash = (Get-FileHash $file.FullName -Algorithm SHA256).Hash.ToLower()
     $state = if (-not $remote.ContainsKey($n)) { "new" } elseif ($remote[$n] -ne $hash) { "changed" } else { "same" }
-    if ($state -ne "same") { $changed += $n }
+    if ($state -eq "changed" -and -not (Test-KnownVersion $file.FullName $remote[$n])) {
+        # Not pushed over: that would lose the headset's change.
+        $state = "edited on headset"
+        $kept = Save-HeadsetCopy $n $remote[$n]
+        Write-Warning $(if ($Overwrite -contains $n) { "$n.gd was changed on the headset; kept as $kept, then replaced (-Overwrite)." } else { "$n.gd was changed on the headset; kept as $kept and not pushed over. Merge it, or give -Overwrite $n to replace it." })
+        if ($Overwrite -contains $n) { $changed += $n }
+    } elseif ($state -ne "same") { $changed += $n }
     # Windows line endings give a different SHA-256 than the repo's copy, so
     # a file you already said Yes to would ask again.
     $crlf = [System.IO.File]::ReadAllText($file.FullName).Contains("`r")
@@ -173,6 +215,14 @@ foreach ($row in $rows) {
     $row | Add-Member approved $(if ($m) { [bool]$m.approved } else { "" })
     $row | Add-Member error $(if ($m) { $m.error } else { "" })
 }
+# Modules only the headset has (the agent writes them too): kept on the PC.
+if (-not $Name) {
+    foreach ($n in ($remote.Keys | Sort-Object)) {
+        if ($local.ContainsKey($n)) { continue }
+        $kept = Save-HeadsetCopy $n $remote[$n]
+        $rows += [pscustomobject]@{ module = $n; pc_vs_headset = "headset only (kept in drafts)"; crlf = ""; loaded = $(if ($app[$n]) { [bool]$app[$n].loaded } else { "" }); approved = $(if ($app[$n]) { [bool]$app[$n].approved } else { "" }); error = "" }
+    }
+}
 if ($rows | Where-Object crlf) {
     Write-Warning "Some files have Windows line endings (crlf). In the repo, run: git config core.autocrlf false; then check them out again."
 }
@@ -186,7 +236,8 @@ if ($Status) {
 # --- Pushing ----------------------------------------------------------------------
 
 if ($changed.Count -eq 0) {
-    Write-Host "The headset already has every one of these modules as they are on the PC."
+    $kept = @($rows | Where-Object { $_.pc_vs_headset -eq "edited on headset" })
+    Write-Host $(if ($kept) { "Nothing pushed; $($kept.Count) module(s) changed on the headset were kept (see the warnings)." } else { "The headset already has every one of these modules as they are on the PC." })
 } else {
     Adb shell "mkdir -p $remoteDir" | Out-Null
     foreach ($n in $changed) {
