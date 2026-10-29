@@ -9,6 +9,8 @@ extends SlopitectModule
 # A line is a command and its fields:
 #   spawn shape=box scale=0.3 position=[0,1,-1]
 #   agent_ask prompt="make the box red"
+# Commands that take text (agent_ask, voice_say, memory_note...) also take it
+# as the rest of the line: agent_ask make the box red.
 # A field's value is read as JSON when it can be (numbers, true/false,
 # [lists], "quoted text"), and as plain text otherwise. A line that starts
 # with { is sent as it is, as JSON.
@@ -33,6 +35,10 @@ const PANEL := "terminal"
 const COLS := 62  # characters per screen line at FONT on the screen's width
 const ROWS := 13  # screen lines shown
 const MAX_LINES := 400  # scrollback kept
+# Commands whose main field is free text: "agent_ask can you..." needs no
+# prompt= or quotes.
+const TEXT_FIELDS := {"agent_ask": "prompt", "voice_say": "text", "avatar_say": "text", "ui_type": "text",
+	"terminal_type": "text", "memory_note": "text", "memory_search": "query", "assets_search": "query"}
 const SCROLL_CHARS := 4000  # the most a text element holds (ui.gd's MAX_TEXT)
 const MAX_LINE := 400  # characters in the line being typed
 const MAX_HISTORY := 50
@@ -108,10 +114,13 @@ func _has_panel() -> bool:
 	return false
 
 
-# The window module: vrui.gd if it's loaded, else ui.gd.
+# The window module: vrui.gd if it's loaded and is the panel module (the old
+# vrui draft has no set_text and no ui_* commands), else ui.gd.
 func _ui() -> SlopitectModule:
 	var vrui: SlopitectModule = ctx["modules"].module("vrui")
-	return vrui if vrui != null else ctx["modules"].module("ui")
+	if vrui != null and vrui.has_method("set_text"):
+		return vrui
+	return ctx["modules"].module("ui")
 
 
 # --- Running a line ------------------------------------------------------------------
@@ -128,6 +137,18 @@ func parse(line: String) -> Dictionary:
 		if typeof(json.data) != TYPE_DICTIONARY or typeof(json.data.get("cmd")) != TYPE_STRING:
 			return {"error": "JSON must be an object with \"cmd\", like {\"cmd\": \"list\"}"}
 		return {"request": json.data}
+	# A command that takes text gets the rest of the line as it is, quotes,
+	# apostrophes and all: agent_ask can you reach the internet?
+	var space := line.find(" ")
+	var cmd := line if space == -1 else line.left(space)
+	var rest := "" if space == -1 else line.substr(space + 1).strip_edges()
+	var close := _close_command(cmd) if not cmd in ctx["server"].commands() else ""
+	if not close.is_empty():
+		return {"error": "no command \"%s\"; did you mean %s?" % [cmd, close]}
+	if TEXT_FIELDS.has(cmd) and not rest.is_empty() and not _is_field(rest):
+		if rest.length() >= 2 and rest.begins_with("\"") and rest.ends_with("\""):
+			rest = rest.substr(1, rest.length() - 2)
+		return {"request": {"cmd": cmd, TEXT_FIELDS[cmd]: rest}}
 	var words := _split(line)
 	if words.has("error"):
 		return words
@@ -137,9 +158,30 @@ func parse(line: String) -> Dictionary:
 		var word: String = parts[i]
 		var eq := word.find("=")
 		if eq <= 0:
-			return {"error": "\"%s\" should be field=value (like shape=box)" % word}
+			return {"error": "\"%s\" should be field=value (like shape=box)" % word.left(40)}
 		request[word.left(eq)] = _value(word.substr(eq + 1))
 	return {"request": request}
+
+
+# Whether text starts like field=value (a name, then =).
+func _is_field(text: String) -> bool:
+	var eq := text.find("=")
+	if eq <= 0:
+		return false
+	var name := text.left(eq)
+	return not name.contains(" ") and not name.contains("\"") and name.is_valid_identifier()
+
+
+# A command with the same words in another order (ask_agent for agent_ask).
+func _close_command(cmd: String) -> String:
+	var words := Array(cmd.split("_"))
+	words.sort()
+	for known in ctx["server"].commands():
+		var known_words := Array(known.split("_"))
+		known_words.sort()
+		if known_words == words:
+			return known
+	return ""
 
 
 # Splits on spaces, keeping "quoted text" and [lists] in one piece.
