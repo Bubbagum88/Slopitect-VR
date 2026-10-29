@@ -10,14 +10,18 @@ Do not `code_load` them on the headset as they are:
 
 | Draft | What it does | Why it waits |
 | --- | --- | --- |
-| `aimsg.gd` | Formats the chat log; drives the avatar from the agent's state | Fights `avatar.gd` over the avatar; writes a debug file; guesses status fields |
-| `controller.gd` | Binds buttons to commands or panel toggles; attaches vrui panels to a hand | Same job as `controls.gd` (a press can fire twice); reaches into other modules' private fields |
-| `hands.gd` | Drawn hands with nails that curl with grip and trigger | Reads the controllers directly; colours not saved |
-| `jelly.gd` | Squash and stretch on the avatar | Guesses where the avatar's body is; settings not saved |
-| `stick_move.gd` | Walking on the right stick | `move.gd` already walks, and the right stick turns |
 | `vrui.gd` | Real Godot buttons and sliders on a panel (idea from MT-ZD/Godot-3D-VR-UI, MIT) | Reads the trigger itself, so it can be pressed while a Yes/No question is open; redraws every frame |
-| `web.gd` | Downloads any URL into `assets/` | No list of allowed sites |
-| `world.gd` | Named worlds, plus Worlds, Files and Modules windows | Its own save format leaves out models and switches; duplicates `save.gd`/`projects.gd` |
+
+Already reworked or dropped: `hands.gd` moved up into `live-modules/`;
+`aimsg.gd` became `live-modules/aimsg.gd` (the chat formatting only; the
+avatar already shows the agent's state); `web.gd` became
+`live-modules/net.gd` (only hosts allowed on the PC); `jelly.gd` became
+`live-modules/jelly.gd` (uses the live avatar's `body()`); `world.gd` became `live-modules/worlds.gd` (its windows as tabs, on top of `save.gd` and `projects.gd`, without its own save format);
+`controller.gd`'s "button runs a command" and "button shows a window" are binding kinds in
+`controls_config`, and right-stick walking is
+`{"sticks": {"right": "walk", "left": "turn"}}` there, so `controller.gd` and
+`stick_move.gd` are gone (still in git history). Panel attaching from
+`controller.gd` waits for the vrui rework.
 
 The full review, and what happens to each, is in
 [docs/MODULE-FRAMEWORK.md](../../docs/MODULE-FRAMEWORK.md).
