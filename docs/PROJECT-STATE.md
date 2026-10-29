@@ -20,8 +20,9 @@ a GDScript file pushed to the headset and loaded while the app runs, after
 a Yes in the headset. Modules stay separate and swappable.
 
 - Engine: Godot 4.7.2, Compatibility (GLES3) renderer, OpenXR through
-  godot_openxr_vendors 5.1.0. GDScript everywhere; native code only for a
-  measured hot spot.
+  godot_openxr_vendors 5.1.0, Jolt physics (PR #20; headset:
+  `physics_status` says Jolt). GDScript everywhere; native code only for a
+  measured hot spot, built for plain armv8-a. Why: [DESIGN.md](DESIGN.md).
 - No outside UI add-ons or dependencies where we can write our own.
 - Licence: MIT.
 
@@ -42,13 +43,14 @@ a Yes in the headset. Modules stay separate and swappable.
 | View | `view_look` gives the agent a picture of the world | PC |
 | Errors | Keeps the app's recent errors; tells the agent about its modules' errors | PC |
 | Pairing | The command port only takes commands from programs you said Yes to (`slopi.ps1 -Pair`) | PC |
+| Physics engine | Jolt (`3d/physics_engine` in `project.godot`); `physics_status` reports the engine | Headset |
 
 Fixed in the APK on purpose (owner's choice): the Yes/No window, Stop on
 left X, pairing, and the code review.
 
 ### Live modules (in `live-modules/`)
 
-All PC-tested, none yet on the headset. See
+All PC-tested. Most are now loaded on the headset; a module counts as Headset only once it has been seen working there (the [project board](https://github.com/users/Bubbagum88/projects/2) tracks each one). See
 [live-modules/README.md](../live-modules/README.md) for commands.
 
 | Module | What it does |
@@ -71,8 +73,13 @@ All PC-tested, none yet on the headset. See
 | net | Downloads, https only and only from hosts allowed on the PC (`net_config`), redirects checked; records each file's source |
 | worlds | The Worlds window (a tile on the Menu): tabs to open or make a project's world, keep and go back to checkpoints, look through the Slopitect folder, and load or unload live modules. Built on projects, save, files and code |
 | jelly | Squash and stretch on the avatar, volume kept; needs the live avatar module's `body()`. Tested on the PC with a stand-in avatar |
-| tts | Speech out, moved out of the APK: replies read aloud through Android TTS; speed, pitch, volume and voice in the Settings window (`tts_set`); a stuck utterance is reset. On Android it plays the speech itself (synthesizeToFile through JavaClassWrapper, then an AudioStreamPlayer). Headset: SherpaTTS played its own sound (Android showed it, nothing muted) but isaac heard nothing; the in-app playing is PC-tested only (the Java calls can only run on the headset) |
-| vtt | Hold-to-talk, moved out of the APK: whisper.cpp on the headset (local, the default) or a web service (`vtt_config`, PC only); words go into the chat window's input box. Headset (old built-in version): heard "Hello." in 22 s, words didn't reach the chat box; English forcing, length-cut audio and chat delivery are PC-tested only |
+| tts | Speech out, moved out of the APK: replies read aloud through Android TTS; speed, pitch, volume and voice in the Settings window (`tts_set`); a stuck utterance is reset. On Android it plays the speech itself (synthesizeToFile through JavaClassWrapper, then an AudioStreamPlayer). Headset: the in-app playing is heard (PR #32); the voice is picked in the SherpaTTS app |
+| vtt | Hold-to-talk, moved out of the APK: whisper.cpp on the headset (local, the default) or a web service (`vtt_config`, PC only); words go into the chat window's input box. Short presses are ignored (`min_hold`); its recording status shows on the hand menu. Headset: works, still slow |
+| terminal | A command line window (`cmd field=value` or raw JSON), history, Tab, Help, Ask AI; also the chat window's Chat mode, so there's one window for typing and talking |
+| pause | The pause menu on the left home button: Resume, Save, Load, Worlds, Settings, All windows, Hand menu; and the one hand menu (Home, Settings, Undo, Redo, Tools, Terminal and each module's `hand_info()`), which snaps on and off the left hand |
+| settings | The Settings window, built from each loaded module's `settings_info()`; nothing in it names a module |
+| library | The Library window: Textures, Assets and Prefabs tabs of thumbnail tiles (Poly Haven, CC0), 12 to a page |
+| joints | Hinges, sliders, ball and fixed joints between things, with attach points that snap together; Jolt joints for dynamic things. Loaded on the headset |
 | hands | Drawn hands with nails in place of the controller boxes; fingers curl with grip, trigger and thumb rest; colours from the PC (`hands_config`). Curling was checked on the PC with a stand-in for the controllers |
 
 Every draft has been reworked or dropped; what happened to each is in
@@ -109,6 +116,9 @@ container).
 
 ## How to build and test
 
+Connecting to the headset over Wi-Fi, syncing modules and reading the log:
+[WIRELESS-ADB.md](WIRELESS-ADB.md).
+
 - **APK:** every push builds one in GitHub Actions (`quest1-apk.yml`), signed
   with `ci/debug.keystore` so builds install over each other. Install with
   `.\adb install -r slopitect-quest1-debug.apk`.
@@ -138,10 +148,9 @@ container).
   godot-whisper's own sgemm.cpp patch hid that function on CPUs without
   half-float vector maths (the Quest 1); `ci/patch-godot-whisper.py` keeps it,
   and CI now fails if the library is missing any of its own functions.
-  Fixed and seen on the headset (it heard "Hello."). Speech moved into the
-  `vtt` and `tts` live modules; they need the next APK (without the old
-  voice module) and a headset test. Speech out still isn't audible: the
-  engine (SherpaTTS) synthesizes, but nothing is heard from Slopitect.
+  Fixed and seen on the headset. Speech moved into the `vtt` and `tts`
+  live modules; both work on the headset (speech out is heard since
+  PR #32). Open: hold-to-talk is still slow.
 - **Module framework** ([MODULE-FRAMEWORK.md](MODULE-FRAMEWORK.md)): the
   owner's decisions, then the live-module steps, then the APK pieces.
 - **Roadmap** (README): Claude on the PC through MCP (step 4), backups to

@@ -5,10 +5,16 @@ you're standing in it. You ask for something, Claude builds it into the
 running world: objects, behaviour, things pulled in from the internet. No
 rebuild, no restart. You and the AI build the world together.
 
-> **Status:** the empty room (step 2), the command server (step 3) and the
-> agent inside the app run on a Quest 1; the agent builds with Claude there.
-> The newer parts (every window as data, files, voice and live code) are
-> built and tested on a PC with Godot, but not yet on the headset.
+> **Status:** the APK, the agent, Jolt physics and on-headset speech to
+> text run on a Quest 1, and spoken replies have been heard there. Most
+> live modules are loaded on the headset; each one's level (seen on the
+> headset, tested on a PC, untested) is in
+> [docs/PROJECT-STATE.md](docs/PROJECT-STATE.md) and on the
+> [project board](https://github.com/users/Bubbagum88/projects/2).
+
+How it's designed: [docs/DESIGN.md](docs/DESIGN.md). Working with the
+headset over Wi-Fi (connect, sync modules, logs):
+[docs/WIRELESS-ADB.md](docs/WIRELESS-ADB.md).
 
 ## Features
 
@@ -34,9 +40,11 @@ Working now:
   write its own Slopitect folder on the headset freely; anything else in
   the headset's storage needs your Yes in the headset each time, and
   personal folders (photos, videos, downloads, documents) stay blocked.
-- **Voice** *(built, waiting on a headset test)*: the agent's replies are
-  read aloud if the headset has a speech engine; hold the left trigger to
-  talk, through a speech-to-text service you choose (off until you set one).
+- **Voice** *(live modules `tts` and `vtt`, both working on the headset)*:
+  the agent's replies are read aloud through the headset's speech engine
+  (heard on the Quest 1), and holding the left trigger turns what you say
+  into text with whisper.cpp on the headset itself (works, still slow), or
+  a service you choose.
 - **New code while you play** *(built, waiting on a headset test)*: the
   agent can write new modules that load into the running app, each only
   after you've seen the code and said Yes in the headset.
@@ -50,6 +58,26 @@ Working now:
   of your view when the avatar is out of sight. It has outfits (top hat,
   party hat, crown, headphones, bow tie), and new ones can be made from
   simple shapes while the app runs.
+
+- **Menus and settings** *(live modules)*: one hand menu on the left hand
+  (Home, Settings, Undo, Redo, Tools, Terminal and a button for each module
+  that offers one), a pause menu on the left home button (save, load,
+  worlds, settings), and a Settings window built from each loaded module's
+  own settings. Windows return to their usual place unless pinned.
+- **Terminal** *(live module)*: a command line window in VR with history,
+  Tab, Help and an Ask AI button; it's also the chat window's Chat mode.
+- **Worlds, saves and undo** *(live modules)*: a world per project,
+  checkpoints to go back to, and one undo list for every change.
+- **Building** *(live modules)*: walk and turn, grab things, physics on or
+  off per thing, terrain, paths, joints (hinges, sliders, ball and fixed,
+  with attach points that snap together) and a Library window of Poly Haven
+  textures and models and your own prefabs.
+- **Hands** *(live module)*: drawn hands whose fingers curl with the grip,
+  trigger and thumb.
+- **The agent's memory** *(live module)*: notes and past questions per
+  world and overall, with keys and personal info cleaned out.
+- **Physics:** Jolt (seen on the headset; `physics_status` says which
+  engine runs).
 
 What you can change live, what needs a new APK, and how the agent is kept
 safe: [docs/LIVE-CHANGES-AND-SAFETY.md](docs/LIVE-CHANGES-AND-SAFETY.md).
@@ -77,7 +105,9 @@ isn't a goal or tested.
 Built with [Godot 4](https://godotengine.org) (4.7.2), its OpenGL ES
 "Compatibility" renderer, and OpenXR through the
 [Godot OpenXR Vendors](https://github.com/GodotVR/godot_openxr_vendors)
-plugin (5.1.0), which has a Quest 1 export switch.
+plugin (5.1.0), which has a Quest 1 export switch. Physics runs on Jolt.
+Why each engine was chosen, and the limits of the Quest 1, are in
+[docs/DESIGN.md](docs/DESIGN.md#4-engines-and-the-quest-1).
 
 The plan (from step 3 on): the app runs a small command server. Claude
 sends it commands such as "spawn a cube here", "make it red", or "run this
@@ -100,7 +130,7 @@ Each step is small and gets tested on the headset before the next one.
 - [ ] 5. Saves and backups: the world is saved as JSON before every change, with undo; backups go to a GitHub repo, so every version has a history
 - [ ] 6. Claude can send scripts, so objects can have behaviour *(built as live modules, each behind your Yes; waiting on a headset test)*
 - [ ] 7. Assets: Poly Haven (CC0, through its API) first; Kenney, Quaternius, Poly Pizza and Sketchfab (CC0 and CC-BY models only) as backups. Each asset's source and licence is recorded, and any that need credit are credited. Assets taken from games on your own headset are kept local and never backed up to GitHub
-- [ ] 8. Talk to Claude from inside the headset *(typing tested on a Quest 1; hold-to-talk heard words on a Quest 1 but they didn't reach the chat box, fixed in the vtt module and waiting on a headset test; spoken replies not heard yet)*
+- [ ] 8. Talk to Claude from inside the headset *(typing tested on a Quest 1; hold-to-talk heard words on a Quest 1 but they didn't reach the chat box, now working through the vtt module, still slow; spoken replies heard through the tts module)*
 - [ ] 9. Upgrade while you play: new menus, tools and features loaded into the running app (scripts and Godot resource packs), with a new APK only for engine or permission changes *(menus and scripts built; resource packs not yet)*
 
 ## Install on a Quest 1
@@ -146,6 +176,10 @@ too, so it only takes commands from programs you said Yes to. Say Yes in
 the headset; the pairing key is saved in `slopi-key.txt` next to the script
 (keep it private) and sent with every command. `pair_config` lists the
 paired programs, and `{"cmd":"pair_config","remove":"NAME"}` unpairs one.
+
+No cable: [docs/WIRELESS-ADB.md](docs/WIRELESS-ADB.md) covers pairing over
+Wi-Fi, the port that changes after a restart, and syncing live modules
+with [`tools/slopi-sync.ps1`](tools/slopi-sync.ps1).
 
 To talk to the agent from the PC and watch what it does, run
 [`tools/slopi-chat.ps1`](tools/slopi-chat.ps1) from the same folder.
@@ -370,6 +404,9 @@ registering the plugin first.)
 | `game/pending.gd` | A command's answer that comes later (after your Yes) |
 | `game/agent/providers/` | One file per kind of AI service (`anthropic.gd`, `openai.gd`) |
 | `game/skills/` | The agent's shipped skills, one `SKILL.md` per folder |
+| `docs/DESIGN.md` | How it's built and why: live modules, module hooks, safety, engines, how work is done |
+| `docs/WIRELESS-ADB.md` | Connecting over Wi-Fi, syncing modules, installing, reading the log |
+| `docs/VR-UI.md` | How the windows work |
 | `docs/LIVE-CHANGES-AND-SAFETY.md` | What changes live, what needs a new APK, and the safety rules |
 | `docs/PROJECT-STATE.md` | Everything built so far, how sure we are each part works, the rules, and what's open |
 | `docs/MODULE-FRAMEWORK.md` | The plan for live modules to plug into each other, and the review of the draft modules |
@@ -377,6 +414,7 @@ registering the plugin first.)
 | `CLAUDE.md` | Working rules for Claude sessions on this repo |
 | `tools/slopi.ps1` | Sends one command from your PC and prints the reply |
 | `tools/slopi-chat.ps1` | Talks to the agent from your PC and shows its replies and tool calls as they happen |
+| `tools/slopi-sync.ps1` | Two-way sync of live modules with the headset, and loading them (`-Status`, `-Load`, `-Device`) |
 | `tools/slopi-backup.ps1` | Backs up a project from the headset into a git repository on the PC, and pushes it with -Push (private projects and assets/ are never taken) |
 | `ci/debug.keystore` | Debug signing key, so each build installs over the last |
 | `game/export_presets.cfg` | The "Quest 1" Android export (Quest 1 and 2 only) |
