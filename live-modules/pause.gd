@@ -35,8 +35,9 @@ const PAGES := {"main": PANEL, "load": LOAD_PANEL, "worlds": "pause_worlds"}
 const OLD_SETTINGS_PANEL := "pause_settings"  # settings.gd took the Settings page over
 const HAND_BUTTON := [0.16, 0.07]
 const CHECK_SECONDS := 1.0
-const WIDTH := 0.42
-const BUTTON := [0.42, 0.06]
+const WIDTH := 0.7
+const BUTTON := [0.7, 0.06]
+const HALF := [0.34, 0.07]  # the main menu's buttons, two to a row
 const MAX_WORLDS := 6
 const MAX_CHECKPOINTS := 6
 
@@ -220,38 +221,41 @@ func _put(id_panel: String, title: String, elements: Array) -> String:
 	return "" if reply.get("ok", false) else "%s: %s" % [id_panel, reply.get("error", "?")]
 
 
-func _text(id: String, text: String, color := "text", font_size := 30) -> Dictionary:
-	return {"type": "text", "id": id, "text": text.left(400), "width": WIDTH, "color": color, "font_size": font_size}
+func _text(id: String, text: String, color := "text", font_size := 30, width := WIDTH) -> Dictionary:
+	return {"type": "text", "id": id, "text": text.left(400), "width": width, "color": color, "font_size": font_size}
 
 
 func _button(id: String, label: String, action: Dictionary, color := "button", size := BUTTON) -> Dictionary:
 	return {"type": "button", "id": id, "label": label.left(40), "size": size, "action": action, "color": color}
 
 
-func _opener(id: String, label: String, to: String) -> Dictionary:
-	return {"type": "button", "id": id, "label": label, "size": BUTTON, "open": to}
+func _opener(id: String, label: String, to: String, size := HALF) -> Dictionary:
+	return {"type": "button", "id": id, "label": label, "size": size, "open": to}
 
 
 func _main_elements() -> Array:
-	var out := [
-		{"type": "text", "id": "where", "width": WIDTH, "font_size": 26, "color": "muted", "source": {"cmd": "pause_status", "field": "line"}},
-		_button("resume", "Resume", {"cmd": "pause_do", "act": "hide"}, "accent"),
-		_button("save", "Save world", {"cmd": "pause_do", "act": "save"}, "ok") if _has("save") else _text("save_missing", "Load save.gd to save the world.", "muted", 26),
+	# Wide, with the buttons two to a row, so the menu isn't a tall column.
+	var buttons := [
+		_button("resume", "Resume", {"cmd": "pause_do", "act": "hide"}, "accent", HALF),
+		_button("save", "Save world", {"cmd": "pause_do", "act": "save"}, "ok", HALF) if _has("save") else _text("save_missing", "Load save.gd to save.", "muted", 26, HALF[0]),
 		_opener("load", "Load", LOAD_PANEL),
 		_opener("worlds_list", "Worlds", WORLDS_PANEL),
-		_opener("windows", "All windows", "bar"),
-		_button("hand", "Hand menu", {"cmd": "pause_do", "act": "hand_menu"}),
 	]
 	if _has("settings"):
 		# settings.gd fills its window, which opens in this menu's place.
-		out.insert(5, {"type": "button", "id": "settings", "label": "Settings", "size": BUTTON,
+		buttons.append({"type": "button", "id": "settings", "label": "Settings", "size": HALF,
 			"action": {"cmd": "settings_do", "act": "refresh"}, "open": "settings"})
+	buttons.append(_opener("windows", "All windows", "bar"))
+	buttons.append(_button("hand", "Hand menu", {"cmd": "pause_do", "act": "hand_menu"}, "button", HALF))
 	if _has("worlds"):
 		# Opens in this menu's place, with a back arrow to it.
-		var worlds := _button("worlds", "Files & modules", {"cmd": "worlds_do", "act": "show"})
+		var worlds := _button("worlds", "Files & modules", {"cmd": "worlds_do", "act": "show"}, "button", HALF)
 		worlds["open"] = "worlds"
-		out.append(worlds)
-	return out
+		buttons.append(worlds)
+	return [
+		{"type": "text", "id": "where", "width": WIDTH, "font_size": 26, "color": "muted", "source": {"cmd": "pause_status", "field": "line"}},
+		{"type": "grid", "id": "main_buttons", "columns": 2, "children": buttons},
+	]
 
 
 func _worlds_elements() -> Array:

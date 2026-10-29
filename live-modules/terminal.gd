@@ -808,11 +808,12 @@ func _build_panel() -> void:
 		elements.append(tool)
 	var title := "Chat" if chat else "Terminal"
 	var panel := {"cmd": "ui_add", "id_panel": PANEL, "title": title, "place": "front", "distance": 0.6, "height": -0.3,
-		"toggle": "right_a", "elements": elements}
+		"toggle": "right_a", "chrome": true, "elements": elements}
 	if _has_panel():
 		# Only the title and elements: where you put the window, and its
 		# toggle, stay.
-		panel = {"cmd": "ui_update", "id_panel": PANEL, "title": title, "elements": elements}
+		# The title bar (carry, Pin, close) is added to a window made before it had one.
+		panel = {"cmd": "ui_update", "id_panel": PANEL, "title": title, "chrome": true, "elements": elements}
 	var reply: Dictionary = ctx["server"].run(panel)
 	if not reply.get("ok", false):
 		push_error("Slopitect terminal: the window could not be built: %s" % reply.get("error"))
