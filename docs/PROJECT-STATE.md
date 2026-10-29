@@ -66,6 +66,7 @@ All PC-tested, none yet on the headset. See
 | physics | Static or dynamic bodies |
 | inspect | Point at a thing to switch its physics, grabbing and hiding, or delete it |
 | avatar | The agent's avatar, moved out of the APK: animations, emotions, a mouth that follows speech, a paged speech bubble that docks at the edge of view, outfits; `body()` for other modules (jelly). The APK avatar it replaces was seen on the headset; this one is PC-tested only |
+| memory | The agent's memory per world and global: notes, past questions with their tools and errors, digests; keys and personal info cleaned out |
 
 Drafts waiting to be reworked: [live-modules/drafts/](../live-modules/drafts/)
 (aimsg, controller, hands, jelly, stick_move, vrui, web, world). The plan for
