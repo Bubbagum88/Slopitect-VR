@@ -38,9 +38,9 @@ extends SlopitectModule
 #
 # Panels are drawn the way the vrui draft drew its windows (rounded, with
 # real 2D panels and text, see Drawing), redrawn only when they change. A
-# panel can be held by a hand ("hand" place). A panel you carry somewhere
-# remembers where it opened ("home"), and goes back there when it's opened
-# again or the app restarts, unless its title bar's Pin is on ("keep_place").
+# panel can be held by a hand ("hand" place). A window opens in front of
+# you each time (a hand panel on its hand), also after a restart, unless its
+# title bar's Pin is on ("keep_place"): then it stays where you put it.
 # A hand panel carried back near its hand shows a faint outline there and
 # snaps on when let go. Its elements can flow in
 # rows, columns and grids (layout column or row) instead of each having an
@@ -369,8 +369,8 @@ func _end_drag() -> void:
 	if index == -1:
 		return
 	# Where you let go is where it stays while it's open: it's now a panel
-	# in the world (a hand panel too: you took it out of your hand). It
-	# remembers where it opened, to go back there (see _go_home).
+	# in the world (a hand panel too: you took it out of your hand). Unless
+	# it's pinned, it opens in front of you next time (see _unpin_place).
 	var panel: Dictionary = panels[index]
 	var near_dock := _near_dock(panel)
 	_hide_home_ghost()
@@ -429,6 +429,22 @@ func _go_home(panel: Dictionary) -> void:
 	if panel["place"] in ["front", "follow"]:
 		holder.global_transform = _front_transform(panel)
 	_following.erase(panel["id_panel"])
+
+
+# An unpinned window opens in front of you: a hand panel goes back on its
+# hand, anything else that was carried or put in the world opens in front
+# (or follows, if that's how it opened).
+func _unpin_place(panel: Dictionary) -> void:
+	if panel["home"].get("place", panel["place"]) == "hand":
+		_go_home(panel)
+		return
+	if panel["place"] != "world":
+		return
+	panel["place"] = "follow" if panel["home"].get("place") == "follow" else "front"
+	panel["home"] = {}
+	_following.erase(panel["id_panel"])
+	if _holders.has(panel["id_panel"]) and panel["visible"]:
+		_holders[panel["id_panel"]].global_transform = _front_transform(panel)
 
 
 # Where a hand panel's spot is now, in the world.
@@ -540,8 +556,8 @@ func _set_keep_place(panel: Dictionary, on: bool) -> void:
 
 
 func _set_visible(panel: Dictionary, on: bool) -> void:
-	if on and not panel["keep_place"] and not panel["home"].is_empty():
-		_go_home(panel)  # a panel you carried opens where it always opens, unless pinned
+	if on and not panel["keep_place"]:
+		_unpin_place(panel)  # opens in front of you (or on its hand), unless pinned
 	if on and panel["place"] in ["front", "follow"]:
 		_holders[panel["id_panel"]].global_transform = _front_transform(panel)
 		_following.erase(panel["id_panel"])
@@ -2542,7 +2558,7 @@ func _load() -> void:
 			panels = loaded
 			for panel in panels:
 				if not panel["keep_place"]:
-					_go_home(panel)  # only pinned windows stay where you put them
+					_unpin_place(panel)  # only pinned windows stay where you put them
 			print("Slopitect ui: loaded %d panels from %s" % [panels.size(), SAVE_PATH])
 			return
 	# Keep the broken file for inspection instead of overwriting it.

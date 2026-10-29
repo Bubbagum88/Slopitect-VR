@@ -49,7 +49,7 @@ controls.gd ── actions ("point", "grab_right", toggles) ──► vrui.gd �
 | Field | What it does |
 | --- | --- |
 | `place` | `front` (opens in front of you), `follow` (opens in front, then catches up when you turn more than 35° away or walk 0.5 m), `wrist` (left wrist), `hand` (held by a controller, see below), `world` (fixed). A panel you carry becomes `world` where you let go |
-| `keep_place`, `home` | `keep_place` false (the default): a panel you carried opens again where it always opens (its `home`, remembered when you first carry it), also after a restart. true: it stays where you put it. The **Pin** button in the title bar switches it. A `hand` panel carried back within 12 cm of its spot shows a faint outline there and snaps on when you let go, pinned or not |
+| `keep_place`, `home` | `keep_place` false (the default): the window opens in front of you each time, also after a restart, even if you carried it somewhere (a `hand` panel goes back on its hand; `home` remembers where it first opened). true: it stays where you put it. The **Pin** button in the title bar switches it. A `hand` panel carried back within 12 cm of its spot shows a faint outline there and snaps on when you let go, pinned or not |
 | `hand`, `scale` | For `hand`: which controller holds it (`left`, the default, or `right`) and its size (0.5 by default; any panel can have a `scale` from 0.1 to 3) |
 | `size`, `color` | The area `at` elements sit in, and the background. No colour means the theme's `panel`. The window grows to fit what's in it |
 | `chrome` | A title bar: the title, a close x, a back arrow when another panel's button opened it, and a handle. Pull the trigger on the bar and move the controller to carry the window |
