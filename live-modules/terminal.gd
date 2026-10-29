@@ -77,9 +77,10 @@ func _exit_tree() -> void:
 		ctx["server"].run({"cmd": "ui_remove", "id_panel": PANEL})
 
 
-# A tile on the Menu bar, when ui.gd has a launcher.
+# A tile on the Menu bar, when ui.gd has a launcher; "tools" also lists it
+# in the Tools menu.
 func menu_info() -> Dictionary:
-	return {"id": "terminal", "label": "Terminal", "order": 50, "panel": PANEL}
+	return {"id": "terminal", "label": "Terminal", "order": 50, "panel": PANEL, "tools": true}
 
 
 func _process(delta: float) -> void:

@@ -1632,6 +1632,11 @@ func _title_bar(panel: Dictionary, view: Dictionary) -> Control:
 	var title := _label(panel["title"], theme_values["font_title"], _theme_color("title"), false, "left")
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	title.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	# One line, cut short if it must: a wrapping label with no width yet
+	# asks for a line per letter, and the window would grow to fit that.
+	title.autowrap_mode = TextServer.AUTOWRAP_OFF
+	title.clip_text = true
+	title.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	row.add_child(title)
 	var close := _small_button(view, id_panel, "close", "x", side, _theme_color("button"))
 	close.set_meta("hover", _theme_color("danger"))
@@ -1644,7 +1649,9 @@ func _small_button(view: Dictionary, id_panel: String, kind: String, text: Strin
 	button.custom_minimum_size = size
 	button.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	_pointable(view, button, id_panel, "", kind, "", color, BUTTON_RADIUS)
-	button.add_child(_label(text, theme_values["font_title"], _theme_color("text"), false, "center"))
+	var label := _label(text, theme_values["font_title"], _theme_color("text"), false, "center")
+	label.autowrap_mode = TextServer.AUTOWRAP_OFF  # see _title_bar
+	button.add_child(label)
 	return button
 
 
@@ -1658,7 +1665,9 @@ func _tabs(panel: Dictionary, view: Dictionary) -> Control:
 		tab.custom_minimum_size = Vector2(_px(0.08), _px(TAB_BAR))
 		tab.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		_pointable(view, tab, panel["id_panel"], "", "tab", page, color, BUTTON_RADIUS)
-		tab.add_child(_label(page, theme_values["font_small"], _theme_color("text"), false, "center"))
+		var label := _label(page, theme_values["font_small"], _theme_color("text"), false, "center")
+		label.autowrap_mode = TextServer.AUTOWRAP_OFF  # see _title_bar
+		tab.add_child(label)
 		row.add_child(tab)
 	return row
 
@@ -1677,7 +1686,10 @@ func _app_tiles(panel: Dictionary, view: Dictionary) -> Control:
 		tile.name = "App_" + app["id"]
 		tile.custom_minimum_size = APP_CELL * PX_PER_M
 		_pointable(view, tile, panel["id_panel"], "", "app", app["id"], _theme_color("accent") if open else _theme_color("button"), BUTTON_RADIUS)
-		tile.add_child(_label(app["label"], theme_values["font_body"], _theme_color("text"), false, "center"))
+		var label := _label(app["label"], theme_values["font_body"], _theme_color("text"), false, "center")
+		label.custom_minimum_size.x = APP_CELL.x * PX_PER_M - 2 * _px(0.006)  # wraps at the tile's width (see _title_bar)
+		label.size.x = label.custom_minimum_size.x
+		tile.add_child(label)
 		grid.add_child(tile)
 	view["apps"] = grid
 	return grid
@@ -1778,6 +1790,7 @@ func _control_for(id_panel: String, element: Dictionary, view: Dictionary, size:
 			var label := _label(element["text"] if not element.has("source") else element["source"].get("empty", ""), element["font_size"], color, element["mono"], element["align"])
 			label.text = _live_text.get(id_panel + "/" + element["id"], label.text)
 			label.custom_minimum_size.x = element["width"] * PX_PER_M
+			label.size.x = label.custom_minimum_size.x  # wrap at its width from the start (see "button")
 			if element.has("height"):
 				label.custom_minimum_size.y = element["height"] * PX_PER_M
 				label.clip_text = true
@@ -1788,7 +1801,12 @@ func _control_for(id_panel: String, element: Dictionary, view: Dictionary, size:
 		"button":
 			control = PanelContainer.new()
 			_pointable(view, control, id_panel, element["id"], "element", "", color, BUTTON_RADIUS)
-			control.add_child(_label(element["label"], _button_font(size), _theme_color("text"), false, "center"))
+			var label := _label(element["label"], _button_font(size), _theme_color("text"), false, "center")
+			# A wrapping label with no width yet would ask for a line per
+			# letter, and a row or column would grow the window to fit that.
+			label.custom_minimum_size.x = maxf(0.0, size.x - 2 * _px(0.006))
+			label.size.x = label.custom_minimum_size.x
+			control.add_child(label)
 		"input":
 			control = PanelContainer.new()
 			_pointable(view, control, id_panel, element["id"], "element", "", _theme_color("input_bg"), BUTTON_RADIUS * 0.5)
@@ -1812,6 +1830,8 @@ func _control_for(id_panel: String, element: Dictionary, view: Dictionary, size:
 			row.mouse_filter = Control.MOUSE_FILTER_IGNORE
 			control.add_child(row)
 			var label := _label(element["label"], _button_font(size), _theme_color("text"), false, "left")
+			label.custom_minimum_size.x = maxf(0.0, size.x - 2 * _px(0.006) - _px(0.05))  # see "button"
+			label.size.x = label.custom_minimum_size.x
 			label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 			label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 			row.add_child(label)

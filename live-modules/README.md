@@ -10,7 +10,9 @@ unless its file has changed since.
 |---|---|
 | `controls.gd` | The only thing that reads the controllers: each button is bound to a named action (point, grab_left, grab_right, talk, left_menu, left_y, right_a, right_b) and each thumbstick to a stick (walk, turn). Other modules take the actions, and read how far a grip or trigger is pressed with `value()`. A button can also run a command (never a `*_config` or `agent_` one) or show and hide a window. `controls_status` shows the bindings; `controls_config` (PC only) changes them. X on the left controller always stops the agent and can't be bound |
 | `ui.gd` | Every window: the Menu (a launcher with a tile for every window), wrist panel, the agent's chat window and keyboard, and any panel you or the agent add (`ui_*` commands). Drawn the way the vrui draft drew windows (rounded, wrapped text), redrawn only on a change. Title bars to carry and close windows, tabs, toggles and sliders, a hand window on a controller, rows/columns/grids that lay themselves out, buttons that open a sub-menu with a back arrow, scrolling text, one theme. Needs controls.gd for its buttons. See [docs/VR-UI.md](../docs/VR-UI.md) |
-| `tools.gd` | The tool window (B on the right controller): a button for each loaded tool, the chosen tool's buttons, and one Undo / Redo list for every tool |
+| `tools.gd` | The Tools menu (B on the right controller, or its tile): a button for each loaded tool, which chooses it and opens that tool's own menu (its buttons, Undo / Redo, a back arrow); the windows that are tools (the terminal; any module whose `menu_info()` has `"tools": true`); and one Undo / Redo list for every tool |
+| `pause.gd` | The pause menu (first tile on the Menu, or a button bound to `{"panel": "pause"}` with `controls_config`): Resume, Save world (a checkpoint), Load world (the worlds and the newest checkpoints, in a sub-menu), Settings (what each setting is now, the avatar's outfit, a new conversation, stop speaking; the rest change from the PC) and the Worlds window. It doesn't stop the world. Needs ui.gd; save.gd and projects.gd for saving and loading |
+| `chat.gd` | Makes the agent's chat window (Y on the left controller) like the terminal: a green screen that keeps the whole conversation (Up / Down / End scroll it, Cls clears it), the agent's state, the line you type, the keyboard with Send, and STOP and New chat beside the screen. It fills ui.gd's chat panel, keeping its ids and where you put it, and puts the old layout back when it's unloaded. Uses aimsg.gd's layout when that's loaded |
 | `landscape.gd` | Ground you can shape, 20 × 20 m: raise, lower, smooth and flatten brushes. It stands in for the flat floor while it's loaded |
 | `paths.gd` | Roads and trails: put down points with the trigger, then press Finish. Optionally levels the ground under the path |
 | `save.gd` | Keeps the shapes and models: saved by themselves when they change and put back at start. Checkpoints keep the whole world (ground and paths too) to go back to, with undo |
@@ -59,6 +61,8 @@ From the platform-tools folder:
 .\adb push "C:\path\to\live-modules\net.gd" /sdcard/Slopitect/modules/
 .\adb push "C:\path\to\live-modules\jelly.gd" /sdcard/Slopitect/modules/
 .\adb push "C:\path\to\live-modules\worlds.gd" /sdcard/Slopitect/modules/
+.\adb push "C:\path\to\live-modules\pause.gd" /sdcard/Slopitect/modules/
+.\adb push "C:\path\to\live-modules\chat.gd" /sdcard/Slopitect/modules/
 .\slopi.ps1 '{"cmd":"code_load","name":"controls"}'
 .\slopi.ps1 '{"cmd":"code_load","name":"ui"}'
 .\slopi.ps1 '{"cmd":"code_load","name":"tools"}'
@@ -79,6 +83,8 @@ From the platform-tools folder:
 .\slopi.ps1 '{"cmd":"code_load","name":"net"}'
 .\slopi.ps1 '{"cmd":"code_load","name":"jelly"}'
 .\slopi.ps1 '{"cmd":"code_load","name":"worlds"}'
+.\slopi.ps1 '{"cmd":"code_load","name":"pause"}'
+.\slopi.ps1 '{"cmd":"code_load","name":"chat"}'
 ```
 
 Each `code_load` shows the code in the headset and waits for your Yes
