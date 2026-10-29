@@ -8,7 +8,7 @@ unless its file has changed since.
 
 | File | What it does |
 |---|---|
-| `controls.gd` | The only thing that reads the controllers: each button is bound to a named action (point, grab_left, grab_right, talk, left_menu, left_y, right_a, right_b) and each thumbstick to a stick (walk, turn). Other modules take the actions. `controls_status` shows the bindings; `controls_config` (PC only) changes them. X on the left controller always stops the agent and can't be bound |
+| `controls.gd` | The only thing that reads the controllers: each button is bound to a named action (point, grab_left, grab_right, talk, left_menu, left_y, right_a, right_b) and each thumbstick to a stick (walk, turn). Other modules take the actions, and read how far a grip or trigger is pressed with `value()`. A button can also run a command (never a `*_config` or `agent_` one). `controls_status` shows the bindings; `controls_config` (PC only) changes them. X on the left controller always stops the agent and can't be bound |
 | `ui.gd` | Every window: the Menu (a launcher with a tile for every window), wrist panel, the agent's chat window and keyboard, and any panel you or the agent add (`ui_*` commands). Title bars to carry and close windows, tabs, toggles and sliders, one theme. Needs controls.gd for its buttons. See [docs/VR-UI.md](../docs/VR-UI.md) |
 | `tools.gd` | The tool window (B on the right controller): a button for each loaded tool, the chosen tool's buttons, and one Undo / Redo list for every tool |
 | `landscape.gd` | Ground you can shape, 20 × 20 m: raise, lower, smooth and flatten brushes. It stands in for the flat floor while it's loaded |
@@ -18,9 +18,14 @@ unless its file has changed since.
 | `grab.gd` | Hold the grip near a shape or model to pick it up; let go to drop it (or throw it, with physics). One undo per pick-up |
 | `physics.gd` | Makes shapes and models fall, bounce and collide (the engine's own physics) once you set them dynamic; the ground is the floor or the landscape |
 | `projects.gd` | A world per project (`projects/NAME/` in the Slopitect folder: its saves, notes, and the live modules it uses). Needs save.gd |
+| `hands.gd` | Drawn hands with coloured nails in place of the controller boxes; the fingers curl with the grip, trigger and where your thumb rests. Colours from the PC (`hands_config`). Needs controls.gd to move |
 | `inspect.gd` | A tool for one thing at a time: point and pull the trigger to select a shape or model, then switch its physics (none, static, dynamic), whether it can be grabbed, hide it, or delete it (one undo). Show hidden brings hidden things back. The switches are kept with each project's world |
 | `terminal.gd` | A command line in the headset (A on the right controller): type any of the app's commands, like `spawn shape=box scale=0.3`, and press Run to see the reply. Tab completes a command's name, Prev / Next step through what you ran, Help lists the commands, Up / Down scroll, Cls clears, and Ask AI sends your line with the last command and its reply to the agent. Won't run `*_config` settings. Needs ui.gd for its window |
 | `avatar.gd` | The agent's avatar (it used to be built into the APK): a red cube with a face that thinks while the agent works, shows emotions (`avatar_emotion`), moves its mouth with the words while the speech engine talks, and shows replies a page at a time in a speech bubble above its head, which waits at the edge of your view when the avatar is out of sight. Outfits are made of simple shapes (`avatar_outfit_add`). Other modules use `body()`, `say()`, `set_state()`, `set_emotion()` and `speaking()` |
+| `aimsg.gd` | Makes the chat log easier to read: "you>" and "ai>" tags, the agent's words wrapped, markdown marks taken out, code marked with "\|", tool calls and thinking on one short line. It changes no window: the chat log's source asks for it (`"format": "aimsg"`, which needs the ui.gd from the VR UI work), and shows plain lines when it isn't loaded. Width and height from the PC (`aimsg_config`) |
+| `net.gd` | Downloads from the internet, only https and only from hosts allowed on the PC (`net_config`; Poly Haven's to start). Files go in `downloads/HOST/` with a `.source.json` saying where they came from. Other modules download through its `fetch()` |
+| `worlds.gd` | The Worlds window, from its tile on the Menu. Tabs: Worlds (open a project's world or make a new one), Checkpoints (keep the world now, go back, delete), Files (look through the Slopitect folder), Modules (load, reload or unload live modules). It keeps nothing itself; it shows and runs projects, save, files and code. Needs ui.gd; a tab whose module is missing says so |
+| `jelly.gd` | The avatar squashes and stretches like jelly as it moves, keeping its volume; `jelly_poke` wobbles it. Needs the live avatar module (its `body()`); spring from the PC (`jelly_config`) |
 | `assets.gd` | 3D models from [Poly Haven](https://polyhaven.com) (all CC0): search, download to the headset, place in the world. Powered by Poly Haven |
 | `memory.gd` | The agent's memory between conversations: notes it keeps (facts, decisions, troubleshooting, coding techniques), each question you asked in a world with its answer, tools and errors, older ones folded into digests, and each tool's failures. One memory per world (project) plus a global one. Keys and personal info are cleaned out before anything is kept |
 
@@ -49,6 +54,11 @@ From the platform-tools folder:
 .\adb push "C:\path\to\live-modules\terminal.gd" /sdcard/Slopitect/modules/
 .\adb push "C:\path\to\live-modules\avatar.gd" /sdcard/Slopitect/modules/
 .\adb push "C:\path\to\live-modules\memory.gd" /sdcard/Slopitect/modules/
+.\adb push "C:\path\to\live-modules\hands.gd" /sdcard/Slopitect/modules/
+.\adb push "C:\path\to\live-modules\aimsg.gd" /sdcard/Slopitect/modules/
+.\adb push "C:\path\to\live-modules\net.gd" /sdcard/Slopitect/modules/
+.\adb push "C:\path\to\live-modules\jelly.gd" /sdcard/Slopitect/modules/
+.\adb push "C:\path\to\live-modules\worlds.gd" /sdcard/Slopitect/modules/
 .\slopi.ps1 '{"cmd":"code_load","name":"controls"}'
 .\slopi.ps1 '{"cmd":"code_load","name":"ui"}'
 .\slopi.ps1 '{"cmd":"code_load","name":"tools"}'
@@ -64,6 +74,11 @@ From the platform-tools folder:
 .\slopi.ps1 '{"cmd":"code_load","name":"terminal"}'
 .\slopi.ps1 '{"cmd":"code_load","name":"avatar"}'
 .\slopi.ps1 '{"cmd":"code_load","name":"memory"}'
+.\slopi.ps1 '{"cmd":"code_load","name":"hands"}'
+.\slopi.ps1 '{"cmd":"code_load","name":"aimsg"}'
+.\slopi.ps1 '{"cmd":"code_load","name":"net"}'
+.\slopi.ps1 '{"cmd":"code_load","name":"jelly"}'
+.\slopi.ps1 '{"cmd":"code_load","name":"worlds"}'
 ```
 
 Each `code_load` shows the code in the headset and waits for your Yes
@@ -169,6 +184,20 @@ The first time projects.gd loads, the existing saves become project `start`.
 | `physics_push` | `name`, `velocity` [x, y, z] |
 | `physics_status` | |
 | `physics_config` (PC only) | `gravity` |
+| `controls_status` | |
+| `controls_config` (PC only) | `buttons` {"hand/button": an action, a command like `{"cmd": "spawn", "shape": "box", "position": "in_front"}`, or ""}, `sticks` {hand: name or ""}, or `reset` true |
+| `hands_status` | |
+| `aimsg_status` | |
+| `aimsg_config` (PC only) | any of `cols` (20–80 characters), `rows` (4–40 lines) |
+| `net_fetch` | `url` (https, an allowed host), optional `file` (name, `/` for folders; default the URL's last part), `licence`; returns an `id` |
+| `net_status` | optional `id` |
+| `net_config` (PC only) | `hosts` [names], or `add` / `remove` (a host) |
+| `worlds_do` | `act`: toggle, show (optional `page`: Worlds, Checkpoints, Files, Modules), refresh, new_project / open_project (`name`), checkpoint (optional `label`), restore / delete_checkpoint (`checkpoint`), load_module / unload_module (`name`), folder (`path`, optional `page`), modules_page (`page`) |
+| `worlds_status` | |
+| `jelly_poke` | optional `strength` (0.1–1) |
+| `jelly_status` | |
+| `jelly_config` (PC only) | any of `stiffness` (20–400), `damping` (1–30) |
+| `hands_config` (PC only) | any of `skin` ("#rrggbb"), `nails` (a colour, or 1 to 5 thumb to pinky, both hands), `nails_left`, `nails_right`, or `reset` true |
 
 | `memory_status` | |
 | `memory_recall` | optional `world` (another world's name) |

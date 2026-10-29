@@ -53,7 +53,7 @@ All PC-tested, none yet on the headset. See
 
 | Module | What it does |
 | --- | --- |
-| controls | The only reader of buttons and thumbsticks; turns them into named actions; bindings changed from the PC (`controls_config`) |
+| controls | The only reader of buttons and thumbsticks; turns them into named actions, or runs a command; `value()` for how far a grip or trigger is pressed; `pulse()` buzzes a controller; bindings changed from the PC (`controls_config`) |
 | ui | Every window: panels of text, buttons, inputs, toggles and sliders that you or the agent can change live; title bars, tabs, a launcher Menu, one theme, hover and haptic feedback ([VR-UI.md](VR-UI.md)) |
 | tools | Tool picker with shared undo |
 | landscape | Terrain |
@@ -67,9 +67,14 @@ All PC-tested, none yet on the headset. See
 | inspect | Point at a thing to switch its physics, grabbing and hiding, or delete it |
 | avatar | The agent's avatar, moved out of the APK: animations, emotions, a mouth that follows speech, a paged speech bubble that docks at the edge of view, outfits; `body()` for other modules (jelly). The APK avatar it replaces was seen on the headset; this one is PC-tested only |
 | memory | The agent's memory per world and global: notes, past questions with their tools and errors, digests; keys and personal info cleaned out |
+| aimsg | Formats the chat log (who's talking, wrapping, markdown out, code marked); shown through ui.gd's source "format" |
+| net | Downloads, https only and only from hosts allowed on the PC (`net_config`), redirects checked; records each file's source |
+| worlds | The Worlds window (a tile on the Menu): tabs to open or make a project's world, keep and go back to checkpoints, look through the Slopitect folder, and load or unload live modules. Built on projects, save, files and code |
+| jelly | Squash and stretch on the avatar, volume kept; needs the live avatar module's `body()`. Tested on the PC with a stand-in avatar |
+| hands | Drawn hands with nails in place of the controller boxes; fingers curl with grip, trigger and thumb rest; colours from the PC (`hands_config`). Curling was checked on the PC with a stand-in for the controllers |
 
 Drafts waiting to be reworked: [live-modules/drafts/](../live-modules/drafts/)
-(aimsg, controller, hands, jelly, stick_move, vrui, web, world). The plan for
+(vrui). The plan for
 them is in [MODULE-FRAMEWORK.md](MODULE-FRAMEWORK.md).
 
 ### PC tools (in `tools/`)

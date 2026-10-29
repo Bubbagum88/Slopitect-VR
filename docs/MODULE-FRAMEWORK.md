@@ -82,10 +82,11 @@ PC first.
 
 Live modules only (no new APK):
 
-1. Keep the repo's paths.gd and tools.gd; drop stick_move.gd.
+1. Keep the repo's paths.gd and tools.gd; drop stick_move.gd. *(Done.)*
 2. controls.gd: add `value(hand, name)` for grip and trigger, and "run a
-   command" as a binding kind. Then drop controller.gd.
-3. hands.gd: read through controls, save colours.
+   command" as a binding kind. Then drop controller.gd. *(Done, PC-tested;
+   panel attaching waits for step 5.)*
+3. hands.gd: read through controls, save colours. *(Done, PC-tested.)*
 4. aimsg.gd: chat formatting only, real fields, no debug file.
 5. vrui.gd: take "point" from controls, respect the Yes/No window, redraw
    only on change, save panels, take over panel attaching.

@@ -10,13 +10,22 @@ extends SlopitectModule
 # On a press the modules are asked in turn (lower action_order() first,
 # 100 when a module has none) until one returns true; that one alone gets
 # the release. A module reads a stick with
-# ctx["modules"].module("controls").stick("walk") (a Vector2), and buzzes a
-# controller with pulse(hand, strength, seconds).
+# ctx["modules"].module("controls").stick("walk") (a Vector2), buzzes a
+# controller with pulse(hand, strength, seconds), and reads how far a
+# grip or trigger is pressed, or whether a thumb or finger rests on the
+# controller, with value(hand, name) (0 to 1; for hands and the like, never
+# a press: presses are actions).
+#
+# A button can also run a command instead of giving an action: bound to
+# {"cmd": ...} in controls_config, a press runs that command (with
+# "position": "in_front" turned into the point 1 m in front of you). Never
+# a *_config or agent_ command, so no button changes a setting.
 #
 # Two things never go through here, so no module can take them away: X on
 # the left controller always stops the agent (the agent module's), and the
 # Yes / No window reads the right trigger (and the right thumbstick, to
-# scroll) itself. While it's open, no action is sent and the sticks read zero.
+# scroll) itself. While it's open, no action or command is sent and the
+# sticks and values read zero.
 # The bindings change from the PC only (controls_config).
 
 const SETTINGS_PATH := "user://controls.json"
@@ -33,8 +42,11 @@ const DEFAULT_BUTTONS := {
 	"right/ax_button": "right_a",
 }
 const DEFAULT_STICKS := {"left": "walk", "right": "turn"}
+const VALUES := ["grip", "trigger", "trigger_touch", "thumb_touch"]
+const THUMB_TOUCHES := ["ax_touch", "by_touch", "primary_touch"]
+const MAX_COMMAND := 2000  # characters of a bound command, as JSON
 
-var buttons := {}  # "hand/button" -> action
+var buttons := {}  # "hand/button" -> action, or a command {"cmd": ...}
 var sticks := {}  # hand -> stick name
 var _taken := {}  # "hand/button" -> the module that took its press
 var _last := ""  # the last action, for controls_status
@@ -46,7 +58,7 @@ func setup() -> String:
 		ctx[hand].button_pressed.connect(_on_button.bind(hand, true))
 		ctx[hand].button_released.connect(_on_button.bind(hand, false))
 	register("controls_status", _status, "what each button and thumbstick does, and the last action")
-	register("controls_config", _config, "from the PC only: buttons {\"hand/button\": action or \"\"}, sticks {hand: name or \"\"}, or reset true")
+	register("controls_config", _config, "from the PC only: buttons {\"hand/button\": action, a command {\"cmd\": ...} or \"\"}, sticks {hand: name or \"\"}, or reset true")
 	return ""
 
 
@@ -63,6 +75,26 @@ func stick(stick_name: String) -> Vector2:
 		if sticks[hand] == stick_name:
 			return (ctx[hand] as XRController3D).get_vector2("primary")
 	return Vector2.ZERO
+
+
+# How far a grip or trigger is pressed (0 to 1), or 1 when a finger rests on
+# the trigger (trigger_touch) or the thumb on a button or the thumbstick
+# (thumb_touch); zero while the Yes / No window asks.
+func value(hand: String, value_name: String) -> float:
+	if not hand in ["left", "right"] or _asking():
+		return 0.0
+	var controller := ctx[hand] as XRController3D
+	match value_name:
+		"grip", "trigger":
+			return clampf(controller.get_float(value_name), 0.0, 1.0)
+		"trigger_touch":
+			return 1.0 if controller.is_button_pressed("trigger_touch") else 0.0
+		"thumb_touch":
+			for touch in THUMB_TOUCHES:
+				if controller.is_button_pressed(touch):
+					return 1.0
+			return 0.0
+	return 0.0
 
 
 # A short buzz on a controller: hand "left" or "right", strength 0 to 1, for
@@ -85,6 +117,9 @@ func _on_button(button: String, hand: String, down: bool) -> void:
 		return
 	if not buttons.has(key) or _asking():
 		return
+	if typeof(buttons[key]) == TYPE_DICTIONARY:
+		_run_bound(key, buttons[key])
+		return
 	var action: String = buttons[key]
 	_last = "%s (%s)" % [action, key]
 	var takers := []
@@ -96,6 +131,23 @@ func _on_button(button: String, hand: String, down: bool) -> void:
 		if module.call("on_action", action, true) == true:
 			_taken[key] = module
 			return
+
+
+func _run_bound(key: String, command: Dictionary) -> void:
+	var request := command.duplicate(true)
+	if request.get("position") is String and request["position"] == "in_front":
+		var head: Transform3D = (ctx["camera"] as Node3D).global_transform
+		var forward := -head.basis.z
+		forward.y = 0.0
+		if forward.length() < 0.01:
+			forward = Vector3(0, 0, -1)
+		var at := head.origin + forward.normalized()
+		request["position"] = [at.x, at.y, at.z]
+	var reply: Dictionary = ctx["server"].run(request)
+	_last = "%s (%s)" % [request["cmd"], key]
+	if not reply.get("ok", false):
+		_last += " failed: %s" % reply.get("error", "?")
+		push_error("Slopitect controls: %s ran %s, which failed: %s" % [key, request["cmd"], reply.get("error", "?")])
 
 
 func _release(key: String) -> void:
@@ -136,7 +188,9 @@ func _config(request: Dictionary) -> Dictionary:
 		var problem := _check_button(key, asked[key])
 		if not problem.is_empty():
 			return {"ok": false, "error": problem}
-		if asked[key].is_empty():
+		if typeof(asked[key]) == TYPE_DICTIONARY:
+			new_buttons[key] = asked[key].duplicate(true)
+		elif asked[key].is_empty():
 			new_buttons.erase(key)
 		else:
 			new_buttons[key] = asked[key]
@@ -164,8 +218,21 @@ func _check_button(key, action) -> String:
 		return "%s isn't a button: use \"left/\" or \"right/\" and one of %s" % [JSON.stringify(key), ", ".join(BUTTONS)]
 	if key in RESERVED:
 		return "%s always stops the agent; it can't be bound" % key
+	if typeof(action) == TYPE_DICTIONARY:
+		return _check_command(action)
 	if typeof(action) != TYPE_STRING or not (action.is_empty() or _good_name(action)):
-		return "an action is a name of 1 to 40 letters, digits and _ (or \"\" for none)"
+		return "an action is a name of 1 to 40 letters, digits and _ (or \"\" for none), or a command {\"cmd\": ...}"
+	return ""
+
+
+func _check_command(command: Dictionary) -> String:
+	var cmd = command.get("cmd")
+	if typeof(cmd) != TYPE_STRING or not _good_name(cmd):
+		return "a bound command needs \"cmd\": a command's name (help lists them)"
+	if cmd.ends_with("_config") or cmd.begins_with("agent_") or cmd == "help":
+		return "a button can't run %s: settings change only from the PC, and the agent's commands only from its window" % cmd
+	if command.has("pair_key") or JSON.stringify(command).length() > MAX_COMMAND:
+		return "a bound command is at most %d characters of JSON, with no pair_key" % MAX_COMMAND
 	return ""
 
 
@@ -189,7 +256,7 @@ func _load() -> void:
 		return
 	buttons = {}
 	for key in saved["buttons"]:
-		if _check_button(key, saved["buttons"][key]).is_empty() and not saved["buttons"][key].is_empty():
+		if _check_button(key, saved["buttons"][key]).is_empty() and not (typeof(saved["buttons"][key]) == TYPE_STRING and saved["buttons"][key].is_empty()):
 			buttons[key] = saved["buttons"][key]
 	sticks = {}
 	for hand in saved["sticks"]:
