@@ -46,7 +46,7 @@ function, and leaves cleanly when it's unloaded.
 | Input only through controls | `on_action(action, down)` for buttons; `stick("walk")` for thumbsticks; a new `value(hand, "grip")` for how far a grip or trigger is pressed | Reading the controllers directly (controller, stick_move, vrui, hands) | controls.gd (live); `value()` is new |
 | One settings helper | Lists its defaults once; they're kept in `user://NAME.json`, and `NAME_config` (PC only) changes them | Each module writing its own load and save, or not saving | module.gd (APK) |
 | Save by plug-in | `save_part()` returns its data and `load_part(data)` puts it back; save finds every module that has them | The list of parts written into save.gd, and world's separate format | save.gd (live) |
-| Menus by plug-in | `menu_info()` returns a window's name and the command that opens it; a menu module lists them all | Every module building its own way into its windows | New menu.gd (live) |
+| Menus by plug-in | `menu_info()` returns a window's name and the panel it opens (or a command); the Menu shows a tile for each | Every module building its own way into its windows | ui.gd (live), see [VR-UI.md](VR-UI.md) |
 | Events, not polling | The agent sends signals (started, replied, stopped); modules connect to them | aimsg and the avatar asking agent_status 2 to 3 times a second | agent.gd (APK) |
 | Internet through one gate | A download goes through one fetch function that only allows the hosts approved on the PC | web.gd downloading from anywhere | A net helper (live), hosts set with `net_config` |
 | A header at the top | `const INFO := {"needs": ["controls", "ui"], "version": 1}` | Modules that silently do nothing when another is missing | code.gd (APK) reads it and loads what's needed first |

@@ -54,7 +54,7 @@ All PC-tested, none yet on the headset. See
 | Module | What it does |
 | --- | --- |
 | controls | The only reader of buttons and thumbsticks; turns them into named actions; bindings changed from the PC (`controls_config`) |
-| ui | Every window: panels of text, buttons and inputs that you or the agent can change live |
+| ui | Every window: panels of text, buttons, inputs, toggles and sliders that you or the agent can change live; title bars, tabs, a launcher Menu, one theme, hover and haptic feedback ([VR-UI.md](VR-UI.md)) |
 | tools | Tool picker with shared undo |
 | landscape | Terrain |
 | paths | Paths |
@@ -131,6 +131,8 @@ container).
   owner's decisions, then the live-module steps, then the APK pieces.
 - **Roadmap** (README): Claude on the PC through MCP (step 4), backups to
   GitHub (step 5), resource packs for upgrades while playing (step 9).
-- **Not started:** our own panel widgets, more shapes (lathe, extrude),
+- **VR UI revamp** ([VR-UI.md](VR-UI.md)): PC-tested; needs the headset
+  test (text sizes, hover, haptics, follow panels).
+- **Not started:** more shapes (lathe, extrude),
   an asset library, a safe browser, the game-asset extraction catalogue
   (drafted, never committed).

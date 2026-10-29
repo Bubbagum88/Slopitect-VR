@@ -10,7 +10,8 @@ extends SlopitectModule
 # On a press the modules are asked in turn (lower action_order() first,
 # 100 when a module has none) until one returns true; that one alone gets
 # the release. A module reads a stick with
-# ctx["modules"].module("controls").stick("walk") (a Vector2).
+# ctx["modules"].module("controls").stick("walk") (a Vector2), and buzzes a
+# controller with pulse(hand, strength, seconds).
 #
 # Two things never go through here, so no module can take them away: X on
 # the left controller always stops the agent (the agent module's), and the
@@ -62,6 +63,14 @@ func stick(stick_name: String) -> Vector2:
 		if sticks[hand] == stick_name:
 			return (ctx[hand] as XRController3D).get_vector2("primary")
 	return Vector2.ZERO
+
+
+# A short buzz on a controller: hand "left" or "right", strength 0 to 1, for
+# seconds. Windows tick on hover and press; tools can mark a click.
+func pulse(hand: String, strength: float, seconds: float) -> void:
+	if not hand in ["left", "right"]:
+		return
+	(ctx[hand] as XRController3D).trigger_haptic_pulse("haptic", 0.0, clampf(strength, 0.0, 1.0), clampf(seconds, 0.0, 0.5), 0.0)
 
 
 func _asking() -> bool:
