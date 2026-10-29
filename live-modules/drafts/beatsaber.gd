@@ -13,6 +13,12 @@ extends SlopitectModule
 # swing to run along the arrow, and the blade to pass through the block's
 # centre; off by 15 degrees or to the edge scores less. Dot notes: only the
 # centre counts. A Perfect / Good / OK label pops up at each cut.
+# Holding the saber: the controller nodes follow the "aim" pose (where the
+# controller points), so the saber is turned up by fit["angle"] degrees to
+# lie along the controller's handle, held fit["hold"] cm down its hilt with
+# the hand at fit["grip"] (cm from the controller's point to the handle's
+# middle, right hand; x mirrors for the left). beatsaber_config changes
+# them from the PC; they are kept in user://beatsaber.json.
 
 const TRAIL_LEN := 12
 const SHARD_LIFE := 0.6
@@ -27,6 +33,10 @@ const POP_LIFE := 0.9
 const FULL_ANGLE := 5.0     # degrees off the arrow that still score full angle points
 const ZERO_ANGLE := 25.0    # degrees off the arrow at which the angle points run out
 const CENTRE_RANGE := 0.2   # metres from the block's centre where centre points run out
+const FIT_PATH := "user://beatsaber.json"
+const FIT_DEFAULTS := {"angle": 45.0, "grip": [0.0, -1.8, 1.8], "hold": 5.0}  # Touch: Chromium's WebXR grip is the aim turned up 45 degrees, 2.5 cm down
+const FIT_ANGLE_RANGE := [-30.0, 90.0]
+const FIT_CM_MAX := 15.0
 
 var root: Node3D = null
 var notes: Array = []
@@ -62,12 +72,15 @@ var sabers := {}
 var trails := {}
 var blades := {}
 var prev_tip := {}
+var fit := FIT_DEFAULTS.duplicate(true)
 
 
 func setup() -> String:
 	register("beatsaber_start", _start, "start the notes: optional interval (seconds between notes, 0.3 to 2)")
 	register("beatsaber_stop", _stop, "stop the notes and clear them")
 	register("beatsaber_score", _score, "the points, misses, cuts, average, and the last cut's angle and centre offset")
+	register("beatsaber_config", _config, "from the PC only: how the saber sits in the hand: any of angle (degrees it tilts up from where the controller points, -30 to 90), grip ([x, y, z] cm from the controller's point to the handle's middle, right hand), hold (cm down the hilt the hand holds it, 0 to 15), or reset true")
+	_load_fit()
 	mesh_box = _rounded_box(0.3, NOTE_ROUND, 4)
 	shard_mesh = _rounded_box(0.14, 0.02, 2)
 	blade_mesh = CylinderMesh.new()
@@ -220,6 +233,79 @@ func _glow(c: Color) -> StandardMaterial3D:
 	m.emission = c
 	m.emission_energy_multiplier = 1.5
 	return m
+
+
+# The saber's place in the hand, seen from the controller: turned up onto
+# the handle, the hold point on the handle's middle, scaled.
+func _hilt(side: String) -> Transform3D:
+	var g: Array = fit["grip"]
+	var mirror := 1.0 if side == "right" else -1.0
+	var grip := Transform3D(Basis(Vector3.RIGHT, deg_to_rad(fit["angle"])), Vector3(mirror * g[0], g[1], g[2]) / 100.0)
+	return grip * Transform3D(Basis.from_scale(Vector3.ONE * SABER_SCALE), Vector3.ZERO) * Transform3D(Basis.IDENTITY, Vector3(0, 0, -fit["hold"] / 100.0))
+
+
+func _config(request: Dictionary) -> Dictionary:
+	if request.get("reset", false) == true:
+		fit = FIT_DEFAULTS.duplicate(true)
+		_save_fit()
+		return {"ok": true, "fit": fit}
+	var changed := fit.duplicate(true)
+	for key in request:
+		if key in ["cmd", "id"]:
+			continue
+		var v = request[key]
+		match key:
+			"angle":
+				if not _number(v) or v < FIT_ANGLE_RANGE[0] or v > FIT_ANGLE_RANGE[1]:
+					return {"ok": false, "error": "\"angle\" must be %d to %d degrees" % FIT_ANGLE_RANGE}
+				changed["angle"] = float(v)
+			"grip":
+				if not _cm3(v):
+					return {"ok": false, "error": "\"grip\" must be [x, y, z] in cm, each -%d to %d" % [FIT_CM_MAX, FIT_CM_MAX]}
+				changed["grip"] = (v as Array).map(func(n): return float(n))
+			"hold":
+				if not _number(v) or v < 0.0 or v > FIT_CM_MAX:
+					return {"ok": false, "error": "\"hold\" must be 0 to %d cm" % FIT_CM_MAX}
+				changed["hold"] = float(v)
+			_:
+				return {"ok": false, "error": "unknown setting \"%s\" (one of: angle, grip, hold, reset)" % key}
+	fit = changed
+	_save_fit()
+	return {"ok": true, "fit": fit}
+
+
+func _number(v) -> bool:
+	return typeof(v) in [TYPE_INT, TYPE_FLOAT]
+
+
+func _cm3(v) -> bool:
+	return typeof(v) == TYPE_ARRAY and v.size() == 3 and v.all(func(n): return _number(n) and absf(n) <= FIT_CM_MAX)
+
+
+func _save_fit() -> void:
+	var out := FileAccess.open(FIT_PATH, FileAccess.WRITE)
+	if out == null:
+		push_error("Slopitect beatsaber: couldn't save %s (error %d)" % [FIT_PATH, FileAccess.get_open_error()])
+		return
+	out.store_string(JSON.stringify(fit, "\t"))
+	out.close()
+
+
+func _load_fit() -> void:
+	if not FileAccess.file_exists(FIT_PATH):
+		return
+	var saved = JSON.parse_string(FileAccess.get_file_as_string(FIT_PATH))
+	if typeof(saved) != TYPE_DICTIONARY:
+		push_error("Slopitect beatsaber: %s isn't readable; using the default fit" % FIT_PATH)
+		return
+	var a = saved.get("angle")
+	if _number(a) and a >= FIT_ANGLE_RANGE[0] and a <= FIT_ANGLE_RANGE[1]:
+		fit["angle"] = float(a)
+	if _cm3(saved.get("grip")):
+		fit["grip"] = (saved["grip"] as Array).map(func(n): return float(n))
+	var h = saved.get("hold")
+	if _number(h) and h >= 0.0 and h <= FIT_CM_MAX:
+		fit["hold"] = float(h)
 
 
 func _exit_tree() -> void:
@@ -487,10 +573,10 @@ func _process(delta: float) -> void:
 			prev_tip.erase(side)
 			continue
 		sabers[side].visible = true
-		var ht: Transform3D = hand.global_transform
-		var base := ht * Vector3(0, 0, -0.05 * SABER_SCALE)
-		var tip := ht * Vector3(0, 0, -1.05 * SABER_SCALE)
-		sabers[side].global_transform = Transform3D(ht.basis.scaled(Vector3.ONE * SABER_SCALE), ht.origin)
+		var st: Transform3D = hand.global_transform * _hilt(side)
+		var base := st * Vector3(0, 0, -0.05)
+		var tip := st * Vector3(0, 0, -1.05)
+		sabers[side].global_transform = st
 		var move := Vector3.ZERO
 		if prev_tip.has(side) and delta > 0.0:
 			move = tip - prev_tip[side]
