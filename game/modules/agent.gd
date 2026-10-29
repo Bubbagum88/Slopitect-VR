@@ -78,6 +78,7 @@ var _waiting_on: SlopitectPending  # a tool waiting for the person's answer
 var _context_tokens := 0  # the size of the last prompt sent: the conversation so far
 var _ask_tokens := {"input": 0, "output": 0, "cached": 0}  # the current (or last) question
 var _total_tokens := {"input": 0, "output": 0, "cached": 0}  # since the app started
+var _phase := "idle"  # what the agent is doing, for the slow-frame log
 # A conversation keeps the tools and instructions it started with: Claude
 # refuses a conversation whose tool list changed partway (its earlier
 # thinking is tied to that list). New tools, like a live module's, are used
@@ -98,6 +99,9 @@ func setup() -> String:
 		push_error("Slopitect agent: %s; set another with agent_config" % problem)
 	_http = HTTPRequest.new()
 	_http.timeout = HTTP_TIMEOUT
+	# Without a thread, connecting (the TLS handshake) and reading the reply
+	# happen in the frame, and the headset stutters while the agent works.
+	_http.use_threads = true
 	add_child(_http)
 	_http.request_completed.connect(func(result, code, headers, body): _reply_ready.emit([result, code, headers, body]))
 	_load_skills()
@@ -115,6 +119,13 @@ func setup() -> String:
 	register("agent_reset", _reset, "forget the conversation and start a new one")
 	register("agent_skills", _list_skills, "list the agent's skills (reloads them from disk)")
 	return ""
+
+
+# A frame that took far longer than the headset's (about 14 ms) is logged
+# with what the agent was doing then, so a stutter can be traced.
+func _process(delta: float) -> void:
+	if _busy and delta > 0.1:
+		print("Slopitect agent: slow frame, %d ms, while %s" % [int(delta * 1000.0), _phase])
 
 
 # --- Commands -----------------------------------------------------------------
@@ -257,7 +268,10 @@ func _run_conversation() -> void:
 		if _round > int(settings["max_tool_rounds"]):
 			_fail("stopped after %d rounds (max_tool_rounds); ask again to carry on" % settings["max_tool_rounds"])
 			break
+		_phase = "building the request"
+		var started := Time.get_ticks_usec()
 		var request := _provider.build_request(settings, system, _history, tools)
+		var build_ms := (Time.get_ticks_usec() - started) / 1000.0
 		if request.has("error"):
 			_fail(request["error"])
 			break
@@ -266,14 +280,22 @@ func _run_conversation() -> void:
 		if err != OK:
 			_fail("could not send the request to %s (%s)" % [request["url"], error_string(err)])
 			break
+		_phase = "waiting for the reply"
+		started = Time.get_ticks_usec()
 		var result: Array = await _reply_ready
+		var wait_ms := (Time.get_ticks_usec() - started) / 1000.0
 		if _stop_requested:
 			_note("stopped; the reply was not waited for")
 			break
 		if result[0] != HTTPRequest.RESULT_SUCCESS:
 			_fail("no reply from %s: %s" % [request["url"], _http_result_name(result[0])])
 			break
+		_phase = "reading the reply"
+		started = Time.get_ticks_usec()
 		var reply := _provider.parse_response(result[1], (result[3] as PackedByteArray).get_string_from_utf8())
+		var parse_ms := (Time.get_ticks_usec() - started) / 1000.0
+		print("Slopitect agent: round %d timing: request built in %.1f ms (%d KB), reply after %.0f ms (%d KB), read in %.1f ms" % [
+			_round, build_ms, String(request["body"]).length() / 1024, wait_ms, (result[3] as PackedByteArray).size() / 1024, parse_ms])
 		if reply.has("error"):
 			_fail(reply["error"])
 			break
@@ -324,6 +346,7 @@ func _run_conversation() -> void:
 		_history.pop_back()
 		_note("your last message was not sent; ask again")
 	_busy = false
+	_phase = "idle"
 	print("Slopitect agent: done after %d rounds" % _round)
 
 
@@ -358,7 +381,12 @@ func _run_tools(calls: Array) -> Array:
 		else:
 			var command := input.duplicate(true)
 			command["cmd"] = call["name"]
+			_phase = "running " + call["name"]
+			var started := Time.get_ticks_usec()
 			var outcome: Dictionary = ctx["server"].run_for_agent(command)
+			var run_ms := (Time.get_ticks_usec() - started) / 1000.0
+			if run_ms > 20.0:
+				print("Slopitect agent: tool %s took %.0f ms" % [call["name"], run_ms])
 			if outcome.get("wait") is SlopitectPending:
 				# It needs the person's Yes in the headset first. Stop gives up
 				# on it (and closes the question) instead of waiting.
