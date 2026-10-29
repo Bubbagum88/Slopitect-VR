@@ -25,7 +25,7 @@ const OLD_VOICE_PATH := "user://voice.json"
 const MIC_PERMISSION := "android.permission.RECORD_AUDIO"
 const MIC_BUS := "SlopitectMic"
 const MAX_SECONDS := 30.0
-const MIN_SECONDS := 0.4
+const MIN_SPEECH_SECONDS := 0.25  # less loud sound than this is a bump or a breath, not words
 const HTTP_TIMEOUT := 60.0
 const LOCAL_CLASS := "SpeechToText"  # from the godot-whisper plugin
 const LOCAL_LANGUAGES := {"": 0, "en": 1}  # its Language enum: 0 Auto, 1 English
@@ -43,8 +43,9 @@ const DEFAULTS := {
 	"vtt_model": "whisper-1",
 	"vtt_language": "",  # like "en"; "" lets it decide (an English-only model always hears English)
 	"send_to_agent": false,  # false: words go in the chat's input box for you to check and Send
+	"min_hold": 0.6,  # seconds: a shorter press is taken as an accident and not turned into text
 }
-const COMFORT := ["send_to_agent"]  # settings vtt_set may change in the headset
+const COMFORT := ["send_to_agent", "min_hold"]  # settings vtt_set may change in the headset
 
 var settings := DEFAULTS.duplicate()
 
@@ -125,6 +126,8 @@ func settings_info() -> Dictionary:
 	return {"title": "Speech to text", "order": 41, "settings": [
 		{"id": "send_to_agent", "type": "toggle", "label": "Send my words straight to the agent", "value": settings["send_to_agent"],
 			"set": {"cmd": "vtt_set", "send_to_agent": "{value}"}},
+		{"id": "min_hold", "type": "slider", "label": "Ignore presses shorter than (s)", "value": settings["min_hold"], "min": 0.2, "max": 3.0, "step": 0.1,
+			"set": {"cmd": "vtt_set", "min_hold": "{value}"}},
 	]}
 
 
@@ -209,8 +212,9 @@ func _stop_listening() -> void:
 	var recording := _record.get_recording()
 	if _capture.get_frames_available() > 0:
 		_frames.append_array(_capture.get_buffer(_capture.get_frames_available()))
-	if recording == null or seconds < MIN_SECONDS:
-		_note("too short to hear anything (%.1f s); hold the trigger while you talk" % seconds)
+	if recording == null or seconds < float(settings["min_hold"]):
+		# Nothing is turned into text: the press was too short to be talking.
+		_note("ignored a %.1f s press (shorter than min_hold, %.1f s); hold the trigger while you talk" % [seconds, float(settings["min_hold"])])
 		return
 	if settings["vtt_engine"] == "local":
 		_transcribe_local(_frames, seconds)
@@ -299,7 +303,8 @@ func _local_work(frames: PackedVector2Array, path: String) -> void:
 
 # The part of a 16 kHz recording from a little before the first loud 20 ms
 # to a little after the last; "loud" is relative to the loudest part, so a
-# quiet microphone works too. Empty when it was all quiet.
+# quiet microphone works too. Empty when it was all quiet, or the loud part
+# is too short to be words (a bump or a click).
 func _trim_quiet(samples: PackedFloat32Array) -> PackedFloat32Array:
 	var frame := TRIM_FRAME
 	var count := samples.size() / frame
@@ -322,7 +327,7 @@ func _trim_quiet(samples: PackedFloat32Array) -> PackedFloat32Array:
 			if first == -1:
 				first = i
 			last = i
-	if first == -1:
+	if first == -1 or (last - first + 1) * frame < MIN_SPEECH_SECONDS * 16000:
 		return PackedFloat32Array()
 	var pad := int(TRIM_PAD_SECONDS * 16000)
 	return samples.slice(maxi(first * frame - pad, 0), mini((last + 1) * frame + pad, samples.size()))
@@ -337,6 +342,9 @@ func _local_done(report: Dictionary, words: String) -> void:
 		_note("on-headset speech-to-text failed: " + String(report["error"]))
 		return
 	words = words.strip_edges()
+	if report.get("speech_s", 1.0) == 0.0:
+		_note("no talking in the recording (only quiet or a short bump); nothing turned into text")
+		return
 	if words.is_empty():
 		_note("on-headset speech-to-text heard nothing")
 		return
@@ -488,6 +496,9 @@ func _check_setting(key: String, value) -> String:
 		"send_to_agent":
 			if typeof(value) != TYPE_BOOL:
 				return "\"send_to_agent\" must be true or false"
+		"min_hold":
+			if typeof(value) not in [TYPE_INT, TYPE_FLOAT] or value < 0.2 or value > 3.0:
+				return "\"min_hold\" must be 0.2 to 3 seconds"
 		"vtt_key", "vtt_model", "vtt_language":
 			if typeof(value) != TYPE_STRING or value.length() > 300:
 				return "\"%s\" must be text" % key
