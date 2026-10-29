@@ -11,6 +11,7 @@ unless its file has changed since.
 | `tools.gd` | The tool window (B on the right controller): a button for each loaded tool, the chosen tool's buttons, and one Undo / Redo list for every tool |
 | `landscape.gd` | Ground you can shape, 20 × 20 m: raise, lower, smooth and flatten brushes. It stands in for the flat floor while it's loaded |
 | `paths.gd` | Roads and trails: put down points with the trigger, then press Finish. Optionally levels the ground under the path |
+| `save.gd` | Keeps the shapes and models: saved by themselves when they change and put back at start. Checkpoints keep the whole world (ground and paths too) to go back to, with undo |
 | `assets.gd` | 3D models from [Poly Haven](https://polyhaven.com) (all CC0): search, download to the headset, place in the world. Powered by Poly Haven |
 
 A tool is any module with a `tool_info()` function, so a new tool is a new
@@ -27,10 +28,12 @@ From the platform-tools folder:
 .\adb push "C:\path\to\live-modules\landscape.gd" /sdcard/Slopitect/modules/
 .\adb push "C:\path\to\live-modules\paths.gd" /sdcard/Slopitect/modules/
 .\adb push "C:\path\to\live-modules\assets.gd" /sdcard/Slopitect/modules/
+.\adb push "C:\path\to\live-modules\save.gd" /sdcard/Slopitect/modules/
 .\slopi.ps1 '{"cmd":"code_load","name":"tools"}'
 .\slopi.ps1 '{"cmd":"code_load","name":"landscape"}'
 .\slopi.ps1 '{"cmd":"code_load","name":"paths"}'
 .\slopi.ps1 '{"cmd":"code_load","name":"assets"}'
+.\slopi.ps1 '{"cmd":"code_load","name":"save"}'
 ```
 
 Each `code_load` shows the code in the headset and waits for your Yes.
@@ -77,6 +80,16 @@ APK over the old one). The undo list is not saved.
 | `assets_place` | `id`, optional `resolution`, `name`, `position`, `rotation`, `scale` (a number or [x, y, z]) |
 | `assets_move` | `name`, any of `position`, `rotation`, `scale` |
 | `assets_remove` | `name` (the files stay on the headset) |
+
+| `save_status`, `save_now`, `save_checkpoints` | |
+| `save_checkpoint` | optional `label` |
+| `save_restore` | `checkpoint` (its id, like "0003" or 3); one undo |
+| `save_delete` | `checkpoint` |
+
+Saves are in `/sdcard/Slopitect/saves/`: `world.json` (shapes and models,
+saved within 5 seconds of a change and when the headset pauses the app) and
+`checkpoints/`. The ground and paths keep saving themselves as before;
+checkpoints hold them too.
 
 ### What assets.gd may reach
 

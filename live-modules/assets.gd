@@ -421,6 +421,7 @@ func _remove(request: Dictionary) -> Dictionary:
 	if node == null:
 		return {"ok": false, "error": "no placed model named %s (assets_placed lists them)" % JSON.stringify(request.get("name"))}
 	_placed.erase(String(node.name))
+	_holder.remove_child(node)  # its name is free at once, for a new model
 	node.queue_free()
 	return {"ok": true, "removed": String(node.name)}
 
