@@ -6,13 +6,17 @@ extends SlopitectModule
 # how big a conversation gets before the next question starts a new one,
 # the most one question may use, and how many rounds it may take. Each
 # change goes through the APK's agent_budget command, which keeps the
-# numbers in narrow ranges and saves them in user://agent.json.
+# numbers in narrow ranges and saves them in user://agent.json. With Claude,
+# the model can be picked too, from a fixed list (a new model starts a new
+# conversation).
 #
 # The agent can't change these: it never gets an agent_ command, even when it
 # goes through settings_set (isaac's choice, 2026-10-29). The key, provider,
-# address, model and allowed tools stay with agent_config, from the PC.
+# address and allowed tools stay with agent_config, from the PC.
 # It has no commands and keeps nothing itself.
 
+# What each model is called here, with its price per million tokens in / out.
+const MODEL_LABELS := {"claude-haiku-5-5": "Haiku 5.5 ($0.10 / $0.50)", "claude-sonnet-5-5": "Sonnet 5.5 ($2 / $10)", "claude-opus-5-5": "Opus 5.5 ($4 / $20)"}
 # Each slider: label, step.
 const SLIDERS := {
 	"max_request_tokens": ["Most per request (tokens)", 5000],
@@ -34,6 +38,12 @@ func settings_info() -> Dictionary:
 	var budget: Dictionary = agent.call("budget")
 	var ranges: Dictionary = agent.get_script().get_script_constant_map()["BUDGET"]
 	var out := []
+	if budget.has("model"):
+		var options := []
+		for model in agent.get_script().get_script_constant_map()["MODELS"]:
+			options.append({"label": MODEL_LABELS.get(model, model), "value": model})
+		out.append({"id": "model", "type": "choice", "label": "Model", "value": budget["model"], "options": options, "columns": 1,
+			"set": {"cmd": "agent_budget", "model": "{value}"}})
 	for key in SLIDERS:
 		var low: int = ranges[key][0]
 		var high: int = ranges[key][1]

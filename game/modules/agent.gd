@@ -70,6 +70,9 @@ const BUDGET := {
 	"max_tokens_per_ask": [50000, 1000000],
 	"max_tool_rounds": [5, 40],
 }
+# The models agent_budget may pick (isaac's choice, 2026-10-29), Claude
+# only, and whether each takes the API's refusal fallbacks (Haiku has none).
+const MODELS := {"claude-haiku-5-5": false, "claude-sonnet-5-5": true, "claude-opus-5-5": true}
 # A tool reply's size in tokens is guessed from its length; JSON runs about
 # three and a half characters a token, so three is on the safe side.
 const CHARS_PER_TOKEN := 3.0
@@ -147,7 +150,7 @@ func setup() -> String:
 	register("agent_skills", _list_skills, "list the agent's skills (reloads them from disk)")
 	# The agent never gets an agent_ command (_allowed_tool), even through
 	# another command such as settings_set, so it can't raise its own budget.
-	register("agent_budget", _budget, "the person's token budget, also from the headset: any of %s, in the ranges %s" % [", ".join(BUDGET.keys()), JSON.stringify(BUDGET)])
+	register("agent_budget", _budget, "the person's token budget, also from the headset: any of %s, in the ranges %s; and model, one of %s (Claude only)" % [", ".join(BUDGET.keys()), JSON.stringify(BUDGET), ", ".join(MODELS.keys())])
 	return ""
 
 
@@ -258,9 +261,17 @@ func _budget(request: Dictionary) -> Dictionary:
 	for key in request:
 		if key in ["cmd", "id"]:
 			continue
-		if not BUDGET.has(key):
-			return {"ok": false, "error": "agent_budget changes %s (the rest is agent_config, from the PC)" % ", ".join(BUDGET.keys())}
 		var value = request[key]
+		if key == "model":
+			if settings["provider"] != "anthropic":
+				return {"ok": false, "error": "the model changes here only for Claude (provider anthropic); this one is agent_config, from the PC"}
+			if not value in MODELS:
+				return {"ok": false, "error": "\"model\" must be one of %s" % ", ".join(MODELS.keys())}
+			changes["model"] = value
+			changes["fallbacks"] = MODELS[value]
+			continue
+		if not BUDGET.has(key):
+			return {"ok": false, "error": "agent_budget changes model and %s (the rest is agent_config, from the PC)" % ", ".join(BUDGET.keys())}
 		if typeof(value) not in [TYPE_INT, TYPE_FLOAT] or value != floorf(value) or value < BUDGET[key][0] or value > BUDGET[key][1]:
 			return {"ok": false, "error": "\"%s\" must be a whole number from %d to %d" % [key, BUDGET[key][0], BUDGET[key][1]]}
 		changes[key] = int(value)
@@ -268,6 +279,10 @@ func _budget(request: Dictionary) -> Dictionary:
 		return {"ok": true, "budget": budget()}
 	if _busy:
 		return {"ok": false, "error": "wait for the agent to finish before changing its budget"}
+	# A conversation keeps its model: its thinking only works with the one
+	# that wrote it, and the cache is per model.
+	if changes.has("model") and changes["model"] != settings["model"]:
+		_clear_conversation()
 	settings.merge(changes, true)
 	_save_settings()
 	_note("budget changed: " + JSON.stringify(changes))
@@ -279,6 +294,8 @@ func budget() -> Dictionary:
 	var out := {}
 	for key in BUDGET:
 		out[key] = settings[key]
+	if settings["provider"] == "anthropic":
+		out["model"] = settings["model"]
 	return out
 
 
