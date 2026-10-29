@@ -38,7 +38,11 @@ extends SlopitectModule
 #
 # Panels are drawn the way the vrui draft drew its windows (rounded, with
 # real 2D panels and text, see Drawing), redrawn only when they change. A
-# panel can be held by a hand ("hand" place), and its elements can flow in
+# panel can be held by a hand ("hand" place). A panel you carry somewhere
+# remembers where it opened ("home"), and goes back there when it's opened
+# again or the app restarts, unless its title bar's Pin is on ("keep_place").
+# A hand panel carried back near its hand shows a faint outline there and
+# snaps on when let go. Its elements can flow in
 # rows, columns and grids (layout column or row) instead of each having an
 # "at", so a menu is a list of what's in it. A button with "open" opens
 # another panel in its place, with a back arrow: menus inside menus.
@@ -103,6 +107,9 @@ const APP_COLUMNS := 5
 const HAND_POSITION := [0.0, 0.12, -0.02]  # a hand panel's default place on the controller
 const HAND_ROTATION := [-35.0, 0.0, 0.0]
 const HAND_SCALE := 0.5
+const HOME_PLACES := ["front", "world", "follow", "hand"]
+const DOCK_DISTANCE := 0.12  # metres from its spot on the hand that a carried hand panel snaps back
+const DOCK_ALPHA := 0.25  # the outline of where it will snap
 const PRESS_SECONDS := 0.12
 const FOLLOW_ANGLE := 35.0  # degrees you turn away before a follow panel catches up
 const FOLLOW_DISTANCE := 0.5  # or metres you walk
@@ -144,6 +151,7 @@ var _apps: Array = []  # launcher tiles from menu_info(), see _scan_apps
 var _apps_signature := ""
 var _since_apps := APPS_SECONDS
 var _following := {}  # id_panel -> the Transform3D a follow panel is easing to
+var _home_ghost: MeshInstance3D  # the outline of a hand panel's spot while you carry it near
 
 
 func setup() -> String:
@@ -213,7 +221,7 @@ func setup() -> String:
 # The wrist panel, laser and ray hang off the controllers, not this node, so
 # they are removed by hand when the module goes.
 func _exit_tree() -> void:
-	for node in _holders.values() + [_ray, _laser]:
+	for node in _holders.values() + [_ray, _laser, _home_ghost]:
 		if node and is_instance_valid(node):
 			node.queue_free()
 
@@ -229,6 +237,7 @@ func _asking() -> bool:
 func _physics_process(_delta: float) -> void:
 	if not _dragging.is_empty() and _holders.has(_dragging):
 		_holders[_dragging].global_transform = _right.global_transform * _drag_offset
+		_show_home_ghost()
 	var blocked := pointer_blocked or _asking()
 	_ray.enabled = not blocked
 	var hit: StaticBody3D = _ray.get_collider() as StaticBody3D if _ray.enabled and _ray.is_colliding() else null
@@ -353,9 +362,20 @@ func _end_drag() -> void:
 	_dragging = ""
 	if index == -1:
 		return
-	# Where you let go is where it stays: it's now a panel in the world
-	# (a hand panel too: you took it out of your hand).
+	# Where you let go is where it stays while it's open: it's now a panel
+	# in the world (a hand panel too: you took it out of your hand). It
+	# remembers where it opened, to go back there (see _go_home).
 	var panel: Dictionary = panels[index]
+	var near_dock := _near_dock(panel)
+	_hide_home_ghost()
+	if near_dock:
+		_go_home(panel)
+		_pulse(0.5, 0.04)
+		_save()
+		print("Slopitect ui: \"%s\" back on the %s hand" % [panel["id_panel"], panel["hand"]])
+		return
+	if panel["home"].is_empty():
+		panel["home"] = {"place": panel["place"], "position": panel["position"], "rotation": panel["rotation"]}
 	var holder: Node3D = _holders[panel["id_panel"]]
 	if holder.get_parent() != self:
 		var at := holder.global_transform
@@ -385,6 +405,74 @@ func _start_drag() -> bool:
 	return true
 
 
+# Puts a carried panel back where it opened (its "home"). A panel still on
+# its hand that was carried and let go near it just settles back.
+func _go_home(panel: Dictionary) -> void:
+	if panel["home"].is_empty() and panel["place"] != "hand":
+		return
+	if not panel["home"].is_empty():
+		panel["place"] = panel["home"]["place"]
+		panel["position"] = panel["home"]["position"]
+		panel["rotation"] = panel["home"]["rotation"]
+		panel["home"] = {}
+	if not _holders.has(panel["id_panel"]):
+		return  # not drawn yet (loading): it's drawn at home
+	var holder: Node3D = _holders[panel["id_panel"]]
+	holder.get_parent().remove_child(holder)
+	_place_holder(holder, panel, false, Transform3D.IDENTITY)
+	if panel["place"] in ["front", "follow"]:
+		holder.global_transform = _front_transform(panel)
+	_following.erase(panel["id_panel"])
+
+
+# Where a hand panel's spot is now, in the world.
+func _dock_transform(panel: Dictionary) -> Transform3D:
+	var p: Array = panel["home"]["position"] if not panel["home"].is_empty() else panel["position"]
+	var r: Array = panel["home"]["rotation"] if not panel["home"].is_empty() else panel["rotation"]
+	var local := Transform3D(Basis.from_euler(Vector3(deg_to_rad(r[0]), deg_to_rad(r[1]), deg_to_rad(r[2]))), Vector3(p[0], p[1], p[2]))
+	return (_left if panel["hand"] == "left" else _right).global_transform * local
+
+
+# Whether a carried panel is close enough to its spot on the hand to snap on.
+func _near_dock(panel: Dictionary) -> bool:
+	if panel["home"].get("place", panel["place"]) != "hand":
+		return false
+	var holder: Node3D = _holders[panel["id_panel"]]
+	return holder.global_position.distance_to(_dock_transform(panel).origin) < DOCK_DISTANCE
+
+
+# While a hand panel is carried near its spot, a faint outline shows where
+# it will go.
+func _show_home_ghost() -> void:
+	var index := _index_of(_dragging)
+	if index == -1 or not _near_dock(panels[index]) or not _views.has(_dragging):
+		_hide_home_ghost()
+		return
+	var panel: Dictionary = panels[index]
+	var screen: Node3D = _holders[_dragging].get_node_or_null("Screen")
+	if _home_ghost == null:
+		_home_ghost = MeshInstance3D.new()
+		_home_ghost.name = "DockGhost"
+		_home_ghost.mesh = QuadMesh.new()
+		var material := StandardMaterial3D.new()
+		material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		material.cull_mode = BaseMaterial3D.CULL_DISABLED
+		_home_ghost.material_override = material
+		add_child(_home_ghost)
+	if not _home_ghost.visible:
+		_pulse(0.2, 0.02)
+	(_home_ghost.mesh as QuadMesh).size = _views[_dragging]["quad"]
+	(_home_ghost.material_override as StandardMaterial3D).albedo_color = Color(_theme_color("accent"), DOCK_ALPHA)
+	_home_ghost.global_transform = _dock_transform(panel) * Transform3D(Basis(), screen.position if screen else Vector3.ZERO)
+	_home_ghost.visible = true
+
+
+func _hide_home_ghost() -> void:
+	if _home_ghost:
+		_home_ghost.visible = false
+
+
 func _on_point_pressed() -> void:
 	if not _hovered:
 		return  # the panel's background: the press is the panel's, and does nothing
@@ -399,6 +487,10 @@ func _on_point_pressed() -> void:
 		"close":
 			_pulse(0.4, 0.04)
 			_set_visible(panels[index], false)
+			return
+		"pin":
+			_pulse(0.4, 0.04)
+			_set_keep_place(panels[index], not panels[index]["keep_place"])
 			return
 		"tab":
 			_pulse(0.4, 0.04)
@@ -432,7 +524,18 @@ func _on_point_pressed() -> void:
 			_slide_follow()
 
 
+# Pin on: the window stays where you put it, across restarts. Off: it opens
+# where it always opens.
+func _set_keep_place(panel: Dictionary, on: bool) -> void:
+	panel["keep_place"] = on
+	_save()
+	_build(panel["id_panel"])
+	print("Slopitect ui: \"%s\" %s" % [panel["id_panel"], "pinned where it is" if on else "opens at home"])
+
+
 func _set_visible(panel: Dictionary, on: bool) -> void:
+	if on and not panel["keep_place"] and not panel["home"].is_empty():
+		_go_home(panel)  # a panel you carried opens where it always opens, unless pinned
 	if on and panel["place"] in ["front", "follow"]:
 		_holders[panel["id_panel"]].global_transform = _front_transform(panel)
 		_following.erase(panel["id_panel"])
@@ -1158,7 +1261,7 @@ func _check_panel(data: Dictionary, is_new: bool, check_actions: bool) -> Dictio
 		return {"error": "a panel \"%s\" already exists" % id}
 	var panel := {"id_panel": id}
 	for key in data:
-		if not key in ["id_panel", "title", "place", "distance", "height", "position", "rotation", "size", "color", "visible", "toggle", "layout", "columns", "cell", "elements", "chrome", "pages", "page", "apps", "menu", "hand", "scale"]:
+		if not key in ["id_panel", "title", "place", "distance", "height", "position", "rotation", "size", "color", "visible", "toggle", "layout", "columns", "cell", "elements", "chrome", "pages", "page", "apps", "menu", "hand", "scale", "home", "keep_place"]:
 			return {"error": "panel %s: unknown field \"%s\"" % [id, key]}
 	panel["title"] = data.get("title", id)
 	if typeof(panel["title"]) != TYPE_STRING or panel["title"].length() > 60:
@@ -1179,6 +1282,15 @@ func _check_panel(data: Dictionary, is_new: bool, check_actions: bool) -> Dictio
 	if typeof(panel["scale"]) not in [TYPE_INT, TYPE_FLOAT] or panel["scale"] < 0.1 or panel["scale"] > 3.0:
 		return {"error": "panel %s: \"scale\" must be 0.1 to 3" % id}
 	panel["scale"] = float(panel["scale"])
+	# Where a panel you carried opens again (unless pinned).
+	panel["home"] = data.get("home", {})
+	if typeof(panel["home"]) != TYPE_DICTIONARY or not (panel["home"].is_empty() or panel["home"].size() == 3
+			and panel["home"].get("place") in HOME_PLACES and _numbers(panel["home"].get("position"), 3, -20.0, 20.0)
+			and _numbers(panel["home"].get("rotation"), 3, -360.0, 360.0)):
+		return {"error": "panel %s: \"home\" must be {} or {\"place\": one of %s, \"position\": [x, y, z], \"rotation\": [x, y, z]}" % [id, HOME_PLACES]}
+	panel["keep_place"] = data.get("keep_place", false)
+	if typeof(panel["keep_place"]) != TYPE_BOOL:
+		return {"error": "panel %s: \"keep_place\" must be true (stays where you put it) or false (opens at home)" % id}
 	# For a hand panel, position and rotation are from the controller.
 	for key in [["position", HAND_POSITION if in_hand else [0, 1.4, -1], 20.0], ["rotation", HAND_ROTATION if in_hand else [0, 0, 0], 360.0]]:
 		var value = data.get(key[0], key[1])
@@ -1687,6 +1799,9 @@ func _title_bar(panel: Dictionary, view: Dictionary) -> Control:
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	title.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	row.add_child(title)
+	# Pin: lit when the window stays where you put it.
+	var pin := _small_button(view, id_panel, "pin", "Pin", Vector2(side.x * 1.6, side.y), _theme_color("accent") if panel["keep_place"] else _theme_color("button"))
+	row.add_child(pin)
 	var close := _small_button(view, id_panel, "close", "x", side, _theme_color("button"))
 	close.set_meta("hover", _theme_color("danger"))
 	row.add_child(close)
@@ -2332,6 +2447,9 @@ func _load() -> void:
 			loaded.append(checked["panel"])
 		if problem.is_empty():
 			panels = loaded
+			for panel in panels:
+				if not panel["keep_place"]:
+					_go_home(panel)  # only pinned windows stay where you put them
 			print("Slopitect ui: loaded %d panels from %s" % [panels.size(), SAVE_PATH])
 			return
 	# Keep the broken file for inspection instead of overwriting it.
