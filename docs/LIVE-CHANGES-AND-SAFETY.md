@@ -93,9 +93,10 @@ Known gaps, in the open:
   reading the key and getting around every rule above. The Yes is the
   lock: read what it uses, and say No when unsure. The "uses" list is a
   hint from the words in the code, not a guarantee.
-- **Any other app on the headset could connect to port 7777.** It can't
-  read the key or answer a question, but it could send other commands.
-  Next safety step: a pairing code the PC has to send first.
+- **Another app on the headset can still connect to port 7777**, but it can
+  only send `ping` and `pair`, and `pair` asks you in the headset. Say Yes
+  only right after you ran `slopi.ps1 -Pair` yourself. The pairing key is in
+  `slopi-key.txt` on the PC; anyone with that file can control the app.
 - **What you type or say to the agent goes to that AI company** (and your
   voice to the speech-to-text service, unless it's turned into text on the
   headset). With self-hosted ones on your PC,

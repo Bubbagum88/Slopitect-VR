@@ -127,11 +127,20 @@ PowerShell in that folder:
 ```
 Set-ExecutionPolicy -Scope Process Bypass
 .\adb forward tcp:7777 tcp:7777
+.\slopi.ps1 -Pair
 .\slopi.ps1 '{"cmd":"spawn","shape":"sphere","position":[0,1.5,-1],"color":"red"}'
 ```
 
 The first line lets this PowerShell window run the script; the second
 connects your PC's port 7777 to the app (again after each reconnect).
+`-Pair` is needed once per PC: other apps on the headset can reach the port
+too, so it only takes commands from programs you said Yes to. Say Yes in
+the headset; the pairing key is saved in `slopi-key.txt` next to the script
+(keep it private) and sent with every command. `pair_config` lists the
+paired programs, and `{"cmd":"pair_config","remove":"NAME"}` unpairs one.
+
+To talk to the agent from the PC and watch what it does, run
+[`tools/slopi-chat.ps1`](tools/slopi-chat.ps1) from the same folder.
 
 | Command | Fields | Example |
 | --- | --- | --- |
@@ -342,6 +351,7 @@ registering the plugin first.)
 | `game/skills/` | The agent's shipped skills, one `SKILL.md` per folder |
 | `docs/LIVE-CHANGES-AND-SAFETY.md` | What changes live, what needs a new APK, and the safety rules |
 | `tools/slopi.ps1` | Sends one command from your PC and prints the reply |
+| `tools/slopi-chat.ps1` | Talks to the agent from your PC and shows its replies and tool calls as they happen |
 | `ci/debug.keystore` | Debug signing key, so each build installs over the last |
 | `game/export_presets.cfg` | The "Quest 1" Android export (Quest 1 and 2 only) |
 | `.github/workflows/quest1-apk.yml` | Builds and checks the APK |

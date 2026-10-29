@@ -11,7 +11,10 @@
 #   /reset    forget the conversation and start a new one
 #   /status   the model, the tokens used, and what it's doing
 #   /quit     leave (the agent and the app keep running)
+# It uses the pairing key slopi.ps1 -Pair saved (slopi-key.txt next to it).
 param([int]$Port = 7777)
+
+$keyFile = Join-Path $PSScriptRoot "slopi-key.txt"
 
 # Sends one command and returns its reply, or $null if the app didn't answer.
 function Send-Command($request) {
@@ -25,6 +28,7 @@ function Send-Command($request) {
         $writer.NewLine = "`n"
         $writer.AutoFlush = $true
         $reader = [System.IO.StreamReader]::new($stream, $utf8)
+        if (Test-Path $keyFile) { $request["pair_key"] = (Get-Content $keyFile -Raw).Trim() }
         $writer.WriteLine(($request | ConvertTo-Json -Compress -Depth 10))
         return $reader.ReadLine() | ConvertFrom-Json
     } catch {
