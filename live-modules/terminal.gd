@@ -258,8 +258,14 @@ func _print(text: String) -> void:
 		if line.is_empty():
 			_screen.append("")
 		while not line.is_empty():
-			_screen.append(line.left(COLS))
-			line = line.substr(COLS)
+			# Break after the last space or comma that fits, so words stay whole.
+			var cut := COLS
+			if line.length() > COLS:
+				var at := maxi(line.rfind(" ", COLS - 1), line.rfind(",", COLS - 1))
+				if at > COLS / 2:
+					cut = at + 1
+			_screen.append(line.left(cut))
+			line = line.substr(cut)
 	if _screen.size() > MAX_LINES:
 		_screen = _screen.slice(_screen.size() - MAX_LINES)
 	_scroll = 0  # new output brings you back to the end
@@ -280,7 +286,7 @@ func _show_screen() -> void:
 
 func _show_line() -> void:
 	var shown := _line.right(LINE_COLS)  # the end of a long line, where you type
-	_set_text("line", "$ " + shown + "_" + (" (SHIFT)" if _shift else ""))
+	_set_text("line", "$ " + shown + "|" + (" (SHIFT)" if _shift else ""))
 
 
 func _set_text(id_element: String, text: String) -> void:
@@ -514,7 +520,7 @@ func _build_panel() -> void:
 		{"type": "box", "id": "screen", "at": [0, screen_y], "size": [width + 0.02, screen_height], "color": "#08100a"},
 		{"type": "text", "id": "screen_text", "at": [0, screen_y + screen_height / 2.0 - 0.01], "width": width,
 			"font_size": FONT, "color": "#8cff99", "mono": true, "text": ""},
-		{"type": "text", "id": "line", "at": [0, line_y + 0.012], "width": width, "font_size": LINE_FONT, "color": "#b3e6ff", "mono": true, "text": "$ _"},
+		{"type": "text", "id": "line", "at": [0, line_y + 0.012], "width": width, "font_size": LINE_FONT, "color": "#b3e6ff", "mono": true, "text": "$ |"},
 	]
 	for r in ROWS_OF_KEYS.size():
 		var row: String = ROWS_OF_KEYS[r]
