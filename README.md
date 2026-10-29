@@ -100,7 +100,7 @@ Each step is small and gets tested on the headset before the next one.
 - [ ] 5. Saves and backups: the world is saved as JSON before every change, with undo; backups go to a GitHub repo, so every version has a history
 - [ ] 6. Claude can send scripts, so objects can have behaviour *(built as live modules, each behind your Yes; waiting on a headset test)*
 - [ ] 7. Assets: Poly Haven (CC0, through its API) first; Kenney, Quaternius, Poly Pizza and Sketchfab (CC0 and CC-BY models only) as backups. Each asset's source and licence is recorded, and any that need credit are credited. Assets taken from games on your own headset are kept local and never backed up to GitHub
-- [ ] 8. Talk to Claude from inside the headset *(typing tested on a Quest 1; voice built, waiting on a headset test)*
+- [ ] 8. Talk to Claude from inside the headset *(typing tested on a Quest 1; hold-to-talk heard words on a Quest 1 but they didn't reach the chat box, fixed in the stt module and waiting on a headset test; spoken replies not heard yet)*
 - [ ] 9. Upgrade while you play: new menus, tools and features loaded into the running app (scripts and Godot resource packs), with a new APK only for engine or permission changes *(menus and scripts built; resource packs not yet)*
 
 ## Install on a Quest 1
@@ -216,9 +216,12 @@ Files, questions, voice and live code:
 | `files_move`, `files_copy` | `from`, `to` | `{"cmd":"files_copy","from":"/sdcard/Android/obb/some.obb","to":"extract/some.obb"}` |
 | `files_config` | `unblock` or `block` (a personal folder) | PC only: `{"cmd":"files_config","unblock":"/sdcard/Download/models"}` |
 | `confirm_status` | | the questions waiting for your answer in the headset |
-| `voice_say` | `text`, optional `voice` | `{"cmd":"voice_say","text":"Hello!"}` |
-| `voice_stop`, `voice_voices`, `voice_status` | | |
-| `voice_config` | any of `speak_replies`, `voice`, `rate`, `pitch`, `volume`, `stt_engine`, `stt_local_model`, `stt_url`, `stt_key`, `stt_model`, `stt_language`, `send_to_agent` | PC only, see below |
+| `tts_say` | `text`, optional `voice` | `{"cmd":"tts_say","text":"Hello!"}` (the tts live module) |
+| `tts_stop`, `tts_voices`, `tts_status` | | |
+| `tts_set` | any of `speak_replies`, `voice`, `rate`, `pitch`, `volume` | comfort settings, also in the headset's Settings window |
+| `stt_status` | | whether hold-to-talk works, and what it heard last (the stt live module) |
+| `stt_set` | `send_to_agent` | a comfort setting, also in the Settings window |
+| `stt_config` | any of `stt_engine`, `stt_local_model`, `stt_url`, `stt_key`, `stt_model`, `stt_language`, `send_to_agent` | PC only, see below |
 | `code_list` | | the live modules and their state |
 | `code_load` | `name` | loads `modules/NAME.gd` from the Slopitect folder after your Yes |
 | `code_unload`, `code_forget` | `name` | take one out; withdraw its Yes |
@@ -249,13 +252,20 @@ in `"error"`, without changing anything. Every command is also logged
 3. In the headset, press Y, type with the laser, press Send.
 
 Settings that end in `_config` (`agent_config`, `files_config`,
-`voice_config`) can only be changed from the PC: the agent can't use them
+`stt_config`) can only be changed from the PC: the agent can't use them
 and no button can run them.
 
 ### Voice
 
+Two live modules, loaded like the others with `code_load` and a Yes:
+`tts` (speech out) and `stt` (hold-to-talk). Their comfort settings (speed,
+pitch, volume, voice, reading replies, sending words straight to the agent)
+are in the headset's Settings window; the speech-to-text service and its
+key change only from the PC with `stt_config`. Settings kept by the old
+built-in voice module (`user://voice.json`) are taken over the first time.
+
 The agent's replies are read aloud by the headset's speech engine, if it
-has one (`voice_status` shows how many voices it found). If it has none,
+has one (`tts_status` shows how many voices it found). If it has none,
 a speech engine app has to be installed on the headset (for example
 [SherpaTTS](https://f-droid.org/en/packages/org.woheller69.ttsengine/),
 not yet tried on a Quest 1).
@@ -271,30 +281,30 @@ the APK. It needs a model file in the Slopitect folder. Download
 ```
 .\adb shell mkdir -p /sdcard/Slopitect/models
 .\adb push "C:\path\to\ggml-tiny.en.bin" /sdcard/Slopitect/models/
-.\slopi.ps1 '{"cmd":"voice_config","stt_engine":"local"}'
 ```
 
-A bigger model (`ggml-base.en.bin`, about 148 MB) hears better and takes
-longer; set `stt_local_model` to its name. How fast it is on the Quest 1
-isn't measured yet: each try logs how long it took.
+`"local"` is the default. A bigger model (`ggml-base.en.bin`, about 148 MB)
+hears better and takes longer; set `stt_local_model` to its name. On the
+Quest 1 the first try took 22 s for 2 s of speech, before English was
+forced for English-only models and the work cut to the recording's length;
+how fast it is since isn't measured yet. Each try logs how long it took.
 
-**Through a service** (`stt_engine` `"web"`, the default; off until you set
-one). For OpenAI's (paid), with its key in a text file:
+**Through a service** (`stt_engine` `"web"`). For OpenAI's (paid), with its key in a text file:
 
 ```
-.\slopi.ps1 (@{cmd="voice_config"; stt_url="https://api.openai.com/v1/audio/transcriptions"; stt_key=(Get-Content "C:\path\to\openai key.txt" -Raw).Trim()} | ConvertTo-Json -Compress)
+.\slopi.ps1 (@{cmd="stt_config"; stt_engine="web"; stt_url="https://api.openai.com/v1/audio/transcriptions"; stt_key=(Get-Content "C:\path\to\openai key.txt" -Raw).Trim()} | ConvertTo-Json -Compress)
 ```
 
 Or a free one on your own PC with [whisper.cpp](https://github.com/ggml-org/whisper.cpp)'s
 server (`whisper-server --host 0.0.0.0 --port 8080 -m <model>`), no key:
 
 ```
-.\slopi.ps1 '{"cmd":"voice_config","stt_url":"http://192.168.1.50:8080/inference"}'
+.\slopi.ps1 '{"cmd":"stt_config","stt_engine":"web","stt_url":"http://192.168.1.50:8080/inference"}'
 ```
 
-Then hold the left trigger, talk, and let go: the words go into the chat's
-input box for you to check and Send (`"send_to_agent":true` sends them
-straight away). Android asks once for the microphone.
+Then hold the left trigger, talk, and let go: the words go into the chat
+window's input box (it opens if it's hidden) for you to check and Send
+(`send_to_agent` sends them straight away). Android asks once for the microphone.
 
 The default is Claude Opus 5.5 (`claude-opus-5-5`), effort `medium`.
 
@@ -354,7 +364,8 @@ registering the plugin first.)
 | `game/modules/confirm.gd` | The Yes/No questions only you can answer, in the headset |
 | `game/modules/files.gd` | Files: the Slopitect folder, everything else behind your Yes |
 | `game/modules/agent.gd` | The AI agent: settings, firewall, tool loop |
-| `game/modules/voice.gd` | Speech out and hold-to-talk |
+| `live-modules/tts.gd` | Speech out: the agent's replies read aloud |
+| `live-modules/stt.gd` | Hold-to-talk: speech to text into the chat window |
 | `game/modules/code.gd` | Live modules: new code loaded after your Yes |
 | `game/pending.gd` | A command's answer that comes later (after your Yes) |
 | `game/agent/providers/` | One file per kind of AI service (`anthropic.gd`, `openai.gd`) |

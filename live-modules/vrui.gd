@@ -167,7 +167,7 @@ func setup() -> String:
 	register("ui_element_remove", _element_remove, "remove an element: id_panel, id_element")
 	register("ui_press", _press_command, "press a button or toggle, as if pointed at and clicked: id_panel, id_element")
 	register("ui_slide", _slide_command, "set a slider and run its action: id_panel, id_element, value")
-	register("ui_type", _type_command, "type text into the selected input box: text")
+	register("ui_type", _type_command, "type text into the selected input box: text, optional id_panel and id_element to pick the box")
 	register("ui_key", _key_command, "a key for the selected input box: key (shift, backspace, clear)")
 	register("ui_reset", _reset, "put the default panels back: optional id_panel for just that one")
 	register("ui_theme_status", _theme_status, "the theme every panel draws with: colours by name and text sizes")
@@ -770,6 +770,14 @@ func _type_command(request: Dictionary) -> Dictionary:
 	var text = request.get("text")
 	if typeof(text) != TYPE_STRING or text.is_empty():
 		return {"ok": false, "error": "ui_type needs \"text\""}
+	# A module can name the input box to type into (stt puts what was heard
+	# in the chat line); it becomes the selected one.
+	if request.has("id_panel") or request.has("id_element"):
+		var id_panel := str(request.get("id_panel", ""))
+		var id_element := str(request.get("id_element", ""))
+		if _element(id_panel, id_element).get("type", "") != "input":
+			return {"ok": false, "error": "\"%s\" has no input box \"%s\"" % [id_panel, id_element]}
+		_set_focus(id_panel + "/" + id_element)
 	if _focus.is_empty():
 		return {"ok": false, "error": "no input box is selected (point at one and pull the trigger)"}
 	if _shift:

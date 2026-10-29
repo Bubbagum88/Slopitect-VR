@@ -1,58 +1,45 @@
 extends SlopitectModule
 
-# Slopitect: talking with the agent.
-# Speech out: the agent's replies are read aloud by the headset's own
-# text-to-speech engine (if it has one: voice_status says), and anything can
-# speak with voice_say.
-# Speech in: hold the "talk" button (the left trigger, with the controls
-# module's default bindings) and talk; let go and the recording is turned
-# into text, and the words land in the chat window's input box (or go
-# straight to the agent, if you turn that on). The microphone records only
-# while the button is held, and a red dot on your left hand shows it. No
-# command turns it on, not the agent's, not a panel button's; only the
-# controls module does, and that is code you said Yes to (like any live
-# module, which could use the microphone itself).
+# Slopitect live module: stt (speech to text, "voice to text").
+# Hold the "talk" button (the left trigger, with the controls module's
+# default bindings) and talk; let go and the recording is turned into text,
+# and the words land in the chat window's input box (or go straight to the
+# agent, if you turn that on). The microphone records only while the button
+# is held, and a red dot on your left hand shows it. No command turns it on,
+# not the agent's, not a panel button's; only the controls module does.
 #
-# Two ways to turn speech into text (stt_engine, set with voice_config from
+# Two ways to turn speech into text (stt_engine, set with stt_config from
 # the PC):
-# - "local": whisper.cpp on the headset itself (the godot-whisper plugin),
-#   with a model file in the Slopitect folder. Nothing you say leaves the
-#   headset.
+# - "local" (the default): whisper.cpp on the headset itself (the
+#   godot-whisper plugin built into the APK), with a model file in the
+#   Slopitect folder. Nothing you say leaves the headset.
 # - "web": a service at stt_url that takes the OpenAI-style upload (a "file"
 #   and a "model" in a multipart form, "text" in the JSON reply): OpenAI,
-#   Groq, or a whisper.cpp server on your PC (its /inference address). Off
-#   until you set stt_url; until then nothing you say leaves the headset.
+#   Groq, or a whisper.cpp server on your PC (its /inference address).
+# Where the words go (send_to_agent) is a comfort setting: it changes in the
+# headset's Settings window too. Everything else changes only from the PC.
 
-const SETTINGS_PATH := "user://voice.json"
+const SETTINGS_PATH := "user://stt.json"
+const OLD_SETTINGS_PATH := "user://voice.json"  # the APK's voice module kept these before
 const MIC_PERMISSION := "android.permission.RECORD_AUDIO"
 const MIC_BUS := "SlopitectMic"
 const MAX_SECONDS := 30.0
 const MIN_SECONDS := 0.4
 const HTTP_TIMEOUT := 60.0
-const POLL_SECONDS := 0.5
-const MAX_SAY := 2000
-# Speech that hasn't finished this long after it started never will: Godot's
-# Android speech waits for the engine to say an utterance is done before it
-# sends the next, and an engine that is killed or drops one never says so.
-const SPEECH_GRACE_SECONDS := 15.0
-const SPEECH_SECONDS_PER_CHAR := 0.2  # far slower than any voice at rate 1
 const LOCAL_CLASS := "SpeechToText"  # from the godot-whisper plugin
 const LOCAL_LANGUAGES := {"": 0, "en": 1}  # its Language enum: 0 Auto, 1 English
+const CHAT_INPUT := ["chat", "line"]  # the chat window's input box, where your words go
 
 const DEFAULTS := {
-	"speak_replies": true,  # read the agent's replies aloud
-	"voice": "",  # a voice id from voice_voices; "" picks the first
-	"rate": 1.0,
-	"pitch": 1.0,
-	"volume": 80,
-	"stt_engine": "web",  # "web": the service at stt_url; "local": on the headset itself
+	"stt_engine": "local",  # "local": on the headset itself; "web": the service at stt_url
 	"stt_local_model": "models/ggml-tiny.en.bin",  # for "local": a whisper.cpp model, in the Slopitect folder
-	"stt_url": "",  # for "web"; "" means hold-to-talk is off
+	"stt_url": "",  # for "web"; "" means hold-to-talk is off there
 	"stt_key": "",
 	"stt_model": "whisper-1",
-	"stt_language": "",  # like "en"; "" lets the service decide
+	"stt_language": "",  # like "en"; "" lets it decide (an English-only model always hears English)
 	"send_to_agent": false,  # false: words go in the chat's input box for you to check and Send
 }
+const COMFORT := ["send_to_agent"]  # settings stt_set may change in the headset
 
 var settings := DEFAULTS.duplicate()
 
@@ -62,18 +49,13 @@ var _record: AudioEffectRecord
 var _capture: AudioEffectCapture  # the same sound as frames, for the local engine
 var _frames := PackedVector2Array()
 var _local: Node  # godot-whisper's SpeechToText, made on first use
-var _plugin := {}  # what was found about the godot-whisper plugin at start
 var _local_model := ""  # the model file _local has loaded
 var _local_thread: Thread
 var _mic_player: AudioStreamPlayer
 var _http: HTTPRequest
 var _busy := false  # a recording is being turned into text
-var _last := ""  # what happened last, for voice_status
+var _last := ""  # what happened last, for stt_status
 var _dot: MeshInstance3D
-var _since_poll := 0.0
-var _seen_reply := ""
-var _voice_cache := []  # the engine's voices, asked once it has some (each ask is a slow call into Android)
-var _speech_deadline := 0.0  # when what is being said should have finished; 0 when nothing is
 
 
 func setup() -> String:
@@ -114,19 +96,18 @@ func setup() -> String:
 	_dot.visible = false
 	ctx["left"].add_child(_dot)
 
-	register("voice_say", _say, "say something aloud through the headset's speech engine: text, optional voice, rate, pitch")
-	register("voice_stop", _stop_speaking, "stop speaking")
-	register("voice_voices", _voices, "the voices the headset's speech engine has")
-	register("voice_status", _status, "whether speech out and hold-to-talk are working, and what happened last")
-	register("voice_config", _config, "from the PC only: show or change any of: %s" % ", ".join(DEFAULTS.keys()))
+	register("stt_status", _status, "whether hold-to-talk works, which engine, the model, and what it heard or what went wrong last")
+	register("stt_set", _set_command, "a comfort setting, so it changes in the headset too: send_to_agent (true: your words go straight to the agent)")
+	register("stt_config", _config, "from the PC only: show or change any of: %s" % ", ".join(DEFAULTS.keys()))
 	var problem := _stt_problem()
-	print("Slopitect voice: %d speech voices; hold-to-talk %s (%s)" % [_voice_list().size(), "on" if problem.is_empty() else "off: " + problem, settings["stt_engine"]])
-	_plugin = _plugin_report()
-	print("Slopitect voice: the on-headset speech-to-text plugin: %s" % JSON.stringify(_plugin))
+	print("Slopitect stt: hold-to-talk %s (%s)" % ["on" if problem.is_empty() else "off: " + problem, settings["stt_engine"]])
 	return ""
 
 
 func _exit_tree() -> void:
+	if _recording:
+		_record.set_recording_active(false)
+		_mic_player.stop()
 	if _dot and is_instance_valid(_dot):
 		_dot.queue_free()
 	if _local_thread and _local_thread.is_started():
@@ -135,100 +116,23 @@ func _exit_tree() -> void:
 		_local.free()
 
 
-func _process(delta: float) -> void:
-	if _recording and Time.get_ticks_msec() / 1000.0 - _started_at >= MAX_SECONDS:
+func settings_info() -> Dictionary:
+	return {"title": "Speech to text", "order": 41, "settings": [
+		{"id": "send_to_agent", "type": "toggle", "label": "Send my words straight to the agent", "value": settings["send_to_agent"],
+			"set": {"cmd": "stt_set", "send_to_agent": "{value}"}},
+	]}
+
+
+func _process(_delta: float) -> void:
+	if not _recording:
+		return
+	if Time.get_ticks_msec() / 1000.0 - _started_at >= MAX_SECONDS:
 		_note("stopped listening after %d seconds" % MAX_SECONDS)
 		_stop_listening()
-	if _recording and _capture.get_frames_available() > 0:
+		return
+	if _capture.get_frames_available() > 0:
 		_frames.append_array(_capture.get_buffer(_capture.get_frames_available()))
-	_since_poll += delta
-	if _since_poll < POLL_SECONDS:
-		return
-	_since_poll = 0.0
-	_check_speech()
-	# Read the agent's new replies aloud.
-	var status: Dictionary = ctx["server"].run({"cmd": "agent_status"})
-	if not status.get("ok", false):
-		return
-	var reply := String(status.get("last_reply", ""))
-	if reply != _seen_reply:
-		_seen_reply = reply
-		if settings["speak_replies"] and not reply.is_empty():
-			_speak(reply, "", true)  # a new reply replaces one still being read
 
-
-# --- Speech out -----------------------------------------------------------------
-
-# Asked again only while the engine has none (it may still be starting) or
-# when voice_voices asks for a fresh list.
-func _voice_list(fresh := false) -> Array:
-	if not ProjectSettings.get_setting("audio/general/text_to_speech", false):
-		return []
-	if fresh or _voice_cache.is_empty():
-		_voice_cache = DisplayServer.tts_get_voices()
-	return _voice_cache
-
-
-func _speak(text: String, voice := "", interrupt := false) -> String:
-	var voices := _voice_list()
-	if voices.is_empty():
-		return "the headset has no text-to-speech voices (no speech engine installed, or it isn't ready yet)"
-	if voice.is_empty():
-		voice = settings["voice"]
-	if voice.is_empty() or not voices.any(func(v): return v["id"] == voice):
-		voice = voices[0]["id"]
-	text = text.left(MAX_SAY)
-	var now := Time.get_ticks_msec() / 1000.0
-	var seconds := SPEECH_GRACE_SECONDS + text.length() * SPEECH_SECONDS_PER_CHAR / float(settings["rate"])
-	# Queued speech starts after what is already being said.
-	_speech_deadline = (maxf(_speech_deadline, now) if not interrupt and _speech_deadline > 0.0 else now) + seconds
-	DisplayServer.tts_speak(text, voice, int(settings["volume"]), float(settings["pitch"]), float(settings["rate"]), 0, interrupt)
-	return ""
-
-
-# Speech the engine never finished blocks everything said after it, so it is
-# stopped, and the next thing said goes through.
-func _check_speech() -> void:
-	if _speech_deadline == 0.0:
-		return
-	if not DisplayServer.tts_is_speaking():
-		_speech_deadline = 0.0
-		return
-	if Time.get_ticks_msec() / 1000.0 < _speech_deadline:
-		return
-	_speech_deadline = 0.0
-	DisplayServer.tts_stop()
-	_note("the speech engine never said it finished speaking (it may have been closed); stopped it so the next speech can play")
-	push_warning("Slopitect voice: the speech engine never finished an utterance; reset its queue")
-
-
-func _say(request: Dictionary) -> Dictionary:
-	var text = request.get("text")
-	if typeof(text) != TYPE_STRING or text.strip_edges().is_empty():
-		return {"ok": false, "error": "voice_say needs \"text\""}
-	var voice = request.get("voice", "")
-	if typeof(voice) != TYPE_STRING:
-		return {"ok": false, "error": "\"voice\" must be a voice id from voice_voices"}
-	var problem := _speak(text, voice)
-	if not problem.is_empty():
-		return {"ok": false, "error": problem}
-	return {"ok": true}
-
-
-func _stop_speaking(_request: Dictionary) -> Dictionary:
-	DisplayServer.tts_stop()
-	_speech_deadline = 0.0
-	return {"ok": true}
-
-
-func _voices(_request: Dictionary) -> Dictionary:
-	var voices := []
-	for v in _voice_list(true):
-		voices.append({"id": v["id"], "name": v["name"], "language": v["language"]})
-	return {"ok": true, "voices": voices}
-
-
-# --- Speech in --------------------------------------------------------------------
 
 # Why hold-to-talk can't work now, or "" when it can.
 func _stt_problem() -> String:
@@ -241,7 +145,7 @@ func _stt_problem() -> String:
 			return "on the headset, stt_language can only be \"en\" or \"\" (any) for now"
 		return ""
 	if String(settings["stt_url"]).is_empty():
-		return "set a speech-to-text service with voice_config from the PC"
+		return "set a speech-to-text service with stt_config from the PC"
 	return ""
 
 
@@ -286,7 +190,7 @@ func _start_listening() -> void:
 	_recording = true
 	_started_at = Time.get_ticks_msec() / 1000.0
 	_dot.visible = true
-	print("Slopitect voice: listening")
+	print("Slopitect stt: listening")
 
 
 func _stop_listening() -> void:
@@ -307,7 +211,7 @@ func _stop_listening() -> void:
 		_transcribe_local(_frames, seconds)
 		_frames = PackedVector2Array()
 		return
-	print("Slopitect voice: heard %.1f s, sending it to speech-to-text" % seconds)
+	print("Slopitect stt: heard %.1f s, sending it to speech-to-text" % seconds)
 	_transcribe(recording)
 
 
@@ -323,16 +227,26 @@ func _transcribe_local(frames: PackedVector2Array, seconds: float) -> void:
 		if _local == null:
 			_note("couldn't make godot-whisper's %s" % LOCAL_CLASS)
 			return
-	_local.set("language", LOCAL_LANGUAGES[settings["stt_language"]])
+	# An English-only model (*.en.bin) can only hear English; left to guess,
+	# it picks a random language and turns English into nonsense.
+	var language: String = settings["stt_language"]
+	if language.is_empty() and path.get_file().contains(".en."):
+		language = "en"
+	_local.set("language", LOCAL_LANGUAGES[language])
 	_busy = true
-	print("Slopitect voice: heard %.1f s (%d frames at %d Hz), turning it into text on the headset" % [seconds, frames.size(), int(AudioServer.get_mix_rate())])
+	print("Slopitect stt: heard %.1f s (%d frames at %d Hz), turning it into text on the headset" % [seconds, frames.size(), int(AudioServer.get_mix_rate())])
 	_local_thread = Thread.new()
 	_local_thread.start(_local_work.bind(frames, path))
 
 
 # Runs on the thread: touches only _local and its own values.
 func _local_work(frames: PackedVector2Array, path: String) -> void:
-	var report := {"model": path, "frames": frames.size(), "mix_rate": int(AudioServer.get_mix_rate())}
+	var report := {"model": path, "frames": frames.size(), "mix_rate": int(AudioServer.get_mix_rate()), "language": int(_local.get("language"))}
+	# How loud the recording got (0 to 1): near 0 means the microphone gave silence.
+	var peak := 0.0
+	for frame in frames:
+		peak = maxf(peak, maxf(absf(frame.x), absf(frame.y)))
+	report["peak"] = snappedf(peak, 0.001)
 	var started := Time.get_ticks_msec()
 	if path != _local_model:
 		var model = ClassDB.instantiate("WhisperResource")
@@ -351,7 +265,12 @@ func _local_work(frames: PackedVector2Array, path: String) -> void:
 	report["samples_16k"] = samples.size()
 	report["resample_ms"] = Time.get_ticks_msec() - started
 	started = Time.get_ticks_msec()
-	var result: Array = _local.call("transcribe", samples, "", 0)
+	# Whisper's encoder covers a fixed 30 s window (an audio context of 1500,
+	# 50 per second) however short the recording; covering only what was
+	# said, plus a second, is what makes a 2 s phrase take seconds, not tens.
+	var audio_ctx := mini(1500, ceili(samples.size() / 320.0) + 50)
+	report["audio_ctx"] = audio_ctx
+	var result: Array = _local.call("transcribe", samples, "", audio_ctx)
 	var took := Time.get_ticks_msec() - started
 	report["transcribe_ms"] = took
 	if samples.size() > 0:
@@ -367,7 +286,7 @@ func _local_done(report: Dictionary, words: String) -> void:
 	_local_thread.wait_to_finish()
 	_local_thread = null
 	_busy = false
-	print("Slopitect voice: on-headset speech-to-text: ", JSON.stringify(report))
+	print("Slopitect stt: on-headset speech-to-text: ", JSON.stringify(report))
 	if report.has("error"):
 		_note("on-headset speech-to-text failed: " + String(report["error"]))
 		return
@@ -428,8 +347,9 @@ func _transcribe(recording: AudioStreamWAV) -> void:
 	_deliver(words)
 
 
-# Puts the words in the chat's input box (showing the chat if it's hidden),
-# or sends them to the agent when send_to_agent is on.
+# Puts the words in the chat window's input box (showing the window if it's
+# hidden), for you to check and Send, or sends them to the agent when
+# send_to_agent is on.
 func _deliver(words: String) -> void:
 	var server: Node = ctx["server"]
 	if settings["send_to_agent"]:
@@ -437,33 +357,35 @@ func _deliver(words: String) -> void:
 		if not reply.get("ok", false):
 			_note("couldn't send it to the agent: " + String(reply.get("error", "?")))
 		return
-	server.run({"cmd": "ui_show", "id_panel": "chat", "visible": true})
-	var typed: Dictionary = server.run({"cmd": "ui_type", "text": words + " "})
+	var typed: Dictionary = server.run({"cmd": "ui_type", "text": words + " ", "id_panel": CHAT_INPUT[0], "id_element": CHAT_INPUT[1]})
 	if not typed.get("ok", false):
-		_note("couldn't put it in an input box: " + String(typed.get("error", "?")))
+		_note("heard \"%s\" but couldn't put it in the chat window: %s" % [words, String(typed.get("error", "?"))])
+		return
+	# Shown only when hidden: showing it again would move it in front of you.
+	var shown: Dictionary = server.run({"cmd": "ui_list"})
+	for panel in shown.get("panels", []):
+		if panel["id_panel"] == CHAT_INPUT[0] and not panel["visible"]:
+			server.run({"cmd": "ui_show", "id_panel": CHAT_INPUT[0], "visible": true})
 
 
 func _note(text: String) -> void:
 	_last = text
-	print("Slopitect voice: ", text)
+	print("Slopitect stt: ", text)
 
 
 # --- Status and settings ------------------------------------------------------------
 
 func _status(_request: Dictionary) -> Dictionary:
+	var problem := _stt_problem()
 	return {
 		"ok": true,
-		"speech_out": ProjectSettings.get_setting("audio/general/text_to_speech", false),
-		"voices": _voice_list().size(),
-		"speaking": DisplayServer.tts_is_speaking() if not _voice_list().is_empty() else false,
-		"speech_should_end_in": maxf(_speech_deadline - Time.get_ticks_msec() / 1000.0, 0.0) if _speech_deadline > 0.0 else 0.0,
-		"microphone_in_build": ProjectSettings.get_setting("audio/driver/enable_input", false),
-		"microphone_permission": OS.get_name() != "Android" or MIC_PERMISSION in OS.get_granted_permissions(),
-		"hold_to_talk": "on (hold the left trigger)" if _stt_problem().is_empty() else "off: " + _stt_problem(),
+		"hold_to_talk": "on (hold the left trigger)" if problem.is_empty() else "off: " + problem,
 		"stt_engine": settings["stt_engine"],
 		"stt_url": settings["stt_url"],
+		"send_to_agent": settings["send_to_agent"],
+		"microphone_in_build": ProjectSettings.get_setting("audio/driver/enable_input", false),
+		"microphone_permission": OS.get_name() != "Android" or MIC_PERMISSION in OS.get_granted_permissions(),
 		"local_in_build": ClassDB.class_exists(LOCAL_CLASS),
-		"plugin": _plugin,
 		"local_model": _local_model_path(),
 		"local_model_found": FileAccess.file_exists(_local_model_path()),
 		"local_model_loaded": not _local_model.is_empty(),
@@ -473,7 +395,20 @@ func _status(_request: Dictionary) -> Dictionary:
 	}
 
 
+func _set_command(request: Dictionary) -> Dictionary:
+	for key in request:
+		if key in ["cmd", "id"]:
+			continue
+		if not key in COMFORT:
+			return {"ok": false, "error": "stt_set changes only %s; \"%s\" changes from the PC with stt_config" % [", ".join(COMFORT), key]}
+	return _change(request)
+
+
 func _config(request: Dictionary) -> Dictionary:
+	return _change(request)
+
+
+func _change(request: Dictionary) -> Dictionary:
 	var changes := {}
 	for key in request:
 		if key in ["cmd", "id"]:
@@ -496,7 +431,7 @@ func _config(request: Dictionary) -> Dictionary:
 		_local.free()
 		_local = null
 		_local_model = ""
-		print("Slopitect voice: on-headset speech-to-text model unloaded")
+		print("Slopitect stt: on-headset speech-to-text model unloaded")
 	var shown := settings.duplicate()
 	shown["stt_key"] = "(set)" if not String(settings["stt_key"]).is_empty() else "(not set)"
 	return {"ok": true, "settings": shown}
@@ -504,82 +439,67 @@ func _config(request: Dictionary) -> Dictionary:
 
 func _check_setting(key: String, value) -> String:
 	match key:
-		"speak_replies", "send_to_agent":
+		"send_to_agent":
 			if typeof(value) != TYPE_BOOL:
-				return "\"%s\" must be true or false" % key
-		"voice", "stt_key", "stt_model", "stt_language":
+				return "\"send_to_agent\" must be true or false"
+		"stt_key", "stt_model", "stt_language":
 			if typeof(value) != TYPE_STRING or value.length() > 300:
 				return "\"%s\" must be text" % key
 		"stt_engine":
 			if not value in ["web", "local"]:
-				return "\"stt_engine\" must be \"web\" (the service at stt_url) or \"local\" (on the headset)"
+				return "\"stt_engine\" must be \"local\" (on the headset) or \"web\" (the service at stt_url)"
 		"stt_local_model":
 			if typeof(value) != TYPE_STRING or not value.ends_with(".bin") or value.begins_with("/") or ".." in value or "\\" in value or "://" in value:
 				return "\"stt_local_model\" must be a .bin file inside the Slopitect folder, like \"models/ggml-tiny.en.bin\""
 		"stt_url":
 			if typeof(value) != TYPE_STRING or not (value.is_empty() or value.begins_with("https://") or value.begins_with("http://")):
-				return "\"stt_url\" must be an http(s) address (like https://api.openai.com/v1/audio/transcriptions or http://192.168.1.10:8080/inference), or \"\" to turn hold-to-talk off"
-		"rate":
-			if typeof(value) not in [TYPE_INT, TYPE_FLOAT] or value < 0.1 or value > 10.0:
-				return "\"rate\" must be 0.1 to 10"
-		"pitch":
-			if typeof(value) not in [TYPE_INT, TYPE_FLOAT] or value < 0.0 or value > 2.0:
-				return "\"pitch\" must be 0 to 2"
-		"volume":
-			if typeof(value) not in [TYPE_INT, TYPE_FLOAT] or value < 0 or value > 100:
-				return "\"volume\" must be 0 to 100"
+				return "\"stt_url\" must be an http(s) address (like https://api.openai.com/v1/audio/transcriptions or http://192.168.1.10:8080/inference), or \"\" to turn the web service off"
 	return ""
 
 
+# Its own file, or the speech-to-text settings the APK's voice module kept
+# before (only the keys this module has, with the engine it used then); a
+# broken file is kept aside and the defaults used.
 func _load_settings() -> void:
-	if not FileAccess.file_exists(SETTINGS_PATH):
+	var path := SETTINGS_PATH if FileAccess.file_exists(SETTINGS_PATH) else OLD_SETTINGS_PATH
+	if not FileAccess.file_exists(path):
 		return
 	var json := JSON.new()
 	var problem := ""
-	if json.parse(FileAccess.get_file_as_string(SETTINGS_PATH)) != OK or typeof(json.data) != TYPE_DICTIONARY:
+	if json.parse(FileAccess.get_file_as_string(path)) != OK or typeof(json.data) != TYPE_DICTIONARY:
 		problem = "not a JSON object"
 	else:
 		for key in json.data:
 			if not DEFAULTS.has(key):
-				problem = "unknown setting \"%s\"" % key
-				break
+				if path == SETTINGS_PATH:
+					problem = "unknown setting \"%s\"" % key
+					break
+				continue
 			problem = _check_setting(key, json.data[key])
 			if not problem.is_empty():
 				break
-		if problem.is_empty():
-			for key in json.data:
+	if problem.is_empty():
+		for key in json.data:
+			if DEFAULTS.has(key):
 				settings[key] = json.data[key]
-			return
-	DirAccess.rename_absolute(SETTINGS_PATH, SETTINGS_PATH + ".bad")
-	push_error("Slopitect voice: %s is broken (%s); kept it as %s and used the defaults" % [SETTINGS_PATH, problem, SETTINGS_PATH + ".bad"])
+		# The old module's "web" was its default, kept even when no address was set.
+		if path == OLD_SETTINGS_PATH:
+			if settings["stt_engine"] == "web" and String(settings["stt_url"]).is_empty():
+				settings["stt_engine"] = "local"
+			_save_settings()
+		return
+	settings = DEFAULTS.duplicate()
+	if path != SETTINGS_PATH:
+		push_warning("Slopitect stt: %s is broken (%s); used the defaults" % [path, problem])
+		return
+	DirAccess.rename_absolute(path, path + ".bad")
+	push_error("Slopitect stt: %s is broken (%s); kept it as %s and used the defaults" % [path, problem, path + ".bad"])
 
 
 func _save_settings() -> void:
 	var file := FileAccess.open(SETTINGS_PATH, FileAccess.WRITE)
 	if file == null:
-		push_error("Slopitect voice: could not save %s (%s)" % [SETTINGS_PATH, error_string(FileAccess.get_open_error())])
+		push_error("Slopitect stt: could not save %s (%s)" % [SETTINGS_PATH, error_string(FileAccess.get_open_error())])
 		return
 	file.store_string(JSON.stringify(settings, "  "))
 	file.close()
-
-
-# Everything about whether the godot-whisper plugin got loaded, in one go:
-# the engine's list of extensions to load at start, which ones it loaded,
-# whether the plugin's files are in the APK, and if it's missing, what
-# loading it now says (any engine error goes to the log and errors_recent).
-func _plugin_report() -> Dictionary:
-	const LIST := "res://.godot/extension_list.cfg"
-	const PLUGIN := "res://addons/godot_whisper/godot_whisper.gdextension"
-	var report := {
-		"class_found": ClassDB.class_exists(LOCAL_CLASS),
-		"extension_list_found": FileAccess.file_exists(LIST),
-		"extension_list": FileAccess.get_file_as_string(LIST).strip_edges().split("\n") if FileAccess.file_exists(LIST) else [],
-		"loaded_extensions": GDExtensionManager.get_loaded_extensions(),
-		"plugin_file_found": FileAccess.file_exists(PLUGIN),
-		"os": OS.get_name(), "architecture": Engine.get_architecture_name(), "debug_build": OS.is_debug_build(),
-	}
-	if not report["class_found"] and report["plugin_file_found"] and not GDExtensionManager.is_extension_loaded(PLUGIN):
-		var status := GDExtensionManager.load_extension(PLUGIN)
-		report["load_now"] = ["ok", "failed", "already loaded", "not loaded", "needs restart"][status] if status < 5 else str(status)
-		report["class_found_after_load_now"] = ClassDB.class_exists(LOCAL_CLASS)
-	return report
