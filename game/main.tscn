@@ -1,4 +1,4 @@
-[gd_scene load_steps=13 format=3]
+[gd_scene load_steps=11 format=3]
 
 [ext_resource type="Script" path="res://main.gd" id="1_main"]
 [ext_resource type="Script" path="res://command_server.gd" id="2_cmd"]
@@ -29,12 +29,6 @@ albedo_color = Color(0.25, 0.5, 1, 1)
 [sub_resource type="StandardMaterial3D" id="right_material"]
 albedo_color = Color(1, 0.3, 0.25, 1)
 
-[sub_resource type="BoxMesh" id="cube_mesh"]
-size = Vector3(0.5, 0.5, 0.5)
-
-[sub_resource type="StandardMaterial3D" id="cube_material"]
-albedo_color = Color(0.95, 0.6, 0.2, 1)
-
 [node name="Main" type="Node3D"]
 script = ExtResource("1_main")
 
@@ -46,11 +40,6 @@ environment = SubResource("environment")
 [node name="Floor" type="MeshInstance3D" parent="."]
 mesh = SubResource("floor_mesh")
 surface_material_override/0 = SubResource("floor_material")
-
-[node name="Cube" type="MeshInstance3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.25, -2)
-mesh = SubResource("cube_mesh")
-surface_material_override/0 = SubResource("cube_material")
 
 [node name="XROrigin3D" type="XROrigin3D" parent="."]
 

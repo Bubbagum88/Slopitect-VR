@@ -68,6 +68,7 @@ var _seen_reply := ""
 func setup() -> String:
 	_load_settings()
 	_http = HTTPRequest.new()
+	_http.use_threads = true  # the connection and its TLS handshake off the frame
 	_http.timeout = HTTP_TIMEOUT
 	add_child(_http)
 

@@ -78,6 +78,16 @@ var _waiting_on: SlopitectPending  # a tool waiting for the person's answer
 var _context_tokens := 0  # the size of the last prompt sent: the conversation so far
 var _ask_tokens := {"input": 0, "output": 0, "cached": 0}  # the current (or last) question
 var _total_tokens := {"input": 0, "output": 0, "cached": 0}  # since the app started
+var _phase := "idle"  # what the agent is doing, for the slow-frame log
+# A conversation keeps the tools and instructions it started with: Claude
+# refuses a conversation whose tool list changed partway (its earlier
+# thinking is tied to that list). New tools, like a live module's, are used
+# from a new conversation, which the agent can start with new_conversation.
+var _conv_tools: Array = []
+var _conv_system := ""
+var _announced := {}  # new tools the agent has been told about, this conversation
+var _restart_note = null  # new_conversation's note, until the next round starts it
+var _last_prompt := ""  # the person's last message, carried into a new conversation
 
 signal _reply_ready(result: Array)
 
@@ -89,6 +99,9 @@ func setup() -> String:
 		push_error("Slopitect agent: %s; set another with agent_config" % problem)
 	_http = HTTPRequest.new()
 	_http.timeout = HTTP_TIMEOUT
+	# Without a thread, connecting (the TLS handshake) and reading the reply
+	# happen in the frame, and the headset stutters while the agent works.
+	_http.use_threads = true
 	add_child(_http)
 	_http.request_completed.connect(func(result, code, headers, body): _reply_ready.emit([result, code, headers, body]))
 	_load_skills()
@@ -108,6 +121,13 @@ func setup() -> String:
 	return ""
 
 
+# A frame that took far longer than the headset's (about 14 ms) is logged
+# with what the agent was doing then, so a stutter can be traced.
+func _process(delta: float) -> void:
+	if _busy and delta > 0.1:
+		print("Slopitect agent: slow frame, %d ms, while %s" % [int(delta * 1000.0), _phase])
+
+
 # --- Commands -----------------------------------------------------------------
 
 func _ask(request: Dictionary) -> Dictionary:
@@ -123,14 +143,15 @@ func _ask(request: Dictionary) -> Dictionary:
 	# (the world itself stays; the agent can look at it again with list).
 	if _context_tokens > int(settings["max_context_tokens"]) and not _history.is_empty():
 		_note("started a new conversation: the last one had grown to %d tokens (max_context_tokens %d)" % [_context_tokens, settings["max_context_tokens"]])
-		_history.clear()
-		_context_tokens = 0
+		_clear_conversation()
+	_last_prompt = prompt
+	var sent: String = prompt + _new_tools_note()
 	# After a run that stopped mid-way, the conversation ends with tool
 	# results; the new message goes in the same turn, after them.
 	if not _history.is_empty() and _history[-1]["role"] == "tool_results":
-		_history[-1]["text"] = prompt
+		_history[-1]["text"] = sent
 	else:
-		_history.append({"role": "user", "text": prompt})
+		_history.append({"role": "user", "text": sent})
 	_note("you: " + prompt)
 	_run_conversation()  # runs on, in the background; not awaited on purpose
 	return {"ok": true, "started": true}
@@ -212,8 +233,7 @@ func _stop(_request: Dictionary) -> Dictionary:
 func _reset(_request: Dictionary) -> Dictionary:
 	if _busy:
 		return {"ok": false, "error": "the agent is still working; wait for it to finish"}
-	_history.clear()
-	_context_tokens = 0
+	_clear_conversation()
 	_last_reply = ""
 	_last_error = ""
 	_note("conversation reset")
@@ -237,14 +257,21 @@ func _run_conversation() -> void:
 	_round = 0
 	_ask_tokens = {"input": 0, "output": 0, "cached": 0}
 	_load_skills()
-	var tools := _tools()
-	var system := _system_prompt()
 	while true:
 		_round += 1
+		# Only the first message of a conversation picks up the current tools.
+		if _history.size() == 1:
+			_conv_tools = _tools()
+			_conv_system = _system_prompt()
+		var tools := _conv_tools
+		var system := _conv_system
 		if _round > int(settings["max_tool_rounds"]):
 			_fail("stopped after %d rounds (max_tool_rounds); ask again to carry on" % settings["max_tool_rounds"])
 			break
+		_phase = "building the request"
+		var started := Time.get_ticks_usec()
 		var request := _provider.build_request(settings, system, _history, tools)
+		var build_ms := (Time.get_ticks_usec() - started) / 1000.0
 		if request.has("error"):
 			_fail(request["error"])
 			break
@@ -253,14 +280,22 @@ func _run_conversation() -> void:
 		if err != OK:
 			_fail("could not send the request to %s (%s)" % [request["url"], error_string(err)])
 			break
+		_phase = "waiting for the reply"
+		started = Time.get_ticks_usec()
 		var result: Array = await _reply_ready
+		var wait_ms := (Time.get_ticks_usec() - started) / 1000.0
 		if _stop_requested:
 			_note("stopped; the reply was not waited for")
 			break
 		if result[0] != HTTPRequest.RESULT_SUCCESS:
 			_fail("no reply from %s: %s" % [request["url"], _http_result_name(result[0])])
 			break
+		_phase = "reading the reply"
+		started = Time.get_ticks_usec()
 		var reply := _provider.parse_response(result[1], (result[3] as PackedByteArray).get_string_from_utf8())
+		var parse_ms := (Time.get_ticks_usec() - started) / 1000.0
+		print("Slopitect agent: round %d timing: request built in %.1f ms (%d KB), reply after %.0f ms (%d KB), read in %.1f ms" % [
+			_round, build_ms, String(request["body"]).length() / 1024, wait_ms, (result[3] as PackedByteArray).size() / 1024, parse_ms])
 		if reply.has("error"):
 			_fail(reply["error"])
 			break
@@ -280,10 +315,17 @@ func _run_conversation() -> void:
 			_last_reply = reply["text"]
 			_note("agent: " + reply["text"])
 		if reply["stop"] == "tool_use" and not reply["tool_calls"].is_empty():
-			_history.append({"role": "tool_results", "results": await _run_tools(reply["tool_calls"])})
+			var results := await _run_tools(reply["tool_calls"])
+			results[-1]["content"] += _new_tools_note()
+			_history.append({"role": "tool_results", "results": results})
 			if _stop_requested:
 				_note("stopped")
 				break
+			if _restart_note != null:
+				var note: String = _restart_note
+				_clear_conversation()
+				_history.append({"role": "user", "text": "(You started this new conversation with new_conversation, so your tools are up to date. The person's last message was: \"%s\". Your note to yourself: %s)" % [_last_prompt, note]})
+				_note("the agent started a new conversation to use its new tools")
 			if spent >= int(settings["max_tokens_per_ask"]):
 				_fail("stopped: this question used %d tokens (max_tokens_per_ask %d); ask again to carry on" % [spent, settings["max_tokens_per_ask"]])
 				break
@@ -304,6 +346,7 @@ func _run_conversation() -> void:
 		_history.pop_back()
 		_note("your last message was not sent; ask again")
 	_busy = false
+	_phase = "idle"
 	print("Slopitect agent: done after %d rounds" % _round)
 
 
@@ -324,13 +367,26 @@ func _run_tools(calls: Array) -> Array:
 			var read := _read_skill(input.get("name"))
 			content = read[1]
 			is_error = not read[0]
+		elif call["name"] == "new_conversation":
+			var note = input.get("note")
+			if typeof(note) != TYPE_STRING or note.strip_edges().is_empty():
+				content = "new_conversation needs \"note\": what you were doing and what's left, since the new conversation won't have this one"
+				is_error = true
+			else:
+				_restart_note = note.strip_edges()
+				content = "ok: after this round a new conversation starts with your current tools; it gets your note and the person's last message, nothing else"
 		elif not _allowed_tool(call["name"]):
 			content = "\"%s\" is not one of your tools" % call["name"]
 			is_error = true
 		else:
 			var command := input.duplicate(true)
 			command["cmd"] = call["name"]
+			_phase = "running " + call["name"]
+			var started := Time.get_ticks_usec()
 			var outcome: Dictionary = ctx["server"].run_for_agent(command)
+			var run_ms := (Time.get_ticks_usec() - started) / 1000.0
+			if run_ms > 20.0:
+				print("Slopitect agent: tool %s took %.0f ms" % [call["name"], run_ms])
 			if outcome.get("wait") is SlopitectPending:
 				# It needs the person's Yes in the headset first. Stop gives up
 				# on it (and closes the question) instead of waiting.
@@ -377,10 +433,36 @@ func _tools() -> Array:
 	if _allowed_tool("modules"):
 		tools.append({"name": "modules", "description": "list the app's loaded modules, and why any failed to load",
 			"schema": {"type": "object", "additionalProperties": true}})
+	tools.append({"name": "new_conversation", "description": "start a new conversation, to use tools that were added after this one began (like a live module's); it forgets this one, so pass a note of what you were doing and what's left",
+		"schema": {"type": "object", "properties": {"note": {"type": "string", "description": "what you were doing and what's left"}}, "required": ["note"]}})
 	if not _skills.is_empty():
 		tools.append({"name": "read_skill", "description": "read one of your skills in full before doing what it covers",
 			"schema": {"type": "object", "properties": {"name": {"type": "string", "description": "the skill's name"}}, "required": ["name"]}})
 	return tools
+
+
+# Tells the agent which tools it now has that this conversation can't use yet,
+# once for each tool.
+func _new_tools_note() -> String:
+	var known := {}
+	for tool in _conv_tools:
+		known[tool["name"]] = true
+	var added := PackedStringArray()
+	for tool in _tools():
+		if not known.has(tool["name"]) and not _announced.has(tool["name"]) and not _history.is_empty():
+			added.append(tool["name"])
+			_announced[tool["name"]] = true
+	if added.is_empty():
+		return ""
+	return "\n[New tools are ready: %s. This conversation can't use them; call new_conversation with a note of what's left to use them.]" % ", ".join(added)
+
+
+func _clear_conversation() -> void:
+	_history.clear()
+	_context_tokens = 0
+	_conv_tools = []
+	_announced = {}
+	_restart_note = null
 
 
 func _system_prompt() -> String:
