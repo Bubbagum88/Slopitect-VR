@@ -2,15 +2,17 @@ extends SlopitectModule
 
 # Slopitect live module: keyboard.
 # One keyboard in its own floating window, "Keyboard", instead of keys on
-# every window. It types into the terminal's line when you last pointed at
-# the terminal, otherwise into the input box you picked in any window (the
-# chat's line, a world's name, ...), and otherwise into the terminal if it's
-# open. (While the terminal is loaded it takes the chat window over, so
-# chat is typed through the terminal too.) Its layout follows what it types into: the command symbols for the
-# terminal's command line, ' ? ! for words. Run (Send) runs the terminal's
-# line, or presses the "send" button beside the input box. The keys are
-# taken off the terminal and chat windows while it's loaded; unloading it
-# gives the terminal its own keys back.
+# every window. What you type shows on its own display line (Shift makes the
+# next letter a capital; Del and Clr work on it) and goes nowhere until Run
+# (Send): then it's put in the terminal's line when you last pointed at the
+# terminal, otherwise in the input box you picked in any window (the chat's
+# line, a world's name, ...), otherwise in the terminal if it's open, and
+# run there (the terminal's Run, or the window's "send" button if it has
+# one). While the terminal is loaded it takes the chat window over, so chat
+# goes through the terminal too. The layout follows where it sends: the
+# command symbols for the terminal's command line, ' ? ! for words. The keys
+# are taken off the terminal and chat windows while it's loaded; unloading
+# it gives the terminal its own keys back.
 # A Menu tile and a hand menu button open it, like the terminal's.
 # From the headset agent's keyboard.gd, 2026-10-29.
 
@@ -27,14 +29,18 @@ const COMMAND_KEYS := ["1234567890-", "qwertyuiop/", "asdfghjkl_=", "zxcvbnm,.[]
 const WORD_KEYS := ["1234567890-", "qwertyuiop'", "asdfghjkl?!", "zxcvbnm,./:"]
 # Keyboard parts on the terminal and chat windows (the row keys are key_R_C).
 const OTHER_IDS := ["space", "del", "clear", "quote", "shift"]
+const DISPLAY := "display"
+const SHOWN := 36  # most characters the display line shows
 
 var _since := CHECK_SECONDS
 var _layout := ""  # "command" or "words": the keys the window was built with
+var _text := ""  # typed on the display line, not sent yet
+var _shift := false  # the next letter is a capital
 
 
 func setup() -> String:
-	register("keyboard_type", _type_command, "type with the keyboard, into what it types into now: text")
-	register("keyboard_key", _key_command, "a key on the keyboard: key (shift, backspace, clear, run)")
+	register("keyboard_type", _type_command, "type on the keyboard's display line: text")
+	register("keyboard_key", _key_command, "a key on the keyboard: key (shift, backspace, clear: on the display line; run: send it)")
 	register("keyboard_status", _status, "what the keyboard types into now (terminal, an input box, or nothing) and its layout")
 	return ""
 
@@ -107,36 +113,79 @@ func _shown() -> Dictionary:
 	return shown
 
 
+# A key that types: it goes on the display line (a capital after Shift).
 func _type_command(request: Dictionary) -> Dictionary:
 	var text = request.get("text")
 	if typeof(text) != TYPE_STRING or text.is_empty():
 		return {"ok": false, "error": "keyboard_type needs \"text\""}
-	var target := _target(_shown())
-	if target == TERMINAL:
-		return _run({"cmd": "terminal_type", "text": text})
-	if target.is_empty():
-		return {"ok": false, "error": "nothing to type into: open the terminal or pick an input box"}
-	return _run({"cmd": "ui_type", "text": text})
+	if _shift and text.to_upper() != text.to_lower():
+		text = text.to_upper()
+		_shift = false
+	_text += text
+	_show()
+	return {"ok": true}
 
 
+# Shift, Del and Clr work on the display line; Run sends it.
 func _key_command(request: Dictionary) -> Dictionary:
-	var key = request.get("key")
-	if not key in ["shift", "backspace", "clear", "run"]:
-		return {"ok": false, "error": "\"key\" must be shift, backspace, clear or run"}
+	match request.get("key"):
+		"shift":
+			_shift = not _shift
+		"backspace":
+			_text = _text.left(_text.length() - 1)
+		"clear":
+			_text = ""
+		"run":
+			return _send()
+		_:
+			return {"ok": false, "error": "\"key\" must be shift, backspace, clear or run"}
+	_show()
+	return {"ok": true}
+
+
+# Puts the display's text in what the keyboard types into, in one go, and
+# runs it there: the terminal's Run, or the input box's window's "send".
+func _send() -> Dictionary:
 	var target := _target(_shown())
+	var reply: Dictionary
 	if target == TERMINAL:
-		return _run({"cmd": "terminal_key", "key": key})
-	if target.is_empty():
-		return {"ok": false, "error": "nothing to type into: open the terminal or pick an input box"}
-	if key == "run":
-		# The input box's window says what Run means with a "send" button.
-		var id_panel := target.get_slice("/", 0)
-		return _run({"cmd": "ui_press", "id_panel": id_panel, "id_element": "send"})
-	return _run({"cmd": "ui_key", "key": key})
+		_run({"cmd": "terminal_key", "key": "clear"})
+		if not _text.is_empty():
+			_run({"cmd": "terminal_type", "text": _text})
+		reply = _run({"cmd": "terminal_key", "key": "run"})
+	elif target.is_empty():
+		return {"ok": false, "error": "nothing to send to: open the terminal or pick an input box"}
+	else:
+		_run({"cmd": "ui_key", "key": "clear"})
+		if not _text.is_empty():
+			_run({"cmd": "ui_type", "text": _text})
+		reply = _run({"cmd": "ui_press", "id_panel": target.get_slice("/", 0), "id_element": "send"})
+		if not reply.get("ok", false) and str(reply.get("error", "")).begins_with("no button"):
+			reply = {"ok": true, "typed_into": target}  # a window with no Send: the text in its box is the end of it
+	if reply.get("ok", false) or reply.get("wait") != null:
+		_text = ""
+		_shift = false
+		_show()
+	return reply
+
+
+# What the display line says.
+func _display() -> String:
+	var line := "> " + (_text if _text.length() <= SHOWN else "..." + _text.right(SHOWN))
+	if _text.is_empty():
+		line = "> type here"
+	return line + ("  [Shift]" if _shift else "")
+
+
+# Changes only the display line, without building the window again.
+func _show() -> void:
+	var ui := _ui()
+	if ui != null and ui.has_method("set_text"):
+		ui.call("set_text", PANEL, DISPLAY, _display())
 
 
 func _status(_request: Dictionary) -> Dictionary:
-	return {"ok": true, "typing_into": _target(_shown()), "layout": _layout}
+	return {"ok": true, "typing_into": _target(_shown()), "layout": _layout, "text": _text, "shift": _shift}
 
 
 # Takes the keys off a window. The shift key is there whenever the window
@@ -158,7 +207,7 @@ func _build(layout: String, exists: bool) -> void:
 	var keys: Array = WORD_KEYS if words else COMMAND_KEYS
 	var width := COLS * UNIT - GAP
 	var left := -width / 2.0
-	var elements := []
+	var elements := [{"type": "text", "id": DISPLAY, "text": _display(), "at": [0.0, ROW_Y + KEY / 2.0 + 0.03], "width": width, "font_size": 28}]
 	for r in keys.size():
 		var row: String = keys[r]
 		for c in row.length():
