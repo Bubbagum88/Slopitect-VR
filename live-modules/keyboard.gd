@@ -4,15 +4,18 @@ extends SlopitectModule
 # One keyboard in its own floating window, "Keyboard", instead of keys on
 # every window. What you type shows on its own display line (Shift makes the
 # next letter a capital; Del and Clr work on it) and goes nowhere until Run
-# (Send): then it's put in the terminal's line when you last pointed at the
-# terminal, otherwise in the input box you picked in any window (the chat's
-# line, a world's name, ...), otherwise in the terminal if it's open, and
-# run there (the terminal's Run, or the window's "send" button if it has
-# one). While the terminal is loaded it takes the chat window over, so chat
-# goes through the terminal too. The layout follows where it sends: the
-# command symbols for the terminal's command line, ' ? ! for words. The keys
-# are taken off the terminal and chat windows while it's loaded; unloading
-# it gives the terminal its own keys back.
+# (Send): then it goes to the window that has the focus (the last one you
+# pulled the trigger on or opened; vrui lights its edge): the terminal's
+# line, or that window's input box (the chat's line, a world's name, ...).
+# With no such window it goes to the input box you last picked, otherwise
+# the terminal if it's open. It's run there (the terminal's Run, or the
+# window's "send" button if it has one). The keyboard never takes the focus
+# itself. While the terminal is loaded it takes the chat window over, so
+# chat goes through the terminal too. The layout follows where it sends:
+# the command symbols for the terminal's command line, ' ? ! for words.
+# Hide folds the keys away, leaving the display line, Keys and Send.
+# The terminal builds itself without keys while this is loaded (and with
+# them again when it's unloaded); the chat window's keys are taken off.
 # A Menu tile and a hand menu button open it, like the terminal's.
 # From the headset agent's keyboard.gd, 2026-10-29.
 
@@ -27,7 +30,7 @@ const ROW_Y := 0.14  # centre of the top row of keys, in the window
 const CHECK_SECONDS := 0.25
 const COMMAND_KEYS := ["1234567890-", "qwertyuiop/", "asdfghjkl_=", "zxcvbnm,.[]"]
 const WORD_KEYS := ["1234567890-", "qwertyuiop'", "asdfghjkl?!", "zxcvbnm,./:"]
-# Keyboard parts on the terminal and chat windows (the row keys are key_R_C).
+# Keyboard parts on the chat window (the row keys are key_R_C).
 const OTHER_IDS := ["space", "del", "clear", "quote", "shift"]
 const DISPLAY := "display"
 const SHOWN := 36  # most characters the display line shows
@@ -36,11 +39,13 @@ var _since := CHECK_SECONDS
 var _layout := ""  # "command" or "words": the keys the window was built with
 var _text := ""  # typed on the display line, not sent yet
 var _shift := false  # the next letter is a capital
+var _collapsed := false  # the keys folded away: only the display line, Keys and Send
+var _built_collapsed := false
 
 
 func setup() -> String:
 	register("keyboard_type", _type_command, "type on the keyboard's display line: text")
-	register("keyboard_key", _key_command, "a key on the keyboard: key (shift, backspace, clear: on the display line; run: send it)")
+	register("keyboard_key", _key_command, "a key on the keyboard: key (shift, backspace, clear: on the display line; run: send it; collapse: hide or show the keys)")
 	register("keyboard_status", _status, "what the keyboard types into now (terminal, an input box, or nothing) and its layout")
 	return ""
 
@@ -48,12 +53,7 @@ func setup() -> String:
 func _exit_tree() -> void:
 	if ctx["modules"].module(name) != null:
 		return  # the app is closing, not unloading this
-	_run({"cmd": "ui_remove", "id_panel": PANEL})
-	# Back to the terminal's own keys: it's built again, in the mode it's in.
-	var mode: String = _run({"cmd": "terminal_status"}).get("mode", "")
-	if mode in ["terminal", "chat"]:
-		_run({"cmd": "terminal_mode", "mode": "chat" if mode == "terminal" else "terminal"})
-		_run({"cmd": "terminal_mode", "mode": mode})
+	_run({"cmd": "ui_remove", "id_panel": PANEL})  # the terminal sees this gone and builds its own keys again
 
 
 # A tile on the Menu bar, and a button on the hand menu (like the terminal's).
@@ -84,12 +84,11 @@ func _process(delta: float) -> void:
 	var shown := _shown()
 	var target := _target(shown)
 	var layout := "command" if target == TERMINAL and _run({"cmd": "terminal_status"}).get("mode", "") == "terminal" else "words"
-	if layout != _layout or not shown.has(PANEL):
+	if layout != _layout or _collapsed != _built_collapsed or not shown.has(PANEL):
 		_layout = layout
 		_build(layout, shown.has(PANEL))
-	for id_panel in [TERMINAL, CHAT]:
-		if shown.has(id_panel):
-			_strip(id_panel)
+	if shown.has(CHAT):
+		_strip(CHAT)
 
 
 # Where the keys go: TERMINAL, "panel/element" (an input box), or "".
@@ -98,9 +97,13 @@ func _target(shown: Dictionary) -> String:
 	if ui == null:
 		return ""
 	var terminal: bool = ctx["modules"].module(TERMINAL) != null and shown.get(TERMINAL, false)
-	if terminal and ui.call("last_pointed", PANEL) == TERMINAL:
-		return TERMINAL
 	var focus: String = ui.call("focus")
+	var window: String = ui.call("focused_window")
+	if terminal and window == TERMINAL:
+		return TERMINAL
+	if not window.is_empty() and focus.begins_with(window + "/"):
+		return focus
+	# The focused window has no input box (or none is focused): as before.
 	if not focus.is_empty() and shown.get(focus.get_slice("/", 0), false):
 		return focus
 	return TERMINAL if terminal else ""
@@ -137,8 +140,12 @@ func _key_command(request: Dictionary) -> Dictionary:
 			_text = ""
 		"run":
 			return _send()
+		"collapse":
+			_collapsed = not _collapsed
+			_build(_layout, _shown().has(PANEL))
+			return {"ok": true, "collapsed": _collapsed}
 		_:
-			return {"ok": false, "error": "\"key\" must be shift, backspace, clear or run"}
+			return {"ok": false, "error": "\"key\" must be shift, backspace, clear, run or collapse"}
 	_show()
 	return {"ok": true}
 
@@ -185,10 +192,10 @@ func _show() -> void:
 
 
 func _status(_request: Dictionary) -> Dictionary:
-	return {"ok": true, "typing_into": _target(_shown()), "layout": _layout, "text": _text, "shift": _shift}
+	return {"ok": true, "typing_into": _target(_shown()), "layout": _layout, "text": _text, "shift": _shift, "collapsed": _collapsed}
 
 
-# Takes the keys off a window. The shift key is there whenever the window
+# Takes the keys off the chat window. The shift key is there whenever the window
 # has its keyboard, so a window without one costs a single call.
 func _strip(id_panel: String) -> void:
 	if not _run({"cmd": "ui_element_remove", "id_panel": id_panel, "id_element": "shift"}).get("ok", false):
@@ -201,13 +208,26 @@ func _strip(id_panel: String) -> void:
 
 
 # The window's keys: letters and figures, then Shift, Space, Del, Clr and
-# Run (Send for words).
+# Run (Send for words). Hide, beside the display line, folds the keys away;
+# folded, the line has Keys (to unfold them) and Send beside it.
 func _build(layout: String, exists: bool) -> void:
 	var words := layout == "words"
 	var keys: Array = WORD_KEYS if words else COMMAND_KEYS
 	var width := COLS * UNIT - GAP
 	var left := -width / 2.0
-	var elements := [{"type": "text", "id": DISPLAY, "text": _display(), "at": [0.0, ROW_Y + KEY / 2.0 + 0.03], "width": width, "font_size": 28}]
+	var line_y := ROW_Y + KEY / 2.0 + 0.03
+	var toggle_w := 2 * UNIT - GAP
+	var beside := 2 * UNIT * (2 if _collapsed else 1)  # room for Keys and Send, or Hide
+	var elements := [{"type": "text", "id": DISPLAY, "text": _display(), "at": [-beside / 2.0, line_y + 0.012], "width": width - beside, "font_size": 28},
+		{"type": "button", "id": "collapse", "label": "Keys" if _collapsed else "Hide",
+			"at": [width / 2.0 - toggle_w / 2.0 - (2 * UNIT if _collapsed else 0.0), line_y], "size": [toggle_w, KEY],
+			"action": {"cmd": "keyboard_key", "key": "collapse"}}]
+	_built_collapsed = _collapsed
+	if _collapsed:
+		elements.append({"type": "button", "id": "run", "label": "Send" if words else "Run", "color": "ok",
+			"at": [width / 2.0 - toggle_w / 2.0, line_y], "size": [toggle_w, KEY],
+			"action": {"cmd": "keyboard_key", "key": "run"}})
+		keys = []
 	for r in keys.size():
 		var row: String = keys[r]
 		for c in row.length():
@@ -230,6 +250,8 @@ func _build(layout: String, exists: bool) -> void:
 			["del", "Del", 2, {"cmd": "keyboard_key", "key": "backspace"}],
 			["clear", "Clr", 1, {"cmd": "keyboard_key", "key": "clear"}],
 			["run", "Send", 2, {"cmd": "keyboard_key", "key": "run"}]]
+	if _collapsed:
+		bottom_row = []
 	var x := left
 	for key in bottom_row:
 		var w: float = key[2] * UNIT - GAP
@@ -241,7 +263,7 @@ func _build(layout: String, exists: bool) -> void:
 		x += key[2] * UNIT
 	if exists:
 		# Only the elements: where you put the window stays.
-		_run({"cmd": "ui_update", "id_panel": PANEL, "elements": elements})
+		_run({"cmd": "ui_update", "id_panel": PANEL, "elements": elements, "focusable": false})
 	else:
 		_run({"cmd": "ui_add", "id_panel": PANEL, "title": "Keyboard", "place": "front",
-			"distance": 0.6, "height": -0.4, "chrome": true, "elements": elements})
+			"distance": 0.6, "height": -0.4, "chrome": true, "focusable": false, "elements": elements})

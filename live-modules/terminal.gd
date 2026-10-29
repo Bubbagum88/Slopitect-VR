@@ -72,6 +72,7 @@ var _last_reply := ""
 var _asking := false
 var _since_ask_poll := 0.0
 var _ui_id := 0  # the ui module the window was built on (its instance id)
+var _keyboard_id := 0  # the keyboard module there was when it was built (0: none, so it has its own keys)
 var _since_check := CHECK_SECONDS
 var _mode := "terminal"  # or "chat"
 var _other_line := ""  # what's typed in the other mode, kept for when you switch back
@@ -140,9 +141,12 @@ func _check_window() -> void:
 	var panels := {}
 	for panel in ctx["server"].run({"cmd": "ui_list"}).get("panels", []):
 		panels[panel.get("id_panel")] = panel
-	if id != _ui_id or not panels.has(PANEL):
+	var keyboard: Node = ctx["modules"].module("keyboard")
+	var keyboard_id := keyboard.get_instance_id() if keyboard != null else 0
+	if id != _ui_id or keyboard_id != _keyboard_id or not panels.has(PANEL):
 		_build_panel()
 	_ui_id = id
+	_keyboard_id = keyboard_id
 	if not panels.get(CHAT_PANEL, {}).get("visible", false):
 		return
 	ctx["server"].run({"cmd": "ui_show", "id_panel": CHAT_PANEL, "visible": false})
@@ -730,14 +734,40 @@ func _build_panel() -> void:
 	var unit := KEY + GAP
 	var width: float = keys[0].length() * unit - GAP
 	var left := -width / 2.0
+	var tools := [
+		["mode", "Chat", {"cmd": "terminal_mode", "mode": "chat"}],
+		["tab", "Tab", {"cmd": "terminal_key", "key": "tab"}],
+		["prev", "Prev", {"cmd": "terminal_key", "key": "prev"}],
+		["next", "Next", {"cmd": "terminal_key", "key": "next"}],
+		["help", "Help", {"cmd": "terminal_help"}],
+		["up", "Up", {"cmd": "terminal_scroll", "by": ROWS - 1}],
+		["down", "Down", {"cmd": "terminal_scroll", "by": -(ROWS - 1)}],
+		["cls", "Cls", {"cmd": "terminal_clear"}],
+		["ask", "Ask AI", {"cmd": "terminal_ask"}],
+	]
+	if chat:
+		tools = [
+			["mode", "Terminal", {"cmd": "terminal_mode", "mode": "terminal"}],
+			["stop", "STOP", {"cmd": "agent_stop"}],
+			["new_chat", "New chat", {"cmd": "agent_reset"}],
+			["up", "Up", {"cmd": "terminal_scroll", "by": ROWS - 1}],
+			["down", "Down", {"cmd": "terminal_scroll", "by": -(ROWS - 1)}],
+			["cls", "Cls", {"cmd": "terminal_clear"}],
+		]
+	# With the keyboard module loaded its window has the keys: this one has
+	# none, a taller screen down to the line, and Run beside the line.
+	var own_keys := ctx["modules"].module("keyboard") == null
 	var screen_height := ROWS * FONT * 0.0006 * 1.25 + 0.02
+	if not own_keys:
+		screen_height = maxf(screen_height, tools.size() * unit - GAP - 0.05 - KEY / 2.0)
 	var line_y := 0.09
 	var screen_y := line_y + 0.05 + screen_height / 2.0
 	var elements := [
 		{"type": "box", "id": "screen", "at": [0, screen_y], "size": [width + 0.02, screen_height], "color": "#08100a"},
 		{"type": "text", "id": "screen_text", "at": [0, screen_y + screen_height / 2.0 - 0.01], "width": width,
 			"font_size": FONT, "color": "#8cff99", "mono": true, "text": ""},
-		{"type": "text", "id": "line", "at": [0, line_y + 0.012], "width": width, "font_size": LINE_FONT, "color": "#b3e6ff", "mono": true, "text": "$ |"},
+		{"type": "text", "id": "line", "at": [0 if own_keys else -0.06, line_y + 0.012], "width": width if own_keys else width - 0.12,
+			"font_size": LINE_FONT, "color": "#b3e6ff", "mono": true, "text": "$ |"},
 	]
 	if chat:
 		# What the agent is doing, between the conversation and your line.
@@ -748,6 +778,10 @@ func _build_panel() -> void:
 		# to the newest lines, and Up / Down scroll it.
 		elements[1]["height"] = screen_height - 0.02
 		elements[1]["scroll"] = true
+	if not own_keys:
+		elements.append({"type": "button", "id": "run", "label": "Send" if chat else "Run", "at": [width / 2.0 - 0.05, line_y + 0.012 - KEY / 2.0 + 0.012],
+			"size": [0.1, KEY], "action": {"cmd": "terminal_key", "key": "run"}, "color": "#2a6f3a"})
+		keys = []
 	for r in keys.size():
 		var row: String = keys[r]
 		for c in row.length():
@@ -769,6 +803,8 @@ func _build_panel() -> void:
 			["del", "Del", 2, {"cmd": "terminal_key", "key": "backspace"}],
 			["clear", "Clr", 1, {"cmd": "terminal_key", "key": "clear"}],
 			["run", "Send", 2, {"cmd": "terminal_key", "key": "run"}]]
+	if not own_keys:
+		bottom_row = []
 	for key in bottom_row:
 		var w: float = key[2] * unit - GAP
 		var button := {"type": "button", "id": key[0], "label": key[1], "at": [x + w / 2.0, bottom], "size": [w, KEY], "action": key[3]}
@@ -776,26 +812,6 @@ func _build_panel() -> void:
 			button["color"] = "#2a6f3a"
 		elements.append(button)
 		x += key[2] * unit
-	var tools := [
-		["mode", "Chat", {"cmd": "terminal_mode", "mode": "chat"}],
-		["tab", "Tab", {"cmd": "terminal_key", "key": "tab"}],
-		["prev", "Prev", {"cmd": "terminal_key", "key": "prev"}],
-		["next", "Next", {"cmd": "terminal_key", "key": "next"}],
-		["help", "Help", {"cmd": "terminal_help"}],
-		["up", "Up", {"cmd": "terminal_scroll", "by": ROWS - 1}],
-		["down", "Down", {"cmd": "terminal_scroll", "by": -(ROWS - 1)}],
-		["cls", "Cls", {"cmd": "terminal_clear"}],
-		["ask", "Ask AI", {"cmd": "terminal_ask"}],
-	]
-	if chat:
-		tools = [
-			["mode", "Terminal", {"cmd": "terminal_mode", "mode": "terminal"}],
-			["stop", "STOP", {"cmd": "agent_stop"}],
-			["new_chat", "New chat", {"cmd": "agent_reset"}],
-			["up", "Up", {"cmd": "terminal_scroll", "by": ROWS - 1}],
-			["down", "Down", {"cmd": "terminal_scroll", "by": -(ROWS - 1)}],
-			["cls", "Cls", {"cmd": "terminal_clear"}],
-		]
 	var tool_x := width / 2.0 + 0.02 + 0.055
 	var top := screen_y + screen_height / 2.0 - KEY / 2.0
 	for i in tools.size():

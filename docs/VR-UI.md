@@ -57,6 +57,7 @@ controls.gd ── actions ("point", "grab_right", toggles) ──► vrui.gd �
 | `apps` | Show the launcher's tiles at the top (the Menu has it) |
 | `menu` | A label: this panel gets a tile on the Menu that shows and hides it |
 | `toggle` | An action from controls that shows and hides it |
+| `focusable` | true (the default): pulling the trigger on the window, or opening it, gives it the focus (see Feedback). false: it never takes it (the keyboard's window) |
 | `layout` | `free` (each element at its `at`, as before), `grid` (buttons in rows of `columns`, each `cell` big), or `column` / `row`: the elements flow down or across in order, with no `at` |
 
 ## Elements
@@ -126,6 +127,10 @@ do before you press:
 - **Press**: a short flash and a firmer tick. Failures show in red under the
   panel for 5 seconds.
 - **Typing**: the input box being typed into is lit.
+- **Focus**: the window you last pulled the trigger on or opened has the
+  focus, and its edge is lit in the accent colour; its input box (if any)
+  is the one typed into. When it closes, the window before it gets the
+  focus back. A keyboard module sends its text to the focused window.
 
 ## Plug-in points for other modules
 
@@ -136,6 +141,7 @@ do before you press:
 | `ui.theme()` | vrui.gd | The theme: colours as `Color`, `font_title` / `font_body` / `font_small` as text sizes |
 | `ui.set_text(id_panel, id_element, text)` | vrui.gd | Changes one text element now, without rebuilding the panel or saving (a terminal's screen). The text isn't saved, since it can be anything. A `scroll` text keeps its newest lines in view |
 | `ui.scroll_text(id_panel, id_element, lines)` | vrui.gd | Scrolls a `scroll` text back by `lines` from the newest (0 = newest) |
+| `ui.focused_window()`, `ui.focus()` | vrui.gd | The window with the focus (`""` if none), and the input box typed into (`"panel/element"` or `""`) |
 | `ui.press(id_panel, id_element)` | vrui.gd | Presses a button or toggle |
 | `controls.pulse(hand, strength, seconds)` | controls.gd | A buzz on a controller |
 
