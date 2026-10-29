@@ -370,7 +370,7 @@ The default is Claude Opus 5.5 (`claude-opus-5-5`), effort `medium`.
 started), and each round logs them. To keep them down:
 - With Claude, everything already sent is cached, so each later round reads
   it back at a twentieth of the price instead of paying for it again.
-- Replies are written to be read aloud: the `tts` module says only the words (no code, markdown or symbols). The short-reply `caveman` skill is off by default; the agent can still use it.
+- Replies are written to be read aloud: the `tts` module says only the words (no code, markdown or symbols). The short-reply `caveman` skill is always on (set in `agent_tuning.gd`).
 - A tool reply over `max_tool_result_chars` (8000) is cut, and the agent is
   told to ask for less.
 - One question stops after `max_tokens_per_ask` (300000) tokens; ask again
