@@ -50,7 +50,8 @@ const DEFAULTS := {
 	"tts_engine": "app",  # "app": the headset's speech engine app; "sherpa": sherpa-onnx in Slopitect
 	"tts_sherpa_voice": "voices/vits-piper-en_US-amy-low",  # for "sherpa": a Piper voice's folder, in the Slopitect folder
 }
-const COMFORT := ["speak_replies", "voice", "rate", "pitch", "volume"]  # settings tts_set may change in the headset
+const COMFORT := ["speak_replies", "voice", "rate", "pitch", "volume", "tts_sherpa_voice"]  # settings tts_set may change in the headset
+const VOICES_FOLDER := "voices"  # in the Slopitect folder; tts_set picks only among the voices in it
 
 # How replies are made sayable (speakable()).
 var _speech_drop := [
@@ -159,7 +160,14 @@ func settings_info() -> Dictionary:
 		{"id": "volume", "type": "slider", "label": "Volume", "value": settings["volume"], "min": 0, "max": 100, "step": 10,
 			"set": {"cmd": "tts_set", "volume": "{value}"}},
 	]
-	if voices.size() > 2:
+	if settings["tts_engine"] == "sherpa":
+		var installed := []
+		for voice in _installed_voices():
+			installed.append({"label": _voice_label(voice), "value": voice})
+		if not installed.is_empty():
+			list.append({"id": "tts_sherpa_voice", "type": "choice", "label": "Voice", "value": settings["tts_sherpa_voice"], "options": installed, "columns": 2,
+				"set": {"cmd": "tts_set", "tts_sherpa_voice": "{value}"}})
+	elif voices.size() > 2:
 		list.append({"id": "voice", "type": "choice", "label": "Voice", "value": settings["voice"], "options": voices, "columns": 2,
 			"set": {"cmd": "tts_set", "voice": "{value}"}})
 	list.append({"id": "test", "type": "button", "label": "Test the voice", "set": {"cmd": "tts_say", "text": "This is how I sound."}})
@@ -322,6 +330,28 @@ func _sherpa_files(folder: String) -> Dictionary:
 	if not found.has("data") and not found.has("lexicon"):
 		return {"error": "the voice folder %s has neither an espeak-ng-data folder nor a lexicon.txt" % folder}
 	return found
+
+
+# The voices in the voices folder that have what a voice needs, as
+# tts_sherpa_voice values ("voices/NAME").
+func _installed_voices() -> Array:
+	var found := []
+	var folder := _home_path(VOICES_FOLDER)
+	for name in DirAccess.get_directories_at(folder):
+		if not _sherpa_files(folder.path_join(name)).has("error"):
+			found.append(VOICES_FOLDER.path_join(name))
+	found.sort()
+	return found
+
+
+# "voices/vits-piper-en_US-amy-low" -> "en_US amy low".
+func _voice_label(voice: String) -> String:
+	var name := voice.get_file()
+	for prefix in ["vits-piper-", "vits-mimic3-", "vits-"]:
+		if name.begins_with(prefix):
+			name = name.substr(prefix.length())
+			break
+	return name.replace("-", " ").left(22)
 
 
 func _sherpa_speak(text: String, interrupt: bool) -> String:
@@ -741,6 +771,10 @@ func _set_command(request: Dictionary) -> Dictionary:
 			continue
 		if not key in COMFORT:
 			return {"ok": false, "error": "tts_set changes only %s; \"%s\" changes from the PC with tts_config" % [", ".join(COMFORT), key]}
+		# In the headset, only a voice already in the voices folder; any other
+		# folder is set from the PC with tts_config.
+		if key == "tts_sherpa_voice" and not request[key] in _installed_voices():
+			return {"ok": false, "error": "tts_set can pick only a voice in the %s folder: %s" % [VOICES_FOLDER, ", ".join(_installed_voices())]}
 	return _change(request)
 
 
