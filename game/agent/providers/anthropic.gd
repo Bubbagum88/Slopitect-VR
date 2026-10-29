@@ -35,7 +35,10 @@ func build_request(settings: Dictionary, system: String, history: Array, tools: 
 				messages.append({"role": "user", "content": blocks})
 	var tool_list := []
 	for tool in tools:
-		tool_list.append({"name": tool["name"], "description": tool["description"], "input_schema": tool["schema"]})
+		if tool.has("server"):
+			tool_list.append(_server_tool(tool))
+		else:
+			tool_list.append({"name": tool["name"], "description": tool["description"], "input_schema": tool["schema"]})
 	# Prompt caching: everything up to the end of the last request (tools,
 	# system, the conversation so far) is read back at a twentieth of the
 	# price instead of being paid in full on every round. One marker on the
@@ -68,6 +71,21 @@ func build_request(settings: Dictionary, system: String, history: Array, tools: 
 	return {"url": String(settings["base_url"]).trim_suffix("/") + "/v1/messages", "headers": headers, "body": JSON.stringify(body)}
 
 
+# Web search and web fetch run on Anthropic's side, inside the same request:
+# the headset only ever talks to the API. The basic versions work on every
+# Claude model the agent can pick. Search costs $10 per 1,000 searches on
+# top of tokens; fetch costs only the tokens of the page.
+func _server_tool(tool: Dictionary) -> Dictionary:
+	var server: Dictionary = tool["server"]
+	match server["kind"]:
+		"web_search":
+			return {"type": "web_search_20250305", "name": "web_search", "max_uses": int(server["max_uses"])}
+		"web_fetch":
+			return {"type": "web_fetch_20250910", "name": "web_fetch", "max_uses": int(server["max_uses"]),
+				"max_content_tokens": int(server["max_content_tokens"]), "citations": {"enabled": true}}
+	return {}
+
+
 func _assistant_from_neutral(item: Dictionary) -> Dictionary:
 	var content := []
 	if not String(item["text"]).is_empty():
@@ -90,19 +108,43 @@ func parse_response(code: int, body: String) -> Dictionary:
 	var texts := PackedStringArray()
 	var thoughts := PackedStringArray()
 	var calls := []
+	var web := []  # what it searched for and fetched, for the log
+	var last_was_text := false
+	var after_cited := false  # the block before was text that cites a page
 	for block in data.get("content", []):
 		match block.get("type"):
 			"text":
-				texts.append(block["text"])
+				# A reply that cites a web page comes in pieces, one text
+				# block per cited part, which belong in one sentence.
+				var cited: bool = block.get("citations") != null
+				if (after_cited or cited) and not texts.is_empty() and last_was_text:
+					texts[-1] += block["text"]
+				else:
+					texts.append(block["text"])
 			"thinking":
 				if not String(block.get("thinking", "")).is_empty():
 					thoughts.append(block["thinking"])
 			"tool_use":
 				calls.append({"id": block["id"], "name": block["name"], "input": block.get("input", {})})
+			"server_tool_use":
+				var input = block.get("input", {})
+				web.append("%s %s" % [block.get("name", "?"), input.get("query", input.get("url", "")) if typeof(input) == TYPE_DICTIONARY else ""])
+			"web_search_tool_result", "web_fetch_tool_result":
+				# A failed search or fetch still comes back as HTTP 200, with
+				# an error in place of the results.
+				var content = block.get("content")
+				if typeof(content) == TYPE_DICTIONARY and String(content.get("type", "")).ends_with("_error"):
+					web.append("%s failed: %s" % [block["type"].trim_suffix("_tool_result"), content.get("error_code", "?")])
+		last_was_text = block.get("type") == "text"
+		after_cited = last_was_text and block.get("citations") != null
 	var stop := String(data.get("stop_reason", "?"))
 	match stop:
 		"end_turn", "stop_sequence":
 			stop = "end"
+		# A long search turn can be paused by the API; sending the reply back
+		# as it is carries it on.
+		"pause_turn":
+			stop = "pause"
 	return {
 		"text": "\n".join(texts),
 		"thinking": "\n".join(thoughts),
@@ -112,6 +154,7 @@ func parse_response(code: int, body: String) -> Dictionary:
 		"usage": data.get("usage", {}),
 		"tokens": _tokens(data.get("usage", {})),
 		"detail": data.get("stop_details", null),
+		"web": web,
 	}
 
 
@@ -119,8 +162,12 @@ func parse_response(code: int, body: String) -> Dictionary:
 # the cache; the whole prompt is the three together.
 func _tokens(usage: Dictionary) -> Dictionary:
 	var cached := int(usage.get("cache_read_input_tokens", 0))
+	var server = usage.get("server_tool_use", {})
+	if typeof(server) != TYPE_DICTIONARY:
+		server = {}
 	return {
 		"input": int(usage.get("input_tokens", 0)) + int(usage.get("cache_creation_input_tokens", 0)) + cached,
 		"output": int(usage.get("output_tokens", 0)),
 		"cached": cached,
+		"searches": int(server.get("web_search_requests", 0)),
 	}

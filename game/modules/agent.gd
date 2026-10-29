@@ -57,6 +57,15 @@ const DEFAULTS := {
 	"max_request_tokens": 100000,
 	"max_context_tokens": 80000,  # a conversation this big starts over at the next question
 	"max_tool_result_chars": 8000,  # a longer tool reply is cut, and the agent is told
+	# The web, through Claude's own tools (the search runs on Anthropic's
+	# side, so the headset still only talks to the API). Each is the most it
+	# may use in one request; 0 turns it off. A search costs $0.01 on top of
+	# the tokens its results add; a fetched page costs only its tokens, at
+	# most web_fetch_max_tokens. A conversation keeps the ones it started with.
+	"web_search_max_uses": 3,
+	"web_fetch_max_uses": 3,
+	"web_fetch_max_tokens": 8000,
+	"max_searches_per_ask": 10,  # one question, all its rounds together; it stops there
 	# Ask the AI for a short summary of its thinking, shown in the chat window
 	# (providers that can't show thinking ignore it).
 	"show_thinking": true,
@@ -121,6 +130,8 @@ const SYSTEM_PROMPT := """You are the AI agent inside Slopitect, a VR sandbox ru
 
 You change the world only through your tools. Each tool is one of the app's commands: pass the command's fields as the tool's input (for example spawn takes {"shape": "box", "position": [0, 1, -1]}). Positions are in metres from the middle of the play area, y is up and -z is forward; rotations are in degrees; colours are #rrggbb or names. Every command replies with "ok", and a failed one says exactly what was wrong in "error" without changing anything: read it and fix your input rather than guessing.
 
+You can search the web (web_search) and read a page (web_fetch) when the person needs something current or from a page. Each search costs money, so search only when it helps, and say where what you found came from.
+
 Keep replies short; they are read on a small panel in VR, and may be read aloud.
 """
 # Always part of the instructions, after the tuning module's: they keep the
@@ -147,6 +158,8 @@ var _waiting_on: SlopitectPending  # a tool waiting for the person's answer
 var _context_tokens := 0  # the size of the last prompt sent: the conversation so far
 var _ask_tokens := {"input": 0, "output": 0, "cached": 0}  # the current (or last) question
 var _total_tokens := {"input": 0, "output": 0, "cached": 0}  # since the app started
+var _ask_searches := 0  # web searches, the current (or last) question
+var _total_searches := 0  # since the app started
 var _phase := "idle"
 var _errors_seen := 0  # the newest error seq the agent was told about  # what the agent is doing, for the slow-frame log
 # A conversation keeps the tools and instructions it started with: Claude
@@ -222,9 +235,17 @@ func _ask(request: Dictionary) -> Dictionary:
 	var carried := ""
 	if not _history.is_empty():
 		var cap := int(settings["max_request_tokens"])
-		var must := _start_over or _context_tokens + _guess_tokens(prompt) > cap
+		# A turn the API paused (web searching) that was never carried on
+		# can't take a new message either.
+		var paused: bool = _history[-1].get("paused", false)
+		var must: bool = _start_over or paused or _context_tokens + _guess_tokens(prompt) > cap
+		var why := ""
+		if paused:
+			why = "the last one stopped in the middle of a web search"
+		elif must:
+			why = "the last one was at max_request_tokens (%d)" % cap
 		var state := {"prompt": prompt, "prompt_tokens": _guess_tokens(prompt), "conversation_tokens": _context_tokens,
-			"turns": _history.size(), "must_start_over": must, "why": "the last one was at max_request_tokens (%d)" % cap if must else "",
+			"turns": _history.size(), "must_start_over": must, "why": why,
 			"last_prompt": _last_prompt, "last_reply": _last_reply, "limits": budget()}
 		var answer := _fields(_tuned("before_question", [state], TYPE_DICTIONARY), {"new_conversation": false, "why": "", "carry": ""})
 		if must or answer["new_conversation"]:
@@ -257,6 +278,7 @@ func _status(_request: Dictionary) -> Dictionary:
 		"last_error": _last_error,
 		"turns": _history.size(),
 		"tokens": {"conversation": _context_tokens, "this_question": _ask_tokens.duplicate(), "since_start": _total_tokens.duplicate()},
+		"web_searches": {"this_question": _ask_searches, "since_start": _total_searches},
 		"events": _log.duplicate(),
 		"status_line": _status_line(),
 	}
@@ -389,6 +411,7 @@ func _run_conversation() -> void:
 	_last_error = ""
 	_round = 0
 	_ask_tokens = {"input": 0, "output": 0, "cached": 0}
+	_ask_searches = 0
 	_load_skills()
 	while true:
 		_round += 1
@@ -438,15 +461,20 @@ func _run_conversation() -> void:
 			_total_tokens[key] += int(tokens.get(key, 0))
 		_context_tokens = int(tokens.get("input", 0)) + int(tokens.get("output", 0))
 		var spent: int = _ask_tokens["input"] + _ask_tokens["output"]
+		_ask_searches += int(tokens.get("searches", 0))
+		_total_searches += int(tokens.get("searches", 0))
 		print("Slopitect agent: reply stop=%s, %d tool calls, tokens in %d (cached %d) out %d; this question %d, conversation %d; usage %s" % [
 			reply["stop"], reply["tool_calls"].size(), tokens.get("input", 0), tokens.get("cached", 0), tokens.get("output", 0), spent, _context_tokens, JSON.stringify(reply["usage"])])
 		_history.append({"role": "assistant", "provider": settings["provider"], "raw": reply["raw"],
-			"text": reply["text"], "tool_calls": reply["tool_calls"]})
+			"text": reply["text"], "tool_calls": reply["tool_calls"], "paused": reply["stop"] == "pause"})
 		if not String(reply.get("thinking", "")).is_empty():
 			_note("thinking: " + reply["thinking"])
+		for used in reply.get("web", []):
+			_note("web: " + used)
 		if not String(reply["text"]).is_empty():
 			_last_reply = reply["text"]
 			_note("agent: " + reply["text"])
+		var searches_out := _ask_searches >= int(settings["max_searches_per_ask"])
 		if reply["stop"] == "tool_use" and not reply["tool_calls"].is_empty():
 			var results := await _run_tools(reply["tool_calls"])
 			results[-1]["content"] += _new_tools_note() + _new_errors_note()
@@ -473,10 +501,26 @@ func _run_conversation() -> void:
 			if spent >= int(settings["max_tokens_per_ask"]):
 				_fail("stopped: this question used %d tokens (max_tokens_per_ask %d); ask again to carry on" % [spent, settings["max_tokens_per_ask"]])
 				break
+			if searches_out and _restart_note == null:
+				_fail("stopped: this question used %d web searches (max_searches_per_ask %d); ask again to carry on" % [_ask_searches, settings["max_searches_per_ask"]])
+				break
 			continue
 		match reply["stop"]:
 			"end":
 				pass
+			"pause":
+				# The API paused a long turn of web searching; this reply,
+				# sent back as it is, carries it on. A paused turn can't take
+				# a new message, so stopping here means a new conversation at
+				# the next question (see _ask).
+				if _context_tokens > int(settings["max_request_tokens"]):
+					_fail("stopped: the next round would send about %d tokens (max_request_tokens %d); ask again and a new conversation carries on" % [_context_tokens, settings["max_request_tokens"]])
+				elif spent >= int(settings["max_tokens_per_ask"]):
+					_fail("stopped: this question used %d tokens (max_tokens_per_ask %d); ask again and a new conversation carries on" % [spent, settings["max_tokens_per_ask"]])
+				elif searches_out:
+					_fail("stopped: this question used %d web searches (max_searches_per_ask %d); ask again and a new conversation carries on" % [_ask_searches, settings["max_searches_per_ask"]])
+				else:
+					continue
 			"refusal":
 				_fail("the AI declined the request" + (": " + JSON.stringify(reply["detail"]) if reply.get("detail") else ""))
 			"max_tokens":
@@ -603,6 +647,12 @@ func _tools() -> Array:
 	if _allowed_tool("modules"):
 		tools.append({"name": "modules", "description": "list the app's loaded modules, and why any failed to load",
 			"schema": {"type": "object", "additionalProperties": true}})
+	if int(settings["web_search_max_uses"]) > 0:
+		tools.append({"name": "web_search", "description": "", "schema": {},
+			"server": {"kind": "web_search", "max_uses": int(settings["web_search_max_uses"])}})
+	if int(settings["web_fetch_max_uses"]) > 0:
+		tools.append({"name": "web_fetch", "description": "", "schema": {},
+			"server": {"kind": "web_fetch", "max_uses": int(settings["web_fetch_max_uses"]), "max_content_tokens": int(settings["web_fetch_max_tokens"])}})
 	tools.append({"name": "new_conversation", "description": "start a new conversation, to use tools that were added after this one began (like a live module's); it forgets this one, so pass a note of what you were doing and what's left",
 		"schema": {"type": "object", "properties": {"note": {"type": "string", "description": "what you were doing and what's left"}}, "required": ["note"]}})
 	if not _skills.is_empty():
@@ -715,8 +765,8 @@ func _default_before_question(state: Dictionary) -> Dictionary:
 	if state["must_start_over"]:
 		# What the new conversation needs to carry on from where it stopped.
 		return {"new_conversation": true, "why": state["why"],
-			"carry": "(Your last conversation reached max_request_tokens and was cleared. The person's message before this one was: \"%s\". Your last words then: \"%s\")\n" % [
-				String(state["last_prompt"]).left(1000), String(state["last_reply"]).left(1000)]}
+			"carry": "(Your last conversation was cleared: %s. The person's message before this one was: \"%s\". Your last words then: \"%s\")\n" % [
+				state["why"], String(state["last_prompt"]).left(1000), String(state["last_reply"]).left(1000)]}
 	return {"new_conversation": false, "why": "", "carry": ""}
 
 
@@ -808,6 +858,18 @@ func _check_setting(key: String, value: Variant) -> Array:
 		"max_tokens_per_ask", "max_context_tokens", "max_request_tokens", "max_tool_result_chars":
 			if typeof(value) not in [TYPE_INT, TYPE_FLOAT] or value != floorf(value) or value < 1000 or value > 10000000:
 				return ["\"%s\" must be a whole number from 1000 to 10000000" % key, null]
+			return ["", int(value)]
+		"web_search_max_uses", "web_fetch_max_uses":
+			if typeof(value) not in [TYPE_INT, TYPE_FLOAT] or value != floorf(value) or value < 0 or value > 20:
+				return ["\"%s\" must be a whole number from 0 to 20 (0 turns it off)" % key, null]
+			return ["", int(value)]
+		"max_searches_per_ask":
+			if typeof(value) not in [TYPE_INT, TYPE_FLOAT] or value != floorf(value) or value < 1 or value > 100:
+				return ["\"max_searches_per_ask\" must be a whole number from 1 to 100", null]
+			return ["", int(value)]
+		"web_fetch_max_tokens":
+			if typeof(value) not in [TYPE_INT, TYPE_FLOAT] or value != floorf(value) or value < 1000 or value > 100000:
+				return ["\"web_fetch_max_tokens\" must be a whole number from 1000 to 100000", null]
 			return ["", int(value)]
 		"max_tokens", "max_tool_rounds":
 			if typeof(value) not in [TYPE_INT, TYPE_FLOAT] or value != floorf(value) or value < 1 or value > 128000:

@@ -37,6 +37,8 @@ func build_request(settings: Dictionary, system: String, history: Array, tools: 
 					messages.append({"role": "user", "content": pictures if pictures.size() > 1 or pictures[0]["type"] != "text" else pictures[0]["text"]})
 	var tool_list := []
 	for tool in tools:
+		if tool.has("server"):
+			continue  # Claude's own web tools; OpenAI-style servers have none
 		tool_list.append({"type": "function", "function": {"name": tool["name"], "description": tool["description"], "parameters": tool["schema"]}})
 	var body := {"model": settings["model"], "messages": messages, "tools": tool_list}
 	# Newer OpenAI models want max_completion_tokens; most other servers want
