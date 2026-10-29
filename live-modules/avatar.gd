@@ -37,6 +37,14 @@ const MAX_PARTS := 12
 const TURN_SPEED := 3.0
 const POLL_SECONDS := 0.25
 const ERROR_SECONDS := 4.0  # how long it looks confused after the agent fails
+# A fallback: the headset's speech engine can keep saying it's speaking after
+# it has stopped (Godot's Android TTS only clears that when the engine reports
+# the end, and some engines never do). So the avatar follows it for at most
+# ENGINE_SLACK times as long as the words would take plus ENGINE_EXTRA
+# seconds, or ENGINE_UNKNOWN_SECONDS for speech it wasn't given the words of.
+const ENGINE_SLACK := 3.0
+const ENGINE_EXTRA := 5.0
+const ENGINE_UNKNOWN_SECONDS := 30.0
 
 # Each emotion is a face: smile (-1 frown to 1 grin), eyes (how open), brow
 # height in metres, brow tilt in degrees (+ is the inner ends down, cross),
@@ -149,6 +157,9 @@ var _speech := ""
 var _speech_at := 0.0
 var _mouth_left := 0.0  # seconds of mouthing left when no speech engine talks
 var _engine_now := false  # the speech engine is talking (read once a frame)
+var _engine_for := 0.0  # seconds the engine has said so without a break
+var _engine_limit := ENGINE_UNKNOWN_SECONDS
+var _engine_stuck := false
 var _mouth_open := 0.0
 var _mouth_wide := 1.0
 var _drawn_mouth := Vector3(-1, -1, -1)
@@ -330,7 +341,7 @@ func _mesh_part(shape: String, size: Vector3, color: Color) -> MeshInstance3D:
 
 func _process(delta: float) -> void:
 	_time += delta
-	_engine_now = _read_engine()
+	_check_engine(delta, _read_engine())
 	_since_poll += delta
 	if _since_poll >= POLL_SECONDS:
 		_since_poll = 0.0
@@ -341,6 +352,7 @@ func _process(delta: float) -> void:
 	var talking := speaking()
 	if not talking:
 		_speech = ""  # so speech from elsewhere isn't mouthed with an old reply's letters
+		_engine_limit = ENGINE_UNKNOWN_SECONDS
 	var state := "talking" if talking and _state == "idle" else _state
 	_animate_body(state)
 	_animate_face(delta, state)
@@ -495,6 +507,22 @@ func _read_engine() -> bool:
 	return ProjectSettings.get_setting("audio/general/text_to_speech", false) and DisplayServer.tts_is_speaking()
 
 
+# Reads the speech engine once a frame, and stops following it when it has
+# said it's speaking for far longer than the words take (see ENGINE_SLACK).
+func _check_engine(delta: float, engine: bool) -> void:
+	if not engine:
+		_engine_for = 0.0
+		if _engine_stuck:
+			_engine_stuck = false
+			print("Slopitect avatar: the speech engine says it has stopped speaking; following it again")
+	else:
+		_engine_for += delta
+		if not _engine_stuck and _engine_for > _engine_limit:
+			_engine_stuck = true
+			push_warning("Slopitect avatar: the speech engine still says it's speaking after %.0f s (the words take about %.1f s); not following it until it says it has stopped" % [_engine_for, (_engine_limit - ENGINE_EXTRA) / ENGINE_SLACK])
+	_engine_now = engine and not _engine_stuck
+
+
 # The avatar shows what the agent is doing, by reading agent_status like any
 # other module would. Without the agent module it just idles.
 func _follow_agent() -> void:
@@ -539,6 +567,9 @@ func _say(text: String) -> void:
 	# Mouthed for as long as it takes to say, unless the speech engine
 	# starts talking (then the mouth follows it instead).
 	_mouth_left = _speech.length() / LETTERS_PER_SECOND
+	_engine_limit = _mouth_left * ENGINE_SLACK + ENGINE_EXTRA
+	if not _engine_stuck:
+		_engine_for = 0.0
 	_pages = _paginate(_speech)
 	_page = 0
 	_show_page()
@@ -815,7 +846,8 @@ func _status_command(_request: Dictionary) -> Dictionary:
 		"emotion": _emotion,
 		"outfit": _outfit,
 		"talking": speaking(),
-		"speech_engine_talking": _engine_now,
+		"speech_engine_talking": _read_engine(),
+		"speech_engine_ignored": _engine_stuck,
 		"bubble": _bubble_label.text if _bubble.visible else "",
 		"page": [_page + 1, _pages.size()] if _bubble.visible else [0, 0],
 		"bubble_docked": _bubble.visible and not _bubble_tail.visible,
