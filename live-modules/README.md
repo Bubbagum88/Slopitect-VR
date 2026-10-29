@@ -21,6 +21,7 @@ unless its file has changed since.
 | `inspect.gd` | A tool for one thing at a time: point and pull the trigger to select a shape or model, then switch its physics (none, static, dynamic), whether it can be grabbed, hide it, or delete it (one undo). Show hidden brings hidden things back. The switches are kept with each project's world |
 | `avatar.gd` | The agent's avatar (it used to be built into the APK): a red cube with a face that thinks while the agent works, shows emotions (`avatar_emotion`), moves its mouth with the words while the speech engine talks, and shows replies a page at a time in a speech bubble above its head, which waits at the edge of your view when the avatar is out of sight. Outfits are made of simple shapes (`avatar_outfit_add`). Other modules use `body()`, `say()`, `set_state()`, `set_emotion()` and `speaking()` |
 | `assets.gd` | 3D models from [Poly Haven](https://polyhaven.com) (all CC0): search, download to the headset, place in the world. Powered by Poly Haven |
+| `memory.gd` | The agent's memory between conversations: notes it keeps (facts, decisions, troubleshooting, coding techniques), each question you asked in a world with its answer, tools and errors, older ones folded into digests, and each tool's failures. One memory per world (project) plus a global one. Keys and personal info are cleaned out before anything is kept |
 
 A tool is any module with a `tool_info()` function, so a new tool is a new
 file; `tools.gd` explains what a tool gets. Tools work without the tools
@@ -45,6 +46,7 @@ From the platform-tools folder:
 .\adb push "C:\path\to\live-modules\projects.gd" /sdcard/Slopitect/modules/
 .\adb push "C:\path\to\live-modules\inspect.gd" /sdcard/Slopitect/modules/
 .\adb push "C:\path\to\live-modules\avatar.gd" /sdcard/Slopitect/modules/
+.\adb push "C:\path\to\live-modules\memory.gd" /sdcard/Slopitect/modules/
 .\slopi.ps1 '{"cmd":"code_load","name":"controls"}'
 .\slopi.ps1 '{"cmd":"code_load","name":"ui"}'
 .\slopi.ps1 '{"cmd":"code_load","name":"tools"}'
@@ -58,6 +60,7 @@ From the platform-tools folder:
 .\slopi.ps1 '{"cmd":"code_load","name":"projects"}'
 .\slopi.ps1 '{"cmd":"code_load","name":"inspect"}'
 .\slopi.ps1 '{"cmd":"code_load","name":"avatar"}'
+.\slopi.ps1 '{"cmd":"code_load","name":"memory"}'
 ```
 
 Each `code_load` shows the code in the headset and waits for your Yes
@@ -140,6 +143,24 @@ The first time projects.gd loads, the existing saves become project `start`.
 | `physics_push` | `name`, `velocity` [x, y, z] |
 | `physics_status` | |
 | `physics_config` (PC only) | `gravity` |
+
+| `memory_status` | |
+| `memory_recall` | optional `world` (another world's name) |
+| `memory_note` | `text` (up to 600 characters), optional `kind` (fact, decision, technique, troubleshooting, todo), `tags` [words], `global` (techniques and troubleshooting are global unless false) |
+| `memory_forget` | `id` (w4: this world's note, g2: global note, d3: digest) |
+| `memory_search` | `query` (words), optional `everywhere` (every world) |
+| `memory_compact` | `summary`; folds this world's exchanges into a digest, or with `digest` (its id) summarises that one |
+| `memory_config` (PC only) | any of `capture` (keep conversations, default true), `recall_chars` (1000–8000, default 4000), `clear` ("global" or a world's name) |
+
+Memory is kept in the app's own storage, `user://memory/` (`global.json` and
+`worlds/NAME.json`), not in the Slopitect folder, so backups never take it.
+A world keeps its last 40 questions; older ones are folded into digests
+(at most 30, the oldest merging), so a world's memory stays under about
+150 KB. Before anything is stored, text that looks like a key, password,
+e-mail address, phone number or IP address is removed, and the agent's
+thinking and settings changes are never recorded. While it's loaded the
+agent has a skill (`user://skills/slopitect-memory`) telling it to call
+`memory_recall` at the start of a conversation; unloading takes it away.
 
 ### What assets.gd may reach
 
