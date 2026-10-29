@@ -18,6 +18,10 @@ wants a new feature; prefer existing commands and panels for everything else.
    `code_load` again (a changed file needs a new Yes).
 4. `code_list` shows each module, whether it's loaded and its last error;
    `code_unload` takes one out.
+5. Errors a loaded module hits while it runs (a null, a bad index, its own
+   `push_error`) come to you after your next step as "[Errors from live
+   modules ...]", with the file and line. `errors_recent` (optional
+   `module`) shows them all. Fix the file and `code_load` it again.
 
 The shape of a module (Godot 4.7, GDScript, tabs for indents):
 

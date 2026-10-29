@@ -45,14 +45,15 @@ const DEFAULTS := {
 	# The agent's firewall: the only commands it may use. A name ending in *
 	# allows every command starting with it. A new module's commands are off
 	# for the agent until they're added here.
-	"allowed_tools": ["list", "spawn", "move", "color", "delete", "ui_*", "modules", "avatar_*", "files_*", "confirm_status", "voice_*", "code_*", "view_*"],
+	"allowed_tools": ["list", "spawn", "move", "color", "delete", "ui_*", "modules", "avatar_*", "files_*", "confirm_status", "voice_*", "code_*", "view_*", "errors_*"],
 }
 # The lists allowed_tools had by default before (before the menu became
-# panels; before view_look). A saved copy of exactly one of them is moved to
+# panels; before view_look and errors_recent). A saved copy of exactly one of them is moved to
 # the new default; a list you changed is kept.
 const OLD_DEFAULT_TOOLS := [
 	["list", "spawn", "move", "color", "delete", "menu_*", "modules", "avatar_*"],
 	["list", "spawn", "move", "color", "delete", "ui_*", "modules", "avatar_*", "files_*", "confirm_status", "voice_*", "code_*"],
+	["list", "spawn", "move", "color", "delete", "ui_*", "modules", "avatar_*", "files_*", "confirm_status", "voice_*", "code_*", "view_*"],
 ]
 
 const SYSTEM_PROMPT := """You are the AI agent inside Slopitect, a VR sandbox running on an Oculus Quest 1. The person you work with is standing in the world wearing the headset, and you build it with them, live.
@@ -82,7 +83,8 @@ var _waiting_on: SlopitectPending  # a tool waiting for the person's answer
 var _context_tokens := 0  # the size of the last prompt sent: the conversation so far
 var _ask_tokens := {"input": 0, "output": 0, "cached": 0}  # the current (or last) question
 var _total_tokens := {"input": 0, "output": 0, "cached": 0}  # since the app started
-var _phase := "idle"  # what the agent is doing, for the slow-frame log
+var _phase := "idle"
+var _errors_seen := 0  # the newest error seq the agent was told about  # what the agent is doing, for the slow-frame log
 # A conversation keeps the tools and instructions it started with: Claude
 # refuses a conversation whose tool list changed partway (its earlier
 # thinking is tied to that list). New tools, like a live module's, are used
@@ -149,7 +151,7 @@ func _ask(request: Dictionary) -> Dictionary:
 		_note("started a new conversation: the last one had grown to %d tokens (max_context_tokens %d)" % [_context_tokens, settings["max_context_tokens"]])
 		_clear_conversation()
 	_last_prompt = prompt
-	var sent: String = prompt + _new_tools_note()
+	var sent: String = prompt + _new_tools_note() + _new_errors_note()
 	# After a run that stopped mid-way, the conversation ends with tool
 	# results; the new message goes in the same turn, after them.
 	if not _history.is_empty() and _history[-1]["role"] == "tool_results":
@@ -320,7 +322,7 @@ func _run_conversation() -> void:
 			_note("agent: " + reply["text"])
 		if reply["stop"] == "tool_use" and not reply["tool_calls"].is_empty():
 			var results := await _run_tools(reply["tool_calls"])
-			results[-1]["content"] += _new_tools_note()
+			results[-1]["content"] += _new_tools_note() + _new_errors_note()
 			_history.append({"role": "tool_results", "results": results})
 			if _stop_requested:
 				_note("stopped")
@@ -452,6 +454,22 @@ func _tools() -> Array:
 		tools.append({"name": "read_skill", "description": "read one of your skills in full before doing what it covers",
 			"schema": {"type": "object", "properties": {"name": {"type": "string", "description": "the skill's name"}}, "required": ["name"]}})
 	return tools
+
+
+# Tells the agent about errors from live modules since it was last told, so
+# it can fix code it wrote. Only the newest few, kept short.
+func _new_errors_note() -> String:
+	var errors: SlopitectModule = ctx["modules"].module("errors")
+	if errors == null:
+		return ""
+	var found: Array = errors.live_errors_since(_errors_seen)
+	_errors_seen = errors.last_seq()
+	if found.is_empty():
+		return ""
+	var lines := PackedStringArray()
+	for entry in found.slice(maxi(0, found.size() - 5)):
+		lines.append("%s: %s" % [entry["where"], String(entry["text"]).left(200)])
+	return "\n[Errors from live modules since your last step (%d; errors_recent has them all): %s]" % [found.size(), " | ".join(lines)]
 
 
 # Tells the agent which tools it now has that this conversation can't use yet,

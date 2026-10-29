@@ -204,9 +204,12 @@ func _read(module_name) -> Dictionary:
 	return {"name": module_name, "source": source, "sha256": FileAccess.get_sha256(path)}
 
 
-func _compile(source: String) -> Dictionary:
+func _compile(source: String, module_name: String) -> Dictionary:
 	var script := GDScript.new()
 	script.source_code = source
+	# A path of its own, so its errors say which module they came from (the
+	# errors module reads it). Nothing is at that path; it's only a name.
+	script.take_over_path("user://live-modules/%s.gd" % module_name)
 	_capture.take()
 	_capture.active = true
 	var err := script.reload()
@@ -225,7 +228,7 @@ func _load_now(module_name: String, sha256: String) -> Dictionary:
 		return {"ok": false, "error": read["error"]}
 	if read["sha256"] != sha256:
 		return {"ok": false, "error": "the file isn't the one approved"}
-	var compiled := _compile(read["source"])
+	var compiled := _compile(read["source"], module_name)
 	if compiled.has("error"):
 		_errors[module_name] = compiled["error"]
 		return {"ok": false, "error": compiled["error"]}
