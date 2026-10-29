@@ -39,6 +39,7 @@ extends SlopitectModule
 # commands still work.
 
 const PANEL := "terminal"
+const CHAT_PANEL := "chat"  # the agent's own window (chat.gd fills it); Chat mode stands in for it
 const COLS := 62  # characters per screen line at FONT on the screen's width
 const ROWS := 13  # screen lines shown
 const MAX_LINES := 400  # scrollback kept
@@ -57,7 +58,7 @@ const GAP := 0.007
 const ROWS_OF_KEYS := ["1234567890-", "qwertyuiop/", "asdfghjkl_=", "zxcvbnm,.[]"]
 const CHAT_KEYS := ["1234567890-", "qwertyuiop'", "asdfghjkl?!", "zxcvbnm,./:"]
 const CHAT_POLL_SECONDS := 0.5
-const CHECK_SECONDS := 1.0
+const CHECK_SECONDS := 0.25
 const ASK_POLL_SECONDS := 0.5
 
 var _line := ""
@@ -112,13 +113,7 @@ func _process(delta: float) -> void:
 	_since_check += delta
 	if _since_check >= CHECK_SECONDS:
 		_since_check = 0.0
-		# ui.gd can be loaded after this module, or reloaded, and ui_reset
-		# takes the window away; it's built again on whichever ui.gd is there.
-		var ui := _ui()
-		var id := ui.get_instance_id() if ui != null else 0
-		if ui != null and (id != _ui_id or not _has_panel()):
-			_build_panel()
-		_ui_id = id
+		_check_window()
 	if _mode == "chat":
 		_since_chat_poll += delta
 		if _since_chat_poll >= CHAT_POLL_SECONDS:
@@ -129,6 +124,42 @@ func _process(delta: float) -> void:
 		if _since_ask_poll >= ASK_POLL_SECONDS:
 			_since_ask_poll = 0.0
 			_check_ask()
+
+
+# ui.gd can be loaded after this module, or reloaded, and ui_reset takes
+# the window away; it's built again on whichever ui.gd is there.
+# The agent's own window shows the same conversation as Chat mode, so there
+# is one chat window: whatever opens the agent's (its button, its Menu tile)
+# opens this one in Chat mode instead, or closes it if it's showing the chat.
+func _check_window() -> void:
+	var ui := _ui()
+	var id := ui.get_instance_id() if ui != null else 0
+	if ui == null:
+		_ui_id = id
+		return
+	var panels := {}
+	for panel in ctx["server"].run({"cmd": "ui_list"}).get("panels", []):
+		panels[panel.get("id_panel")] = panel
+	if id != _ui_id or not panels.has(PANEL):
+		_build_panel()
+	_ui_id = id
+	if not panels.get(CHAT_PANEL, {}).get("visible", false):
+		return
+	ctx["server"].run({"cmd": "ui_show", "id_panel": CHAT_PANEL, "visible": false})
+	var showing_chat: bool = panels.get(PANEL, {}).get("visible", false) and _mode == "chat"
+	_set_mode("chat")
+	ctx["server"].run({"cmd": "ui_show", "id_panel": PANEL, "visible": not showing_chat})
+
+
+# Words heard by voice (vtt.gd): they go on the chat line, for you to check
+# and Send, and the window shows the chat.
+func hear(words: String) -> void:
+	_set_mode("chat")
+	_type(words)
+	for panel in ctx["server"].run({"cmd": "ui_list"}).get("panels", []):
+		# Shown only when hidden: showing it again would move it in front of you.
+		if panel.get("id_panel") == PANEL and not panel.get("visible", false):
+			ctx["server"].run({"cmd": "ui_show", "id_panel": PANEL, "visible": true})
 
 
 func _has_panel() -> bool:
