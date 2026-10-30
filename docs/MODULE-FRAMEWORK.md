@@ -136,7 +136,7 @@ seen on the headset yet.
 
 | Module | State |
 | --- | --- |
-| lib | New; `world_file()` added in batch 4a. PC (tests/zz_lib.gd, 34 checks) |
+| lib | New; `world_file()` added in batch 4a, the `thing_entered(node)` event in 4b. PC (tests/zz_lib.gd, 36 checks) |
 | projects | Batch 1. Emits `project_changed(project, folder)`; joins save through `lib.watch` instead of checking every frame; no `_process`. PC (zz_projects, 13) |
 | physics | Batch 1. Bodies come back when a thing joins the world (no 1 s scan); idle when nothing is physical; ground follows landscape through lib; `_find` is lib's `world_node`. A thing or body freed by something else is let go at once (a freed body is made again), not tripped over every frame (found by the headset agent). PC (zz_physics, 16) |
 | jelly | Batch 1. Off without an avatar, on when it loads (`lib.watch`). PC (zz_jelly, 13) |
@@ -164,7 +164,8 @@ seen on the headset yet.
 | worlds, agent_settings | Batch 3b. Already fit (no per-frame work, no copied helpers); tests only. PC (zz_worlds, 9; zz_agent_settings, 3) |
 | textures, doors, multi | Batch 4a. Their per-world files come from the new `lib.world_file()` (save's folder) instead of each reading user://projects.json every 2 s; they load again on projects' `project_changed`. textures checks its shapes only while one has a texture; doors runs only while one swings; multi draws only while it's the chosen tool and keeps groups together only while there are some (grab found through lib, not every physics frame). multi uses lib's `things`/`thing`/`world_box`. PC (zz_textures, 8; zz_doors, 9; zz_multi, 10; zz_undo, zz_gaps) |
 | tool_front, sweet_potato, beatsaber_path | The headset agent's, rewritten to the rules. tool_front hears vrui's `panel_shown` (no 0.3 s scan of every module). sweet_potato hears assets' new `placed` signal and runs only while a potato waits or a tree grows, moving its shapes straight (not dozens of commands a second), and growing adds nothing to undo. beatsaber_path is idle without beatsaber; with it, it reads its `running` flag each frame (beatsaber has no signal and stays as it is). PC (zz_tool_front, 5; zz_sweet_potato, 14; zz_beatsaber_path, 7) |
-| grab, inspect, prefabs, shapes, tools, joints | Not yet rewritten (batches 4b, 4c) |
+| grab, inspect, prefabs | Batch 4b. grab runs each physics frame only while a hand holds something (the throw speed is taken while held). inspect has no 0.5 s scan: a thing made or put back gets its switches from lib's new `thing_entered` event, and the outline is drawn only while Inspect is chosen. prefabs' folder and files go through lib (commands wait for it). All three use lib's thing helpers instead of their own copies. PC (zz_grab, 8; zz_inspect, 9; zz_prefabs, 7; zz_undo, zz_gaps, zz_library) |
+| shapes, tools, joints | Not yet rewritten (batch 4c) |
 | save, pause | Not yet rewritten (batch 4d) |
 | everything else | Not started |
 

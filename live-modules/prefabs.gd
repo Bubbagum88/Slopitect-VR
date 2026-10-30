@@ -6,6 +6,11 @@ extends SlopitectModule
 # selected with the Multi tool (multi.gd). Shapes made with shapes.gd keep
 # their recipe. Doors should be closed when saving. The Library window's
 # Prefabs tab (library.gd) shows them with a picture and places them.
+# The prefabs folder is in the Slopitect folder (lib.home()); its commands
+# wait for lib.
+
+var _lib: SlopitectModule
+
 
 func setup() -> String:
 	register("prefabs_save", _save_command, "save things as a prefab asset: name (letters, digits, _ and -); which things: names [..] and/or prefixes [name starts], or (neither given) what the Multi tool has selected; optional origin [x, y, z] (default the middle of their footprint, on the floor)")
@@ -15,12 +20,17 @@ func setup() -> String:
 	return ""
 
 
-func _home() -> String:
-	return "/sdcard/Slopitect" if OS.get_name() == "Android" else OS.get_user_data_dir() + "/files_home"
+func lib_ready(lib) -> void:
+	_lib = lib
 
 
+# "" without lib, which every command checks first.
 func _folder() -> String:
-	return _home() + "/prefabs"
+	return _lib.home() + "/prefabs" if _lib else ""
+
+
+func _waiting() -> Dictionary:
+	return {"ok": false, "error": "prefabs is waiting for the lib module (load lib.gd)"}
 
 
 func _run(req: Dictionary) -> Dictionary:
@@ -80,6 +90,8 @@ func _first_array(d: Dictionary) -> Array:
 
 
 func _save_command(request: Dictionary) -> Dictionary:
+	if _lib == null:
+		return _waiting()
 	var name = request.get("name")
 	if not _good_name(name):
 		return {"ok": false, "error": "\"name\" must be letters, digits, _ and -"}
@@ -157,29 +169,25 @@ func _save_command(request: Dictionary) -> Dictionary:
 			if members.size() >= 2:
 				groups[g] = members
 	DirAccess.make_dir_recursive_absolute(_folder())
-	var f := FileAccess.open("%s/%s.json" % [_folder(), name], FileAccess.WRITE)
-	if f == null:
-		return {"ok": false, "error": "can't write prefabs/%s.json" % name}
-	f.store_string(JSON.stringify({"shapes": out_shapes, "models": out_models, "textures": textures, "doors": doors, "groups": groups}, "\t"))
-	f.close()
+	var problem: String = _lib.write_json("%s/%s.json" % [_folder(), name], {"shapes": out_shapes, "models": out_models, "textures": textures, "doors": doors, "groups": groups}, "\t")
+	if not problem.is_empty():
+		return {"ok": false, "error": problem}
 	return {"ok": true, "file": "prefabs/%s.json" % name, "origin": _arr(origin), "shapes": out_shapes.size(), "models": out_models.size(), "textures": textures.size(), "doors": doors.size(), "groups": groups.size()}
 
 
 func _load(name: String) -> Dictionary:
-	var path := "%s/%s.json" % [_folder(), name]
-	if not FileAccess.file_exists(path):
-		return {}
-	var data = JSON.parse_string(FileAccess.get_file_as_string(path))
+	var data = _lib.read_json("%s/%s.json" % [_folder(), name])
 	return data if typeof(data) == TYPE_DICTIONARY else {}
 
 
 func _taken(n: String) -> bool:
-	var world: Node3D = ctx["world"]
-	return world.get_node_or_null(NodePath(n)) != null
+	return _lib.world_node(n) != null
 
 
 # Placing is one undo, which takes away all it placed; redo places it again.
 func _place_command(request: Dictionary) -> Dictionary:
+	if _lib == null:
+		return _waiting()
 	var tools: SlopitectModule = ctx["modules"].module("tools")
 	if tools:
 		tools.call("undo_batch_begin", "place prefab %s" % str(request.get("name")))
@@ -309,6 +317,8 @@ func _place(request: Dictionary) -> Dictionary:
 
 
 func _list_command(_request: Dictionary) -> Dictionary:
+	if _lib == null:
+		return _waiting()
 	var out := []
 	var dir := DirAccess.open(_folder())
 	if dir:
@@ -320,6 +330,8 @@ func _list_command(_request: Dictionary) -> Dictionary:
 
 
 func _delete_command(request: Dictionary) -> Dictionary:
+	if _lib == null:
+		return _waiting()
 	var name = request.get("name")
 	if not _good_name(name):
 		return {"ok": false, "error": "\"name\" must be a prefab name"}

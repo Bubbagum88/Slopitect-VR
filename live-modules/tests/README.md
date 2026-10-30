@@ -20,8 +20,10 @@ The modules each test loads, in order (the order matters: some load lib last on 
 | `zz_controls.gd` | `controls lib landscape zz_controls` |
 | `zz_doors.gd` | `lib save projects tools doors zz_doors` |
 | `zz_gaps.gd` | `lib controls vrui tools inspect shapes physics grab multi doors textures joints save projects prefabs zz_gaps` (FRESH=1 after an APK change: it checks objects.gd) |
+| `zz_grab.gd` | `lib tools grab zz_grab` |
 | `zz_hands.gd` | `hands lib controls zz_hands` |
 | `zz_holster.gd` | `controls vrui tools pause avatar holster lib zz_holster` |
+| `zz_inspect.gd` | `lib tools inspect zz_inspect` |
 | `zz_jelly.gd` | `avatar jelly lib zz_jelly` |
 | `zz_keyboard.gd` | `controls vrui chat terminal keyboard lib zz_keyboard` |
 | `zz_landscape.gd` | `landscape lib tools zz_landscape` |
@@ -35,6 +37,7 @@ The modules each test loads, in order (the order matters: some load lib last on 
 | `zz_paths.gd` | `paths lib landscape tools zz_paths` |
 | `zz_perf.gd` | `lib perf zz_perf` |
 | `zz_physics.gd` | `physics lib landscape zz_physics` |
+| `zz_prefabs.gd` | `lib tools prefabs zz_prefabs` |
 | `zz_projects.gd` | `save projects lib zz_projects` |
 | `zz_settings.gd` | `settings controls vrui hands lib zz_settings` |
 | `zz_sweet_potato.gd` | `lib assets tools sweet_potato zz_sweet_potato` |
