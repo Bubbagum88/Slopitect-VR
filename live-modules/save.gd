@@ -14,6 +14,11 @@ extends SlopitectModule
 # those modules keeps its own file per project, so world.json doesn't), and
 # deleting a checkpoint is one undo.
 # With the projects module, each project has its own saves folder.
+# It needs lib: the world is put back in lib_ready (after projects, when it's
+# loaded, has said which folder), and a part waiting for its module is put
+# back when lib says that module loaded. It saves every CHECK_SECONDS when
+# the world changed (no module tells it about every change), and before the
+# app closes.
 
 const CHECK_SECONDS := 5.0  # how often it looks for changes to save
 const MAX_CHECKPOINTS := 50
@@ -25,7 +30,8 @@ const CHECKPOINT_PARTS := {"groups": ["multi", "get_grouping", "set_grouping"], 
 
 var _folder := ""
 var _last_saved := ""  # what world.json holds, to save only on a change
-var _since_check := 0.0
+var _lib: SlopitectModule
+var _timer: Timer
 var _pending := {}  # part -> its saved value, while its module isn't loaded; kept in every save until it is
 var _kept := {}  # part -> its value at the last snapshot, kept if its module is unloaded later
 var _restoring := false
@@ -34,23 +40,53 @@ var _ground_from := 0  # the landscape module's instance id _ground was made fro
 
 
 func setup() -> String:
-	var home := "/sdcard/Slopitect" if OS.get_name() == "Android" else OS.get_user_data_dir() + "/files_home"
-	_folder = home + "/saves"
-	# In a project (the projects module), start in its folder rather than
-	# load the old one and switch.
-	var projects = JSON.parse_string(FileAccess.get_file_as_string("user://projects.json")) if FileAccess.file_exists("user://projects.json") else null
-	if typeof(projects) == TYPE_DICTIONARY and typeof(projects.get("current")) == TYPE_STRING and projects["current"].is_valid_filename():
-		_folder = "%s/projects/%s/saves" % [home, projects["current"]]
-	var made := DirAccess.make_dir_recursive_absolute(_folder + "/checkpoints")
-	if made != OK:
-		return "save can't make its folder %s (error %d)" % [_folder, made]
+	set_process(false)
+	_timer = Timer.new()
+	_timer.wait_time = CHECK_SECONDS
+	_timer.timeout.connect(_autosave)
+	add_child(_timer)
 	register("save_status", _status, "what is saved: the world file, its time, how many shapes and models; and the checkpoints")
 	register("save_now", _save_command, "save the shapes and models now (it also saves by itself when they change)")
 	register("save_checkpoint", _checkpoint, "keep the whole world as it is now (shapes, models, ground, paths): optional label")
 	register("save_checkpoints", _list, "the checkpoints, newest last: id, label, when, what's in it")
 	register("save_restore", _restore_command, "go back to a checkpoint: checkpoint (its id); one undo")
 	register("save_delete", _delete, "delete a checkpoint: checkpoint (its id)")
+	return ""
+
+
+func lib_ready(lib) -> void:
+	_lib = lib
+	if lib == null:
+		_autosave()
+		_timer.stop()
+		return
+	lib.follow(self, "lib", "module_loaded", _module_loaded)
+	for part in _pending.keys():
+		if lib.module(PARTS[part]) != null:
+			_module_loaded(PARTS[part])
+	_timer.start()
+	# After every module loaded with it has had lib_ready, so projects (if
+	# it's there) has already said which folder to use.
+	_start.call_deferred()
+
+
+func _start() -> void:
+	if _lib == null or not _folder.is_empty():
+		return  # lib went again, or a folder (and its world) is already in use
+	var problem := _open(_lib.home() + "/saves")
+	if not problem.is_empty():
+		push_error("Slopitect save: " + problem)
+
+
+# The first folder: its world is put back as it was saved (the world is left
+# as it is when there's none yet).
+func _open(folder: String) -> String:
+	var made := DirAccess.make_dir_recursive_absolute(folder + "/checkpoints")
+	if made != OK:
+		return "can't make %s (error %d)" % [folder, made]
+	_folder = folder
 	_load_world()
+	print("Slopitect save: saving in %s" % folder)
 	return ""
 
 
@@ -64,20 +100,25 @@ func _notification(what: int) -> void:
 func _exit_tree() -> void:
 	_ground = ""
 	_autosave()
+	var landscape := instance_from_id(_ground_from) if _ground_from != 0 else null
+	if is_instance_valid(landscape) and landscape.is_connected("changed", _ground_changed):
+		landscape.disconnect("changed", _ground_changed)
 
 
-func _process(delta: float) -> void:
+# A part that waited for its module goes back as soon as that module loads.
+func _module_loaded(module_name: String) -> void:
 	for part in _pending.keys():
-		if ctx["modules"].module(PARTS[part]) != null:
+		if PARTS[part] == module_name:
 			var value = _pending[part]
 			_pending.erase(part)
 			for problem in _put_part(part, value):
 				push_error("Slopitect save: " + problem)
 			print("Slopitect save: put back the saved %s now that its module is loaded" % part)
-	_since_check += delta
-	if _since_check >= CHECK_SECONDS:
-		_since_check = 0.0
-		_autosave()
+
+
+# A module by name: lib's cached lookup, or the loader's without lib.
+func _module(module_name: String) -> SlopitectModule:
+	return _lib.module(module_name) if _lib else ctx["modules"].module(module_name)
 
 
 func _run(request: Dictionary) -> Dictionary:
@@ -101,7 +142,7 @@ func _checkpoint_snapshot() -> Dictionary:
 	var state := _snapshot()
 	for part in CHECKPOINT_PARTS:
 		var spec: Array = CHECKPOINT_PARTS[part]
-		var module: SlopitectModule = ctx["modules"].module(spec[0])
+		var module: SlopitectModule = _module(spec[0])
 		if module and module.has_method(spec[1]):
 			state[part] = module.call(spec[1])
 	return state
@@ -111,7 +152,7 @@ func _checkpoint_snapshot() -> Dictionary:
 func _snapshot() -> Dictionary:
 	var state := {"version": 2, "saved": Time.get_datetime_string_from_system(true), "shapes": _shapes()}
 	for part in PARTS:
-		var module: SlopitectModule = ctx["modules"].module(PARTS[part])
+		var module: SlopitectModule = _module(PARTS[part])
 		if module == null:
 			if _pending.has(part):
 				state[part] = _pending[part]
@@ -138,7 +179,7 @@ func _snapshot() -> Dictionary:
 # Putting a world back isn't a change to undo: the deletes and spawns in it
 # add nothing to the undo list.
 func _put_back(state: Dictionary) -> PackedStringArray:
-	var tools: SlopitectModule = ctx["modules"].module("tools")
+	var tools: SlopitectModule = _module("tools")
 	if tools and tools.has_method("quiet"):
 		return tools.call("quiet", _put_back_now.bind(state))
 	return _put_back_now(state)
@@ -164,13 +205,13 @@ func _put_back_now(state: Dictionary) -> PackedStringArray:
 	for part in PARTS:
 		if not state.has(part):
 			continue
-		if ctx["modules"].module(PARTS[part]) == null:
+		if _module(PARTS[part]) == null:
 			_pending[part] = state[part]  # put back when its module loads
 		else:
 			problems.append_array(_put_part(part, state[part]))
 	for part in CHECKPOINT_PARTS:
 		var spec: Array = CHECKPOINT_PARTS[part]
-		var module: SlopitectModule = ctx["modules"].module(spec[0])
+		var module: SlopitectModule = _module(spec[0])
 		if state.has(part) and module and module.has_method(spec[2]):
 			module.call(spec[2], state[part])
 	_restoring = false
@@ -180,7 +221,7 @@ func _put_back_now(state: Dictionary) -> PackedStringArray:
 
 
 func _put_part(part: String, value) -> PackedStringArray:
-	var module: SlopitectModule = ctx["modules"].module(PARTS[part])
+	var module: SlopitectModule = _module(PARTS[part])
 	match part:
 		"models":
 			for model in _run({"cmd": "assets_placed"}).get("placed", []):
@@ -287,6 +328,8 @@ func _autosave() -> void:
 func use_folder(folder: String) -> String:
 	if folder == _folder:
 		return ""
+	if _folder.is_empty():
+		return _open(folder)  # projects says where before save has opened one
 	if DirAccess.dir_exists_absolute(_folder):
 		_autosave()
 	var made := DirAccess.make_dir_recursive_absolute(folder + "/checkpoints")
@@ -297,7 +340,7 @@ func use_folder(folder: String) -> String:
 		_load_world()
 	else:
 		var empty := {"shapes": [], "models": [], "paths": {"paths": {}, "next": 1}}
-		var landscape: SlopitectModule = ctx["modules"].module("landscape")
+		var landscape: SlopitectModule = _module("landscape")
 		if landscape:
 			var flat := PackedFloat32Array()
 			flat.resize((landscape.call("get_heights") as PackedFloat32Array).size())
@@ -325,13 +368,21 @@ func _write(path: String, state: Dictionary) -> String:
 	return "" if moved == OK else "couldn't move %s into place (error %d)" % [temporary, moved]
 
 
+func _waiting() -> Dictionary:
+	return {"ok": false, "error": "save hasn't opened a world yet (it needs the lib module loaded)"}
+
+
 func _save_command(_request: Dictionary) -> Dictionary:
+	if _folder.is_empty():
+		return _waiting()
 	_last_saved = ""
 	_autosave()
 	return {"ok": _last_saved != "", "saved": _folder + "/world.json"}
 
 
 func _status(_request: Dictionary) -> Dictionary:
+	if _folder.is_empty():
+		return _waiting()
 	var path := _folder + "/world.json"
 	var reply := {"ok": true, "world_file": path, "exists": FileAccess.file_exists(path), "checkpoints": _checkpoint_files().size()}
 	if reply["exists"]:
@@ -355,6 +406,8 @@ func _checkpoint_files() -> PackedStringArray:
 
 
 func _checkpoint(request: Dictionary) -> Dictionary:
+	if _folder.is_empty():
+		return _waiting()
 	var label = request.get("label", "")
 	if typeof(label) != TYPE_STRING or label.length() > 60:
 		return {"ok": false, "error": "\"label\" must be text of up to 60 characters"}
@@ -392,6 +445,8 @@ func _read_checkpoint(id) -> Dictionary:
 
 
 func _list(_request: Dictionary) -> Dictionary:
+	if _folder.is_empty():
+		return _waiting()
 	var listed := []
 	for file in _checkpoint_files():
 		var read := _read_checkpoint(file.get_slice("-", 0))
@@ -404,13 +459,15 @@ func _list(_request: Dictionary) -> Dictionary:
 
 
 func _restore_command(request: Dictionary) -> Dictionary:
+	if _folder.is_empty():
+		return _waiting()
 	var read := _read_checkpoint(request.get("checkpoint"))
 	if read.has("error"):
 		return {"ok": false, "error": read["error"]}
 	var before := _checkpoint_snapshot()
 	var state: Dictionary = read["state"]
 	var problems := _put_back(state)
-	var tools: SlopitectModule = ctx["modules"].module("tools")
+	var tools: SlopitectModule = _module("tools")
 	if tools:
 		tools.call("push_undo", "go back to checkpoint %s" % read["id"], func(): _put_back(before), func(): _put_back(state))
 	_autosave()
@@ -420,13 +477,15 @@ func _restore_command(request: Dictionary) -> Dictionary:
 
 
 func _delete(request: Dictionary) -> Dictionary:
+	if _folder.is_empty():
+		return _waiting()
 	var read := _read_checkpoint(request.get("checkpoint"))
 	if read.has("error"):
 		return {"ok": false, "error": read["error"]}
 	var path: String = read["path"]
 	var kept := FileAccess.get_file_as_string(path)
 	DirAccess.remove_absolute(path)
-	var tools: SlopitectModule = ctx["modules"].module("tools")
+	var tools: SlopitectModule = _module("tools")
 	if tools:
 		var put_back := func():
 			var out := FileAccess.open(path, FileAccess.WRITE)
