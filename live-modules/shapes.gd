@@ -162,6 +162,19 @@ func recipe(node_name: String) -> Dictionary:
 	return _made.get(node_name, {}).duplicate(true)
 
 
+# A made shape's recipe and where it is (as get_made() has it), and making it
+# again from that with no undo of its own: for undoing a delete.
+func made_entry(node_name: String) -> Dictionary:
+	for entry in get_made()["shapes"]:
+		if entry["name"] == node_name:
+			return entry
+	return {}
+
+
+func remake(entry: Dictionary) -> void:
+	_recreate(entry)
+
+
 func attach_points(node_name: String) -> Array:
 	var node := _node(node_name)
 	if node == null:
@@ -651,8 +664,12 @@ func _recut(base_name: String, mesh: Mesh, cut: Dictionary, tool_name: String) -
 	if not tool_name.is_empty() and _node(tool_name):
 		if _made.has(tool_name):
 			_remove(tool_name)
-		else:
-			ctx["server"].run({"cmd": "delete", "name": tool_name})
+		else:  # the cut's own undo brings it back, so the delete adds none
+			var tools: SlopitectModule = ctx["modules"].module("tools")
+			if tools and tools.has_method("quiet"):
+				tools.call("quiet", ctx["server"].run.bind({"cmd": "delete", "name": tool_name}))
+			else:
+				ctx["server"].run({"cmd": "delete", "name": tool_name})
 
 
 func _put_mesh(node: MeshInstance3D, mesh: Mesh, made: Dictionary, material: Material = null) -> void:

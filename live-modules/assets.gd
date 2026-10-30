@@ -403,16 +403,33 @@ func _place(request: Dictionary) -> Dictionary:
 	_holder.add_child(scene)
 	_placed[node_name] = {"id": id, "res": res}
 	_note("placed %s as %s (read in %d ms)" % [id, node_name, Time.get_ticks_msec() - started])
-	return {"ok": true, "placed": _describe(scene)}
+	var placed := _describe(scene)
+	var again := _again(placed)
+	var take_away := func():
+		ctx["server"].run({"cmd": "assets_remove", "name": node_name})
+		var tools: SlopitectModule = ctx["modules"].module("tools")
+		if tools and tools.has_method("thing_forget"):
+			tools.call("thing_forget", node_name)
+	_undo("place " + node_name, take_away, ctx["server"].run.bind(again))
+	return {"ok": true, "placed": placed}
 
 
 func _move(request: Dictionary) -> Dictionary:
 	var node := _find(request)
 	if node == null:
 		return {"ok": false, "error": "no placed model named %s (assets_placed lists them)" % JSON.stringify(request.get("name"))}
+	var before := node.transform
 	var problem := _transform(node, request)
 	if not problem.is_empty():
 		return {"ok": false, "error": problem}
+	var after := node.transform
+	if not before.is_equal_approx(after):
+		var moved_name := String(node.name)
+		var put := func(t: Transform3D):
+			var again := _holder.get_node_or_null(NodePath(moved_name)) as Node3D
+			if again:
+				again.transform = t
+		_undo("move " + moved_name, put.bind(before), put.bind(after))
 	return {"ok": true, "placed": _describe(node)}
 
 
@@ -420,10 +437,28 @@ func _remove(request: Dictionary) -> Dictionary:
 	var node := _find(request)
 	if node == null:
 		return {"ok": false, "error": "no placed model named %s (assets_placed lists them)" % JSON.stringify(request.get("name"))}
-	_placed.erase(String(node.name))
+	var node_name := String(node.name)
+	var again := _again(_describe(node))
+	var tools: SlopitectModule = ctx["modules"].module("tools")
+	var snapshot: Dictionary = tools.call("thing_snapshot", node_name) if tools and tools.has_method("thing_snapshot") else {}
+	_placed.erase(node_name)
 	_holder.remove_child(node)  # its name is free at once, for a new model
 	node.queue_free()
-	return {"ok": true, "removed": String(node.name)}
+	if tools and tools.has_method("thing_removed"):
+		tools.call("thing_removed", node_name, snapshot, again, {"cmd": "assets_remove", "name": node_name})
+	return {"ok": true, "removed": node_name}
+
+
+# The assets_place that puts a placed model back as it is.
+func _again(placed: Dictionary) -> Dictionary:
+	return {"cmd": "assets_place", "id": placed["id"], "resolution": placed["resolution"], "name": placed["name"],
+		"position": placed["position"], "rotation": placed["rotation"], "scale": placed["scale"]}
+
+
+func _undo(label: String, undo: Callable, redo: Callable) -> void:
+	var tools: SlopitectModule = ctx["modules"].module("tools")
+	if tools:
+		tools.call("push_undo", label, undo, redo)
 
 
 func _placed_list(_request: Dictionary) -> Dictionary:
