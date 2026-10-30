@@ -3,7 +3,7 @@ extends SlopitectModule
 var _fails := 0
 var _passes := 0
 
-const FAKE_BEAT := "extends SlopitectModule\nvar running := false\n"
+const FAKE_BEAT := "extends SlopitectModule\nsignal started(title)\nsignal stopped()\nvar running := false\nfunc track_transform() -> Transform3D:\n\treturn Transform3D(Basis.IDENTITY, Vector3(2, 0, 0))\n"
 
 
 func setup() -> String:
@@ -33,14 +33,17 @@ func _go() -> void:
 	ctx["modules"].load_live("beatsaber", s)
 	await _frames(3)
 	var beat = ctx["modules"].module("beatsaber")
-	_check("beatsaber loaded: watching, still hidden", path.is_processing() and not strip.visible)
+	_check("beatsaber loaded: still hidden, never per frame", not path.is_processing() and not strip.visible)
 	beat.running = true
+	beat.started.emit("x")
 	await _frames(2)
-	_check("notes running: shown", strip.visible)
+	_check("started: shown on the track", strip.visible and strip.global_position.is_equal_approx(Vector3(2, 0.01, -5.5)), strip.global_position)
 	beat.running = false
+	beat.stopped.emit()
 	await _frames(2)
 	_check("stopped: hidden", not strip.visible)
 	beat.running = true
+	beat.started.emit("x")
 	await _frames(2)
 	ctx["modules"].unload("beatsaber")
 	await _frames(2)
