@@ -286,11 +286,10 @@ func _load_times(request: Dictionary) -> Dictionary:
 	var only = request.get("name", "")
 	if typeof(only) != TYPE_STRING or (not only.is_empty() and not only.is_valid_identifier()):
 		return {"ok": false, "error": "\"name\" must be a module name"}
-	var files: SlopitectModule = ctx["modules"].module("files")
-	var home: String = files.get("_home") if files else ""
-	if home.is_empty():
-		home = "/sdcard/Slopitect" if OS.get_name() == "Android" else OS.get_user_data_dir() + "/files_home"
-	var folder := home + "/modules"
+	var lib: SlopitectModule = ctx["modules"].module("lib")
+	if lib == null:
+		return {"ok": false, "error": "perf_load needs the lib module (load lib.gd)"}
+	var folder: String = lib.home() + "/modules"
 	var names := []
 	if only.is_empty():
 		for file in DirAccess.get_files_at(folder):

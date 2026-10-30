@@ -10,6 +10,10 @@ The modules each test loads, in order (the order matters: some load lib last on 
 
 | Test | Run with |
 | --- | --- |
+| `zz_agent_settings.gd` | `agent_settings zz_agent_settings` |
+| `zz_agent_tuning.gd` | `lib agent_tuning zz_agent_tuning` |
+| `zz_aimsg.gd` | `lib aimsg zz_aimsg` |
+| `zz_assets.gd` | `lib assets zz_assets` |
 | `zz_avatar.gd` | `controls vrui tts avatar lib zz_avatar` |
 | `zz_chat.gd` | `controls chat vrui lib zz_chat` |
 | `zz_controls.gd` | `controls lib landscape zz_controls` |
@@ -23,12 +27,15 @@ The modules each test loads, in order (the order matters: some load lib last on 
 | `zz_memory.gd` | `memory lib zz_memory` |
 | `zz_memory_world.gd` | `save projects memory lib zz_memory_world` |
 | `zz_menu.gd` | `controls vrui lib zz_menu` |
+| `zz_net.gd` | `lib net zz_net` |
 | `zz_paths.gd` | `paths lib landscape zz_paths` |
+| `zz_perf.gd` | `lib perf zz_perf` |
 | `zz_physics.gd` | `physics lib landscape zz_physics` |
 | `zz_projects.gd` | `save projects lib zz_projects` |
 | `zz_settings.gd` | `settings controls vrui hands lib zz_settings` |
 | `zz_terminal.gd` | `controls vrui chat terminal lib zz_terminal` |
 | `zz_voice.gd` | `controls vrui tts vtt lib pause zz_voice` |
 | `zz_vrui.gd` | `controls vrui lib zz_vrui` |
+| `zz_worlds.gd` | `lib controls vrui projects save worlds zz_worlds` |
 
 `net_stub.gd` stands in for net.gd (a fake Poly Haven); load it as `net=net_stub`.

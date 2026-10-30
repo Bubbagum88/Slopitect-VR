@@ -46,13 +46,17 @@ func _go() -> void:
 	await _r({"cmd": "hands_hide", "hidden": false})
 	_check("shown: moving again", hands.is_processing() and left.visible)
 
-	# beatsaber loaded hides them; unloaded brings them back.
+	# With sabers chosen, beatsaber loaded hides them; with hands chosen it
+	# doesn't; unloaded brings them back.
 	var s := GDScript.new()
 	s.source_code = FAKE_BEAT
 	s.reload()
 	ctx["modules"].load_live("beatsaber", s)
 	await _frames(2)
-	_check("beatsaber hides them", not left.visible and not hands.is_processing())
+	_check("beatsaber with hands chosen: still shown", left.visible and hands.is_processing())
+	await _r({"cmd": "hands_style", "style": "saber"})
+	await _frames(2)
+	_check("beatsaber with sabers chosen hides them", not left.visible and not hands.is_processing())
 	ctx["modules"].unload("beatsaber")
 	await _frames(2)
 	_check("beatsaber gone: back", left.visible and hands.is_processing())

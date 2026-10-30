@@ -100,12 +100,10 @@ func after_tools(state: Dictionary) -> Dictionary:
 	return {"note": ""}
 
 
+# Without lib there are no extra skills (the shipped ones still work).
 func _folder() -> String:
-	var files: SlopitectModule = ctx["modules"].module("files")
-	var home: String = files.get("_home") if files else ""
-	if home.is_empty():
-		home = "/sdcard/Slopitect" if OS.get_name() == "Android" else OS.get_user_data_dir() + "/files_home"
-	return home + "/modules/" + SKILLS_FOLDER
+	var lib: SlopitectModule = ctx["modules"].module("lib")
+	return lib.home() + "/modules/" + SKILLS_FOLDER if lib else ""
 
 
 # A SKILL.md header's fields, or {} when it has no proper one.

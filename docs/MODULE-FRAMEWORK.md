@@ -140,7 +140,7 @@ seen on the headset yet.
 | projects | Batch 1. Emits `project_changed(project, folder)`; joins save through `lib.watch` instead of checking every frame; no `_process`. PC (zz_projects, 13) |
 | physics | Batch 1. Bodies come back when a thing joins the world (no 1 s scan); idle when nothing is physical; ground follows landscape through lib; `_find` is lib's `world_node`. PC (zz_physics, 13) |
 | jelly | Batch 1. Off without an avatar, on when it loads (`lib.watch`). PC (zz_jelly, 13) |
-| hands | Batch 1. No `module()` lookups per frame; idle while hidden, with beatsaber, or without controls. PC (zz_hands, 14) |
+| hands | Batch 1. No `module()` lookups per frame; idle while hidden, while beatsaber's sabers are chosen, or without controls. PC (zz_hands, 15) |
 | vrui | Batch 2 (signals only; its own polling comes later). `panel_shown(id_panel, on)`, `page_changed(id_panel, page)`, `panel_changed(id_panel)`, `focus_changed`. PC (zz_vrui, 8) |
 | keyboard | Batch 2b. No 0.25 s check: looks again when a window opens, closes or changes, the focus moves, the terminal switches mode, or a module comes or goes. PC (zz_keyboard, 10) |
 | terminal | Batch 2b. `mode_changed(mode)`; no 0.25 s window check; Chat mode follows chat.gd's `transcript_changed`, and reads the agent itself only when chat.gd isn't loaded; idle otherwise. PC (zz_terminal, 9) |
@@ -156,7 +156,12 @@ seen on the headset yet.
 | avatar | Batch 3. tts kept at hand (it was looked up every frame). Still reads agent_status twice a second (APK). PC (old test, all pass) |
 | holster | Batch 3. Off without an avatar; no per-frame lookups. PC (old test, 35) |
 | memory | Batch 3. Follows projects' `project_changed` instead of reading projects' own file (one owner per piece of data). Still reads agent_status (APK). PC (zz_memory, zz_memory_world, 4) |
-| net, assets, worlds, aimsg, perf, agent_settings, agent_tuning | Looked at: no per-frame work or copied helpers to fix; perf measures every frame on purpose. Their `_home` copies stay until the APK loads lib first (they need it in `setup()`) |
+| net | Batch 3b. Folder and saving through lib; `downloads/` made in `lib_ready`, `net_fetch` waits for lib. The allowed hosts still load in `setup()` so the safety list is never at its default. PC (zz_net, 10, no network) |
+| assets | Batch 3b. Its models folder is made in `lib_ready` (no copied Slopitect-folder path); `assets_get` and `assets_place` wait for lib; tools found through lib. PC (zz_assets, 9, no network) |
+| aimsg | Batch 3b. Its size loads and saves through lib's JSON helpers, once lib is there (the defaults until then). PC (zz_aimsg, 7) |
+| perf | Batch 3b. `perf_load` finds the modules folder through `lib.home()` (says it needs lib otherwise); it still notes every frame time on purpose (perf_status looks back 10 s). PC (zz_perf, 5) |
+| agent_tuning | Batch 3b. The extra skills folder comes from `lib.home()`; without lib only the shipped skills. PC (zz_agent_tuning, 4) |
+| worlds, agent_settings | Batch 3b. Already fit (no per-frame work, no copied helpers); tests only. PC (zz_worlds, 9; zz_agent_settings, 3) |
 | grab, inspect, multi, prefabs, shapes, textures, tools, joints, doors | Waiting for the undo-groups work to land, to avoid clashing edits |
 | save, pause | Being changed for the stutter; their rewrite comes after |
 | everything else | Not started |
