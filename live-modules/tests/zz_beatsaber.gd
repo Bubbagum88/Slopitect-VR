@@ -97,6 +97,8 @@ func _go() -> void:
 	_beat.started.connect(func(t): _signals.append("started " + t))
 	_beat.stopped.connect(func(): _signals.append("stopped"))
 	_beat.finished.connect(func(r): _signals.append("finished"))
+	var sky_env: Environment = ctx["world"].get_parent().get_node("WorldEnvironment").environment
+	var sun_energy: float = ctx["world"].get_parent().get_node("Sun").light_energy
 	var reply := _run({"cmd": "beatsaber_start", "song": "free"})
 	_check("free play starts", reply.get("ok", false) and _beat.running and _beat.is_processing() and reply.get("notes", 0) > 50, reply)
 	await get_tree().create_timer(1.0).timeout
@@ -107,9 +109,19 @@ func _go() -> void:
 	# Its own world: made on the first start, left with Leave, reused after
 	_check("starting took us to the Rhythm world", _world() == "rhythm_sabers", _world())
 	_check("in the game: sabers, automatically", hands.settings["style"] == "saber" and saber.visible)
+	var scene: Node = ctx["world"].get_parent()
+	var env_node: WorldEnvironment = scene.get_node("WorldEnvironment")
+	var sun: DirectionalLight3D = scene.get_node("Sun")
+	var main_floor: Node3D = scene.get_node("Floor")
+	_check("the Rhythm world's own surroundings", _beat._stage != null and env_node.environment != sky_env
+		and env_node.environment.background_mode == Environment.BG_COLOR and not main_floor.visible and sun.light_energy < sun_energy,
+		[_beat._stage, env_node.environment, main_floor.visible, sun.light_energy])
+	_check("its stage lies with the track", _beat._stage.global_transform.is_equal_approx(_beat.track_transform()))
 	reply = _run({"cmd": "beatsaber_leave"})
 	_check("Leave goes back to where we were", reply.get("ok", false) and _world() == "start", [reply, _world()])
 	_check("out of the game: hands back", hands.settings["style"] == "hand" and not saber.visible)
+	_check("outside it the sky, sun and floor come back", _beat._stage == null and env_node.environment == sky_env and main_floor.visible
+		and is_equal_approx(sun.light_energy, sun_energy))
 	_check("the tile takes us back in", _run({"cmd": "beatsaber_do", "act": "toggle"}).get("ok", false) and _world() == "rhythm_sabers")
 	_check("one Rhythm world, not one per visit", _run({"cmd": "projects_list"})["projects"].filter(func(p): return p["name"] == "rhythm_sabers").size() == 1)
 	_run({"cmd": "beatsaber_start", "song": "free"})
@@ -279,6 +291,8 @@ func _go() -> void:
 
 	ctx["modules"].unload("beatsaber")
 	await _frames(3)
+	_check("unload puts the sky, sun and floor back", ctx["world"].get_parent().get_node("WorldEnvironment").environment == sky_env
+		and ctx["world"].get_parent().get_node("Floor").visible and is_equal_approx(ctx["world"].get_parent().get_node("Sun").light_energy, sun_energy))
 	_check("unload takes the sabers and window", not is_instance_valid(saber) and not _run({"cmd": "ui_get", "id_panel": "beatsaber"}).get("ok", true))
 	print("RESULT %d passed, %d failed" % [_passes, _fails])
 	get_tree().quit()

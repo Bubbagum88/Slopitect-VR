@@ -18,6 +18,8 @@ extends SlopitectModule
 # beatsaber_leave) stops the song and takes you back to the world you came
 # from (remembered even across a restart). Going to any other world stops
 # the song too. Without projects.gd and save.gd it plays where you are.
+# In the Rhythm world the usual sky, sun and floor give way to its own dark
+# stage (see _stage_on), put back when you leave.
 # The track is laid out where you stand, facing the way you look, when a
 # song starts. A score board stands to its left.
 #
@@ -211,6 +213,8 @@ var _return_to := ""        # the world to go back to on Leave
 var _pack := "All songs"    # the pack shown in the middle window
 var _hands_before := ""     # the hands style to put back when you leave (auto sabers)
 var _placed := false        # the track was laid out with the windows
+var _stage: Node3D          # the Rhythm world's surroundings, laid out with the track
+var _swapped := {}          # what the stage changed in the main scene, to put back
 var _selected := "free"     # the song chosen there ("free" for free play)
 var _mode := "Standard"     # its mode (a custom song's characteristic)
 var _song_cache = null      # _songs() as last read; null to read the folder again
@@ -269,6 +273,8 @@ func lib_ready(lib) -> void:
 	lib.watch(self, "controls", _controls_here, _controls_gone)
 	lib.watch(self, "hands", _hands_here, _hands_gone)
 	lib.follow(self, "projects", "project_changed", _on_world_changed)
+	if _projects() != null and in_world():  # loaded while already in the Rhythm world
+		_stage_on()
 	lib.touch(self)
 
 
@@ -300,6 +306,7 @@ func _on_info_changed(module_name: String) -> void:
 func _exit_tree() -> void:
 	if _lib and _lib.info_changed.is_connected(_on_info_changed):
 		_lib.info_changed.disconnect(_on_info_changed)
+	_stage_off()
 	for box in _hidden_boxes:
 		if is_instance_valid(box):
 			box.visible = true
@@ -867,12 +874,107 @@ func _leave(_request: Dictionary) -> Dictionary:
 func _on_world_changed(project: String, _folder: String) -> void:
 	if project == WORLD:
 		_sabers_on()
+		_stage_on()
 		_show_windows.call_deferred()
 	else:
 		if running:
 			_stop({})
 		_hide_windows()
 		_hands_back()
+		_stage_off()
+
+
+# --- The Rhythm world's surroundings -----------------------------------------------
+# In the Rhythm world the main scene's sky, sun and floor give way to a dark
+# stage of our own: a night sky, a dim sun, a dark ground and runway, the
+# lanes edged in the two note colours, and glowing frames down the track.
+# Everything it changed goes back when you leave or the module unloads.
+# Glowing (emissive) materials, no screen-wide glow, and one draw per
+# colour (MultiMesh), to stay light on the Quest 1.
+
+const STAGE_SKY := Color(0.01, 0.01, 0.035)
+const STAGE_AMBIENT := Color(0.3, 0.3, 0.42)
+const STAGE_SUN := 0.35          # the sun's energy while the stage is up
+const STAGE_FRAMES := 6          # glowing frames down the track
+const STAGE_FRAME_GAP := 3.5     # metres between them
+
+
+func _stage_on() -> void:
+	if _stage != null:
+		return
+	var scene := ctx["world"].get_parent() as Node if ctx.get("world") else null
+	if scene:
+		var env := scene.get_node_or_null("WorldEnvironment") as WorldEnvironment
+		if env:
+			_swapped["environment"] = [env, env.environment]
+			var night := Environment.new()
+			night.background_mode = Environment.BG_COLOR
+			night.background_color = STAGE_SKY
+			night.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+			night.ambient_light_color = STAGE_AMBIENT
+			env.environment = night
+		var sun := scene.get_node_or_null("Sun") as DirectionalLight3D
+		if sun:
+			_swapped["sun"] = [sun, sun.light_energy]
+			sun.light_energy = STAGE_SUN
+		var ground := scene.get_node_or_null("Floor") as Node3D
+		if ground:
+			_swapped["floor"] = [ground, ground.visible]
+			ground.visible = false
+	_stage = Node3D.new()
+	_stage.name = "stage"
+	add_child(_stage)
+	_stage.global_transform = _track.global_transform
+	var dark := _flat(Color(0.03, 0.03, 0.05))
+	var runway := _flat(Color(0.06, 0.06, 0.09))
+	var length := -SPAWN_Z + 4.0
+	_stage_box(Vector3(60.0, 0.02, 60.0), Vector3(0.0, -0.03, 0.0), dark)  # the ground
+	_stage_box(Vector3(LANE_W * 4.0 + 0.5, 0.02, length), Vector3(0.0, -0.015, 2.0 - length / 2.0), runway)
+	_stage_box(Vector3(2.4, 0.02, 2.4), Vector3(0.0, -0.01, 0.0), runway)  # where you stand
+	# The lanes' edges: blue on the left, red on the right.
+	for side in [-1, 1]:
+		_stage_box(Vector3(0.04, 0.02, length), Vector3(side * (LANE_W * 2.0 + 0.25), 0.0, 2.0 - length / 2.0), _mat["l" if side < 0 else "r"])
+	# Frames over the track: two posts and a bar each, in one MultiMesh.
+	var unit := BoxMesh.new()
+	unit.size = Vector3.ONE
+	var frames := MultiMesh.new()
+	frames.transform_format = MultiMesh.TRANSFORM_3D
+	frames.mesh = unit
+	frames.instance_count = STAGE_FRAMES * 3
+	for i in STAGE_FRAMES:
+		var z := HIT_Z - 3.0 - i * STAGE_FRAME_GAP
+		frames.set_instance_transform(i * 3, Transform3D(Basis.from_scale(Vector3(0.06, 3.2, 0.06)), Vector3(-2.2, 1.6, z)))
+		frames.set_instance_transform(i * 3 + 1, Transform3D(Basis.from_scale(Vector3(0.06, 3.2, 0.06)), Vector3(2.2, 1.6, z)))
+		frames.set_instance_transform(i * 3 + 2, Transform3D(Basis.from_scale(Vector3(4.46, 0.06, 0.06)), Vector3(0.0, 3.2, z)))
+	var frame_node := MultiMeshInstance3D.new()
+	frame_node.multimesh = frames
+	frame_node.material_override = _mat["spike"]
+	frame_node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_stage.add_child(frame_node)
+
+
+func _stage_box(size: Vector3, at: Vector3, material: Material) -> void:
+	var box := BoxMesh.new()
+	box.size = size
+	var m := MeshInstance3D.new()
+	m.mesh = box
+	m.material_override = material
+	m.position = at
+	m.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_stage.add_child(m)
+
+
+func _stage_off() -> void:
+	if _swapped.has("environment") and is_instance_valid(_swapped["environment"][0]):
+		_swapped["environment"][0].environment = _swapped["environment"][1]
+	if _swapped.has("sun") and is_instance_valid(_swapped["sun"][0]):
+		_swapped["sun"][0].light_energy = _swapped["sun"][1]
+	if _swapped.has("floor") and is_instance_valid(_swapped["floor"][0]):
+		_swapped["floor"][0].visible = _swapped["floor"][1]
+	_swapped.clear()
+	if _stage != null and is_instance_valid(_stage):
+		_stage.queue_free()
+	_stage = null
 
 
 # Auto sabers: in the game you hold sabers; back out, the hands module's
@@ -1273,6 +1375,8 @@ func _place_track() -> void:
 	if origin:
 		floor_y = origin.global_position.y
 	_track.global_transform = Transform3D(Basis(Vector3.UP, yaw), Vector3(cam.global_position.x, floor_y, cam.global_position.z))
+	if _stage != null:
+		_stage.global_transform = _track.global_transform
 
 
 # Where on the track the track's transform is (for beatsaber_path).
