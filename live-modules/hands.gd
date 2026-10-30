@@ -174,6 +174,8 @@ func _apply_visible() -> void:
 
 
 func _refresh() -> void:
+	if _lib:
+		_lib.touch(self)  # the Settings window shows the new values
 	_apply_colours()
 	_apply_visible()
 	for h in _hands:

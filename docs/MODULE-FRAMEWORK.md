@@ -141,6 +141,11 @@ seen on the headset yet.
 | physics | Batch 1. Bodies come back when a thing joins the world (no 1 s scan); idle when nothing is physical; ground follows landscape through lib; `_find` is lib's `world_node`. PC (zz_physics, 13) |
 | jelly | Batch 1. Off without an avatar, on when it loads (`lib.watch`). PC (zz_jelly, 13) |
 | hands | Batch 1. No `module()` lookups per frame; idle while hidden, with beatsaber, or without controls. PC (zz_hands, 14) |
+| vrui | Batch 2 (signals only; its own polling comes later). `panel_shown(id_panel, on)`, `page_changed(id_panel, page)`, `panel_changed(id_panel)`. PC (zz_vrui, 8) |
+| settings | Batch 2. No 1 s scan: draws when the window opens, and while open when a module comes, goes or calls `lib.touch(self)`. Modules with settings must call `lib.touch(self)` when a value changes outside the window (hands does; controls, avatar, tts, vtt, vrui, joints, agent_settings still to do). PC (zz_settings, 13) |
+| library | Batch 2. Tabs through `page_changed`; runs only while a model waits for its download. PC (zz_library, 0 failed) |
+| landscape | Batch 2. Physics only while it's the chosen tool; the ground is redrawn 20 times a second while painting, not every tick. PC (zz_landscape, 7) |
+| paths | Batch 2. No per-frame landscape check (`lib.watch`/`follow`); aiming only while chosen. PC (zz_paths, 8) |
 | grab, inspect, multi, prefabs, shapes, textures, tools, joints, doors | Waiting for the undo-groups work to land, to avoid clashing edits |
 | save, pause | Being changed for the stutter; their rewrite comes after |
 | everything else | Not started |
