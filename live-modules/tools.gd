@@ -15,7 +15,20 @@ extends SlopitectModule
 #   tool_trigger(down: bool) the "point" action (the right trigger), unless
 #                            you're pointing at a panel or a question is open
 # Any module can add to the shared undo list with
-# push_undo(label, undo: Callable, redo: Callable).
+# push_undo(label, undo: Callable, redo: Callable). Changes made between
+# undo_batch_begin(label) and undo_batch_end() are one undo (undone newest
+# first, redone oldest first), so a change made of many is one press;
+# undo_batch_end(undo, redo) instead replaces what was pushed inside with
+# that one pair (for a change that knows how to take itself back whole).
+# quiet(work) runs work with nothing it changes going on the list (putting
+# back a saved world).
+#
+# A thing's delete is undone whole: a module that keeps something about a
+# thing by its name (its joints, door, texture, physics, switches, group)
+# has thing_state(name) -> Dictionary ({} for nothing), thing_forget(name)
+# and thing_restore(name, state). Whatever deletes a thing calls
+# thing_snapshot(name) first, then thing_removed(name, snapshot, respawn,
+# remove) with the commands that make it again and take it away.
 
 const PANEL := "tools"
 const SCAN_SECONDS := 0.5
@@ -30,6 +43,10 @@ var _tools := {}  # id -> the module
 var _signature := ""  # what the panel was last built from
 var _undo: Array = []  # [{label, undo, redo}], newest last
 var _redo: Array = []
+var _batch: Array = []  # [label, [entries]] while a batch is open
+var _batch_depth := 0
+var _stepping := false  # while an undo or redo runs, its own changes add nothing
+var _world_folder := ""  # the save module's folder: a new one (another project) empties the lists
 var _trigger_down := false
 var _since_scan := SCAN_SECONDS
 
@@ -65,7 +82,135 @@ func _process(delta: float) -> void:
 # --- Shared undo -------------------------------------------------------------------
 
 func push_undo(label: String, undo: Callable, redo: Callable) -> void:
-	_undo.append({"label": label, "undo": undo, "redo": redo})
+	if _stepping:
+		return  # an undo putting a thing back through a command that keeps its own undo
+	if _batch_depth > 0:
+		_batch[1].append({"label": label, "undo": undo, "redo": redo})
+		return
+	_add({"label": label, "undo": undo, "redo": redo})
+
+
+# Batches nest: only the outermost one's label is kept.
+func undo_batch_begin(label: String) -> void:
+	if _stepping:
+		return
+	if _batch_depth == 0:
+		_batch = [label, []]
+	_batch_depth += 1
+
+
+func undo_batch_end(undo := Callable(), redo := Callable()) -> void:
+	if _batch_depth == 0:
+		return
+	_batch_depth -= 1
+	if _batch_depth > 0:
+		return
+	var label: String = _batch[0]
+	var entries: Array = _batch[1]
+	_batch = []
+	if undo.is_valid() and redo.is_valid():
+		_add({"label": label, "undo": undo, "redo": redo})
+	elif entries.size() == 1:
+		_add(entries[0])
+	elif entries.size() > 1:
+		var undo_all := func():
+			for i in range(entries.size() - 1, -1, -1):
+				if (entries[i]["undo"] as Callable).is_valid():
+					(entries[i]["undo"] as Callable).call()
+		var redo_all := func():
+			for entry in entries:
+				if (entry["redo"] as Callable).is_valid():
+					(entry["redo"] as Callable).call()
+		_add({"label": label, "undo": undo_all, "redo": redo_all})
+
+
+func quiet(work: Callable) -> Variant:
+	var was := _stepping
+	_stepping = true
+	var result = work.call()
+	_stepping = was
+	return result
+
+
+# --- A deleted thing, undone whole -----------------------------------------------------
+
+func thing_snapshot(node_name: String) -> Dictionary:
+	var snapshot := {"modules": {}}
+	for child in ctx["modules"].get_children():
+		if child.has_method("thing_state"):
+			var state = child.call("thing_state", node_name)
+			if typeof(state) == TYPE_DICTIONARY and not state.is_empty():
+				snapshot["modules"][String(child.name)] = state
+	var shapes: SlopitectModule = ctx["modules"].module("shapes")
+	if shapes and shapes.has_method("made_entry"):
+		var made: Dictionary = shapes.call("made_entry", node_name)
+		if not made.is_empty():
+			snapshot["made"] = made  # made again from its recipe, not respawned
+	return snapshot
+
+
+# Every module lets go of what it kept about a thing that's gone, so a new
+# thing given the same name starts clean.
+func thing_forget(node_name: String) -> void:
+	for child in ctx["modules"].get_children():
+		if child != self and child.has_method("thing_forget"):
+			child.call("thing_forget", node_name)
+
+
+func thing_removed(node_name: String, snapshot: Dictionary, respawn: Dictionary, remove: Dictionary) -> void:
+	if _stepping:
+		return  # an undo, a redo or a world being put back: it handles its own
+	thing_forget(node_name)
+	push_undo("delete " + node_name, _bring_back.bind(node_name, snapshot, respawn), _take_again.bind(node_name, remove))
+
+
+func _bring_back(node_name: String, snapshot: Dictionary, respawn: Dictionary) -> void:
+	if snapshot.has("made"):
+		var shapes: SlopitectModule = ctx["modules"].module("shapes")
+		if shapes == null:
+			push_error("Slopitect tools: %s can't come back: the shapes module isn't loaded" % node_name)
+			return
+		shapes.call("remake", snapshot["made"])
+	else:
+		var reply: Dictionary = ctx["server"].run(respawn)
+		if not reply.get("ok", false):
+			push_error("Slopitect tools: %s couldn't come back: %s" % [node_name, reply.get("error")])
+			return
+	_restore_when_back(node_name, snapshot["modules"])
+
+
+# A shape with a cut is made in the background, so its things wait for it.
+func _restore_when_back(node_name: String, states: Dictionary) -> void:
+	var waited := 0.0
+	while _thing(node_name) == null and waited < 5.0:
+		await get_tree().process_frame
+		waited += get_process_delta_time()
+	if _thing(node_name) == null:
+		push_error("Slopitect tools: %s didn't come back, so its joints, textures and the rest weren't put back" % node_name)
+		return
+	for module_name in states:
+		var module: SlopitectModule = ctx["modules"].module(module_name)
+		if module and module.has_method("thing_restore"):
+			module.call("thing_restore", node_name, states[module_name])
+
+
+func _take_again(node_name: String, remove: Dictionary) -> void:
+	ctx["server"].run(remove)
+	thing_forget(node_name)
+
+
+func _thing(node_name: String) -> Node3D:
+	if node_name.is_empty() or node_name.validate_node_name() != node_name:
+		return null
+	var world: Node3D = ctx["world"]
+	var node := world.get_node_or_null(NodePath(node_name)) as Node3D
+	if node == null and world.has_node("PolyHaven"):
+		node = world.get_node("PolyHaven").get_node_or_null(NodePath(node_name)) as Node3D
+	return node
+
+
+func _add(entry: Dictionary) -> void:
+	_undo.append(entry)
 	if _undo.size() > MAX_UNDO:
 		_undo.pop_front()
 	_redo.clear()
@@ -88,7 +233,9 @@ func _step(from: Array, to: Array, key: String, done: String) -> Dictionary:
 	if from.is_empty():
 		return {"ok": false, "error": "nothing to %s" % key}
 	var entry: Dictionary = from.pop_back()
+	_stepping = true
 	(entry[key] as Callable).call()
+	_stepping = false
 	to.append(entry)
 	_signature = ""
 	print("Slopitect tools: %s \"%s\"" % [done, entry["label"]])
@@ -98,6 +245,16 @@ func _step(from: Array, to: Array, key: String, done: String) -> Dictionary:
 # --- Tools ---------------------------------------------------------------------------
 
 func _scan() -> void:
+	var save: SlopitectModule = ctx["modules"].module("save")
+	var folder: String = save.call("folder") if save and save.has_method("folder") else ""
+	if folder != _world_folder:
+		if not _world_folder.is_empty() and not folder.is_empty() and not (_undo.is_empty() and _redo.is_empty()):
+			print("Slopitect tools: another world (%s): the undo list is for the last one, so it's emptied" % folder)
+			_undo.clear()
+			_redo.clear()
+			_signature = ""
+		if not folder.is_empty():
+			_world_folder = folder
 	var found := {}
 	var infos := {}
 	for child in ctx["modules"].get_children():

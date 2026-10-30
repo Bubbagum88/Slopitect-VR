@@ -125,6 +125,45 @@ const IMAGE_TYPES := ["png", "jpg", "jpeg", "webp"]
 const IMAGE_PX := 160  # a button's picture is shrunk to this many pixels across, at most
 const MAX_IMAGES := 120  # pictures kept loaded; more and the oldest go
 
+# For other modules (connect with lib.follow, never by checking a panel's
+# state every frame): a window opened or closed, its tab changed, or it
+# was added, changed or removed with the ui_* commands.
+signal panel_shown(id_panel: String, on: bool)
+signal page_changed(id_panel: String, page: String)
+signal panel_changed(id_panel: String)
+signal focus_changed  # the focused window or input box (focus(), focused_window()) may have changed
+var _reported := {}  # id_panel -> visible, as panel_shown last told it
+var _lib: SlopitectModule
+var _apps_due := false  # the Menu's tiles are looked at again at the end of this frame
+
+
+# The Menu's tiles (every module's menu_info(), lit while their window is
+# open) are looked at again when a module comes, goes or calls lib.touch(),
+# and when a window opens, closes or changes.
+func lib_ready(lib) -> void:
+	_lib = lib
+	if lib == null:
+		return
+	for sig in ["module_loaded", "module_unloaded", "info_changed"]:
+		lib.follow(self, "lib", sig, _apps_soon)
+	for sig in ["panel_shown", "panel_changed"]:
+		if not is_connected(sig, _apps_soon):
+			connect(sig, _apps_soon)
+	_apps_soon()
+
+
+func _apps_soon(_a = null, _b = null) -> void:
+	if _apps_due:
+		return
+	_apps_due = true
+	_apps_now.call_deferred()
+
+
+func _apps_now() -> void:
+	_apps_due = false
+	if is_inside_tree():
+		_scan_apps()
+
 var panels: Array = []  # [panel dictionaries], see _check_panel
 # While a question from the confirm module is up, the pointer only works on
 # it, so no panel can sit in front of it or be pressed instead.
@@ -225,8 +264,18 @@ func setup() -> String:
 		if panel["place"] in ["front", "follow"]:
 			panel["visible"] = false
 		_build(panel["id_panel"])
+		_reported[panel["id_panel"]] = panel["visible"]
 	_focus_first_input()
 	return ""
+
+
+# Tells panel_shown when a window's visible changed since it was last told.
+func _tell(id_panel: String) -> void:
+	var index := _index_of(id_panel)
+	var on: bool = index != -1 and panels[index]["visible"]
+	if _reported.get(id_panel, false) != on:
+		_reported[id_panel] = on
+		panel_shown.emit(id_panel, on)
 
 
 # The wrist panel, laser and ray hang off the controllers, not this node, so
@@ -285,10 +334,11 @@ func _physics_process(_delta: float) -> void:
 
 func _process(delta: float) -> void:
 	_follow(delta)
-	_since_apps += delta
-	if _since_apps >= APPS_SECONDS:
-		_since_apps = 0.0
-		_scan_apps()
+	if _lib == null:  # with lib, the Menu's tiles are looked at again on events
+		_since_apps += delta
+		if _since_apps >= APPS_SECONDS:
+			_since_apps = 0.0
+			_scan_apps()
 	_since_poll += delta
 	if _since_poll < POLL_SECONDS:
 		return
@@ -589,6 +639,7 @@ func _set_visible(panel: Dictionary, on: bool) -> void:
 		_show_window_focus()  # the next window you used before it has the focus now
 	if not panel["place"] in ["front", "follow"]:
 		_save()  # panels that open in front always start hidden, so aren't saved for this
+	_tell(panel["id_panel"])
 
 
 # In front of you, at the panel's distance and height, facing your eyes and
@@ -635,6 +686,8 @@ func _open_menu(from: String, to: String) -> Dictionary:
 	opener["visible"] = false
 	_holders[from].visible = false
 	_set_pointable(_holders[from], false)
+	_tell(from)
+	_tell(to)
 	return {"ok": true}
 
 
@@ -814,6 +867,7 @@ func _set_page(panel: Dictionary, page: String) -> void:
 	panel["page"] = page
 	_save()
 	_build(panel["id_panel"])
+	page_changed.emit(panel["id_panel"], page)
 
 
 func _page_command(request: Dictionary) -> Dictionary:
@@ -988,6 +1042,7 @@ func _max_length(key: String) -> int:
 func _set_focus(key: String) -> void:
 	var before := _focus
 	_focus = key
+	focus_changed.emit()
 	for k in [before, key]:
 		if not k.is_empty():
 			var parts: PackedStringArray = k.split("/")
@@ -1113,6 +1168,9 @@ func _remove(request: Dictionary) -> Dictionary:
 			_live_text.erase(key)
 	_following.erase(removed["id_panel"])
 	_save()
+	panel_changed.emit(removed["id_panel"])
+	_tell(removed["id_panel"])
+	_reported.erase(removed["id_panel"])
 	return {"ok": true, "removed": removed["id_panel"]}
 
 
@@ -1190,11 +1248,15 @@ func _reset(request: Dictionary) -> Dictionary:
 	if not request.has("id_panel"):
 		for panel in panels:
 			_drop_holder(panel["id_panel"])
+		var before := _reported.keys()
 		panels = defaults
 		_focus = ""
 		for panel in panels:
 			_build(panel["id_panel"])
 		_save()
+		for id_panel in before + panels.map(func(p): return p["id_panel"]):
+			panel_changed.emit(id_panel)
+			_tell(id_panel)
 		return {"ok": true, "panels": panels.size()}
 	var id_panel := str(request["id_panel"])
 	for panel in defaults:
@@ -1302,6 +1364,8 @@ func _load_config() -> void:
 func _changed(id_panel: String, reply: Dictionary) -> Dictionary:
 	_save()
 	_build(id_panel)
+	panel_changed.emit(id_panel)
+	_tell(id_panel)
 	return reply
 
 
@@ -2304,6 +2368,7 @@ func focused_window() -> String:
 
 # Lights the focused window's edge, and puts the others' back.
 func _show_window_focus() -> void:
+	focus_changed.emit()
 	var focused := focused_window()
 	for id_panel in _views:
 		var style: StyleBoxFlat = _views[id_panel].get("frame_style")

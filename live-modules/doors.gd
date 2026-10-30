@@ -53,7 +53,10 @@ func _load() -> void:
 	_doors.clear()
 	if not FileAccess.file_exists(_file):
 		return
-	var data = JSON.parse_string(FileAccess.get_file_as_string(_file))
+	_read(JSON.parse_string(FileAccess.get_file_as_string(_file)))
+
+
+func _read(data) -> void:
 	if typeof(data) != TYPE_DICTIONARY:
 		return
 	for id in data:
@@ -74,6 +77,13 @@ func _load() -> void:
 
 
 func _save() -> void:
+	DirAccess.make_dir_recursive_absolute(_file.get_base_dir())
+	var f := FileAccess.open(_file, FileAccess.WRITE)
+	if f:
+		f.store_string(JSON.stringify(_written(), "\t"))
+
+
+func _written() -> Dictionary:
 	var out := {}
 	for id in _doors:
 		var d: Dictionary = _doors[id]
@@ -82,10 +92,63 @@ func _save() -> void:
 			rest[n] = var_to_str(d["rest"][n])
 		var p: Vector3 = d["pivot"]
 		out[id] = {"parts": d["parts"], "pivot": [p.x, p.y, p.z], "axis": d["axis"], "angle": d["angle"], "rest": rest}
-	DirAccess.make_dir_recursive_absolute(_file.get_base_dir())
-	var f := FileAccess.open(_file, FileAccess.WRITE)
-	if f:
-		f.store_string(JSON.stringify(out, "\t"))
+	return out
+
+
+# A door (closed), or none (null): it closes before it goes.
+func _put_door(id: String, d) -> void:
+	if _doors.has(id):
+		_doors[id]["t"] = 0.0
+		_place(_doors[id])
+		_doors.erase(id)
+	if d != null:
+		_doors[id] = (d as Dictionary).duplicate(true)
+		_doors[id]["open"] = false
+		_doors[id]["t"] = 0.0
+		_place(_doors[id])
+	_save()
+
+
+func _undo(label: String, id: String, before, after) -> void:
+	var tools: SlopitectModule = ctx["modules"].module("tools")
+	if tools:
+		tools.call("push_undo", label, _put_door.bind(id, before), _put_door.bind(id, after))
+
+
+# --- For the save module, and for undoing a delete (tools.gd) ----------------------------
+
+func get_doors() -> Dictionary:
+	return _written()
+
+
+func set_doors(data) -> void:
+	if typeof(data) != TYPE_DICTIONARY:
+		return
+	for id in _doors.keys():
+		_put_door(id, null)
+	_read(data)
+	_save()
+
+
+func thing_state(node_name: String) -> Dictionary:
+	var found := {}
+	for id in _doors:
+		if node_name in _doors[id]["parts"]:
+			found[id] = _doors[id].duplicate(true)
+	return {"doors": found} if not found.is_empty() else {}
+
+
+func thing_forget(node_name: String) -> void:
+	for id in _doors.keys():
+		if node_name in _doors[id]["parts"]:
+			_put_door(id, null)
+
+
+func thing_restore(_node_name: String, state: Dictionary) -> void:
+	var doors = state.get("doors", {})
+	for id in doors:
+		if not _doors.has(id):
+			_put_door(id, doors[id])
 
 
 func _place(d: Dictionary) -> void:
@@ -203,12 +266,10 @@ func _add_command(request: Dictionary) -> Dictionary:
 	var angle = request.get("angle", 100.0)
 	if not typeof(angle) in [TYPE_INT, TYPE_FLOAT] or absf(angle) > 180:
 		return {"ok": false, "error": "\"angle\" must be -180 to 180"}
-	if _doors.has(id):
-		_doors[id]["open"] = false
-		_doors[id]["t"] = 0.0
-		_place(_doors[id])
-	_doors[id] = {"parts": parts, "pivot": pivot, "axis": axis, "angle": float(angle), "rest": rest, "open": false, "t": 0.0}
-	_save()
+	var before = _doors[id].duplicate(true) if _doors.has(id) else null
+	var door := {"parts": parts, "pivot": pivot, "axis": axis, "angle": float(angle), "rest": rest, "open": false, "t": 0.0}
+	_put_door(id, door)
+	_undo("door " + id, id, before, door.duplicate(true))
 	return {"ok": true, "door": id}
 
 
@@ -227,10 +288,9 @@ func _remove_command(request: Dictionary) -> Dictionary:
 	var id = request.get("name")
 	if typeof(id) != TYPE_STRING or not _doors.has(id):
 		return {"ok": false, "error": "no door named %s" % JSON.stringify(id)}
-	_doors[id]["t"] = 0.0
-	_place(_doors[id])
-	_doors.erase(id)
-	_save()
+	var before: Dictionary = _doors[id].duplicate(true)
+	_put_door(id, null)
+	_undo("remove door " + id, id, before, null)
 	return {"ok": true}
 
 
