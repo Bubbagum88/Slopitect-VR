@@ -8,17 +8,18 @@ extends SlopitectModule
 # hide, and delete. Hidden things can't be pointed at, so "Show hidden"
 # brings them all back. Delete is one undo in the tool window.
 # The switches are kept with the world (the save module keeps them in each
-# project's saves and checkpoints).
+# project's saves and checkpoints). A thing made or put back gets its
+# switches as it joins the world (lib's thing_entered); the outline is drawn
+# only while Inspect is the chosen tool.
 
 const REACH := 20.0  # metres the pointer reaches
-const SCAN_SECONDS := 0.5
 const NO_GRAB := "slopitect_no_grab"  # meta the grab module checks
 
 var settings := {}  # thing's name -> {"grabbable": false, "hidden": true}; only switches that aren't the default
 var _selected := ""
 var _chosen := false  # the tool is chosen in the tool window
 var _outline: MeshInstance3D
-var _since_scan := 0.0
+var _lib: SlopitectModule
 
 
 func setup() -> String:
@@ -31,6 +32,7 @@ func setup() -> String:
 	_outline.top_level = true
 	_outline.visible = false
 	add_child(_outline)
+	set_process(false)
 	register("inspect_select", _select_command, "select a shape or model to change: name (\"\" for none)")
 	register("inspect_set", _set_command, "change a thing's switches: optional name (default: the selected one), grabbable (true/false), hidden (true/false)")
 	register("inspect_delete", _delete_command, "delete a shape or model (one undo in the tool window): optional name (default: the selected one)")
@@ -49,11 +51,20 @@ func _exit_tree() -> void:
 			node.remove_meta(NO_GRAB)
 
 
-func _process(delta: float) -> void:
-	_since_scan += delta
-	if _since_scan >= SCAN_SECONDS:
-		_since_scan = 0.0
-		_apply_all()  # things made or put back since keep their switches
+func lib_ready(lib) -> void:
+	_lib = lib
+	if lib:
+		lib.follow(self, "lib", "thing_entered", _joined)
+		_apply_all()
+
+
+# Things made or put back keep their switches.
+func _joined(node: Node3D) -> void:
+	if settings.has(String(node.name)):
+		_apply(String(node.name))
+
+
+func _process(_delta: float) -> void:
 	_draw_outline()
 
 
@@ -83,6 +94,9 @@ func tool_info() -> Dictionary:
 
 func tool_selected(on: bool) -> void:
 	_chosen = on
+	set_process(on)
+	if not on:
+		_draw_outline()  # takes the outline away
 
 
 func tool_trigger(down: bool) -> void:
@@ -125,41 +139,17 @@ func _line() -> String:
 
 # --- Things --------------------------------------------------------------------------
 
-# The shapes (the objects module's, under World) and placed models (under
-# World/PolyHaven, from the assets module), as the grab module finds them.
+# The shapes and placed models (lib's; none without it).
 func _things() -> Array:
-	var found := []
-	var world: Node3D = ctx["world"]
-	for child in world.get_children():
-		if child is MeshInstance3D:
-			found.append(child)
-		elif child.name == "PolyHaven":
-			found.append_array(child.get_children())
-	return found
+	return _lib.things() if _lib else []
 
 
-# A shape first, then a model, the same as the physics module.
 func _find(node_name) -> Node3D:
-	if typeof(node_name) != TYPE_STRING or node_name.is_empty() or node_name.validate_node_name() != node_name:
-		return null
-	var world: Node3D = ctx["world"]
-	var node := world.get_node_or_null(NodePath(node_name)) as Node3D
-	if node is MeshInstance3D:
-		return node
-	if world.has_node("PolyHaven"):
-		return world.get_node("PolyHaven").get_node_or_null(NodePath(node_name)) as Node3D
-	return null
+	return _lib.thing(node_name) if _lib else null
 
 
 func _box(thing: Node3D) -> AABB:
-	var box := AABB()
-	var first := true
-	var meshes: Array = [thing] if thing is MeshInstance3D else thing.find_children("*", "MeshInstance3D", true, false)
-	for mesh: MeshInstance3D in meshes:
-		var world_box := mesh.global_transform * mesh.get_aabb()
-		box = world_box if first else box.merge(world_box)
-		first = false
-	return box
+	return _lib.world_box(thing)
 
 
 func _physics_mode(node_name: String) -> String:

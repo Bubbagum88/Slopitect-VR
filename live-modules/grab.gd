@@ -14,6 +14,8 @@ extends SlopitectModule
 # together to make it bigger or smaller; it keeps its shape. Letting go
 # with either hand leaves it in the other. The whole hold, moves and resizes,
 # is one undo.
+# It runs each physics frame only while a hand holds something (the hand
+# speed for a throw is taken while held). Shapes and models are lib's.
 
 const REACH := 0.12  # metres from the hand to the thing's box
 const SPEED_FRAMES := 6  # hand speed is taken over this many frames
@@ -27,12 +29,21 @@ var _held := {}  # hand name -> {"node", "offset": Transform3D, "before": {name:
 # the point between the hands, in that hand's own directions}
 var _resize := {}
 var _trail := {"left": [], "right": []}  # recent [time, position] of each hand
+var _lib: SlopitectModule
 
 
 func setup() -> String:
+	set_physics_process(false)
 	register("grab_status", _status, "what each hand is holding")
 	register("grab_release", _release_command, "make a hand let go: hand (left or right; default both)")
 	return ""
+
+
+func lib_ready(lib) -> void:
+	_lib = lib
+	if lib == null:
+		for hand in _held.keys():
+			_let_go(hand)
 
 
 func _exit_tree() -> void:
@@ -67,6 +78,8 @@ func _physics_process(_delta: float) -> void:
 				_follow_both()
 			continue
 		(held["node"] as Node3D).global_transform = (ctx[hand] as Node3D).global_transform * held["offset"]
+	if _held.is_empty():
+		set_physics_process(false)
 
 
 # Both hands on one thing: it moves and turns with the hand that took it
@@ -126,6 +139,8 @@ func _grip(hand: String) -> bool:
 		return true
 	_held[hand] = {"node": best, "offset": (ctx[hand] as Node3D).global_transform.affine_inverse() * best.global_transform,
 		"before": _where(_moving_with(best))}
+	_trail[hand].clear()
+	set_physics_process(true)
 	var physics: SlopitectModule = ctx["modules"].module("physics")
 	if physics:
 		physics.call("hold", best, true)
@@ -194,24 +209,13 @@ func _hand_speed(hand: String) -> Vector3:
 	return (trail[-1][1] - trail[0][1]) / (trail[-1][0] - trail[0][0])
 
 
-# The shapes (the objects module's, under World) and placed models (under
-# World/PolyHaven, from the assets module).
+# The shapes and placed models (lib's; none without it).
 func _grabbable() -> Array:
-	var found := []
-	var world: Node3D = ctx["world"]
-	for child in world.get_children():
-		if child is MeshInstance3D:
-			found.append(child)
-		elif child.name == "PolyHaven":
-			found.append_array(child.get_children())
-	return found
+	return _lib.things() if _lib else []
 
 
 func _thing(node_name: String) -> Node3D:
-	for thing in _grabbable():
-		if String(thing.name) == node_name:
-			return thing
-	return null
+	return _lib.thing(node_name) if _lib else null
 
 
 # The names that move with node: its group in multi.gd, or just itself.
@@ -240,14 +244,7 @@ func _distance_to(thing: Node3D, at: Vector3) -> float:
 
 
 func _box(thing: Node3D) -> AABB:
-	var box := AABB()
-	var first := true
-	var meshes: Array = [thing] if thing is MeshInstance3D else thing.find_children("*", "MeshInstance3D", true, false)
-	for mesh: MeshInstance3D in meshes:
-		var world_box := mesh.global_transform * mesh.get_aabb()
-		box = world_box if first else box.merge(world_box)
-		first = false
-	return box
+	return _lib.world_box(thing)
 
 
 func _status(_request: Dictionary) -> Dictionary:

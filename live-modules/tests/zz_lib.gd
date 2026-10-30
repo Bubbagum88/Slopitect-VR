@@ -127,6 +127,24 @@ func _go() -> void:
 	var box: AABB = _lib.world_box(shape)
 	_check("world_box", box.get_center().is_equal_approx(Vector3(1, 2, 3)) and box.size.is_equal_approx(Vector3.ONE), box)
 
+	# thing_entered: a shape or model once it's in place; not other World children.
+	var joined := []
+	await get_tree().process_frame  # the box and model above have had theirs
+	_lib.thing_entered.connect(func(n): joined.append(String(n.name)))
+	var later := MeshInstance3D.new()
+	later.name = "zz_later"
+	later.mesh = BoxMesh.new()
+	world.add_child(later)
+	var later_model := Node3D.new()
+	later_model.name = "zz_later_model"
+	holder.add_child(later_model)
+	var not_thing := Node3D.new()
+	not_thing.name = "zz_not_thing"
+	world.add_child(not_thing)
+	_check("thing_entered waits until in place", joined.is_empty())
+	await get_tree().process_frame
+	_check("thing_entered for a shape and a model only", joined == ["zz_later", "zz_later_model"], joined)
+
 	# Files.
 	var path: String = _lib.home() + "/zz_lib_test.json"
 	DirAccess.make_dir_recursive_absolute(_lib.home())
