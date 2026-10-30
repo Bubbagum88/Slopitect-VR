@@ -33,6 +33,7 @@ const PANEL := "pause"
 const LOAD_PANEL := "pause_load"
 const WORLDS_PANEL := "pause_worlds"
 const HAND_PANEL := "hand_menu"
+const HAND_COLUMNS := 4  # the hand menu's buttons, four to a row
 const WRIST_PANEL := "wrist"  # the window module's own small hand panel, folded into the hand menu
 const MENUS := [PANEL, LOAD_PANEL, "pause_worlds"]
 const PAGES := {"main": PANEL, "load": LOAD_PANEL, "worlds": "pause_worlds"}
@@ -370,7 +371,7 @@ func _build_hand() -> void:
 		buttons.append(_button("m_" + str(info["id"]).left(30), str(info["label"]), action, "button", HAND_BUTTON))
 	for button in _wrist_buttons():
 		buttons.append(_button("w_" + str(button["id"]).left(30), str(button.get("label", button["id"])), button["action"], "button", HAND_BUTTON))
-	var elements := [{"type": "grid", "id": "buttons", "columns": 2, "children": buttons}]
+	var elements := [{"type": "grid", "id": "buttons", "columns": HAND_COLUMNS, "children": buttons}]
 	for status in _hand_statuses():
 		elements.append(_text("st_" + str(status["id"]).left(30), str(status["text"]), str(status.get("color", "muted")), 24))
 	var reply: Dictionary
