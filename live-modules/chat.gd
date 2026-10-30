@@ -31,13 +31,16 @@ const KEY := 0.045
 const GAP := 0.007
 const ROWS_OF_KEYS := ["1234567890-", "qwertyuiop'", "asdfghjkl?!", "zxcvbnm,./:"]
 const POLL_SECONDS := 0.5
-const CHECK_SECONDS := 1.0
 
 var _screen: PackedStringArray = []  # laid-out lines, oldest first
 var _seen: Array = []  # agent_status's events at the last look
 var _ui_id := 0
 var _since_poll := POLL_SECONDS
-var _since_check := CHECK_SECONDS
+var _lib: SlopitectModule
+
+# The conversation on the screen changed (transcript() has it); the terminal's
+# Chat mode follows this instead of asking twice a second.
+signal transcript_changed
 
 
 func setup() -> String:
@@ -64,18 +67,42 @@ func _exit_tree() -> void:
 		push_error("Slopitect chat: couldn't put the chat window back: %s" % reply.get("error"))
 
 
+# vrui can load after this, or be reloaded, and the panel can be put back to
+# its default: the window is filled again then (not checked every second).
+func lib_ready(lib) -> void:
+	_lib = lib
+	if lib == null:
+		return
+	lib.watch(self, "vrui", _ui_here)
+	lib.follow(self, "vrui", "panel_changed", _on_changed)
+
+
+func _ui_here(_ui_module: SlopitectModule) -> void:
+	_fill_soon()
+
+
+func _on_changed(id_panel: String) -> void:
+	if id_panel == PANEL:
+		_fill_soon()
+
+
+func _fill_soon() -> void:
+	_fill.call_deferred()
+
+
+func _fill() -> void:
+	if not is_inside_tree():
+		return
+	var ui := _ui()
+	var id := ui.get_instance_id() if ui != null else 0
+	if ui != null and (id != _ui_id or not _is_ours()):
+		_build_panel()
+	_ui_id = id
+
+
+# The agent has no signals yet (that's an APK change), so its events are
+# read twice a second; nothing else runs per frame.
 func _process(delta: float) -> void:
-	_since_check += delta
-	if _since_check >= CHECK_SECONDS:
-		_since_check = 0.0
-		# ui.gd can load after this, or be reloaded; the window is filled
-		# again on whichever one is there, and after the panel is put back
-		# to its default.
-		var ui := _ui()
-		var id := ui.get_instance_id() if ui != null else 0
-		if ui != null and (id != _ui_id or not _is_ours()):
-			_build_panel()
-		_ui_id = id
 	_since_poll += delta
 	if _since_poll >= POLL_SECONDS:
 		_since_poll = 0.0
@@ -134,6 +161,7 @@ func _lines(event: String) -> PackedStringArray:
 
 
 func _show_screen() -> void:
+	transcript_changed.emit()
 	var ui := _ui()
 	if ui == null or not ui.has_method("set_text"):
 		return

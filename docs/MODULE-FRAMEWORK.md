@@ -141,7 +141,12 @@ seen on the headset yet.
 | physics | Batch 1. Bodies come back when a thing joins the world (no 1 s scan); idle when nothing is physical; ground follows landscape through lib; `_find` is lib's `world_node`. PC (zz_physics, 13) |
 | jelly | Batch 1. Off without an avatar, on when it loads (`lib.watch`). PC (zz_jelly, 13) |
 | hands | Batch 1. No `module()` lookups per frame; idle while hidden, with beatsaber, or without controls. PC (zz_hands, 14) |
-| vrui | Batch 2 (signals only; its own polling comes later). `panel_shown(id_panel, on)`, `page_changed(id_panel, page)`, `panel_changed(id_panel)`. PC (zz_vrui, 8) |
+| vrui | Batch 2 (signals only; its own polling comes later). `panel_shown(id_panel, on)`, `page_changed(id_panel, page)`, `panel_changed(id_panel)`, `focus_changed`. PC (zz_vrui, 8) |
+| keyboard | Batch 2b. No 0.25 s check: looks again when a window opens, closes or changes, the focus moves, the terminal switches mode, or a module comes or goes. PC (zz_keyboard, 10) |
+| terminal | Batch 2b. `mode_changed(mode)`; no 0.25 s window check; Chat mode follows chat.gd's `transcript_changed`, and reads the agent itself only when chat.gd isn't loaded; idle otherwise. PC (zz_terminal, 9) |
+| chat | Batch 2b. `transcript_changed`; refills its window on vrui loading or its panel changing, not every second. Still reads agent_status twice a second: the agent has no signals (an APK change). PC (zz_chat, 4) |
+| tts | Batch 2b. Sound files checked only while there's speech to write or play; tells Settings when a value changes. Still reads the agent's replies twice a second (APK). PC (zz_voice) |
+| vtt | Batch 2b. Runs only while you talk, while words are turned into text, and until the hand menu shows the line; tells Settings when a value changes. PC (zz_voice, 8) |
 | settings | Batch 2. No 1 s scan: draws when the window opens, and while open when a module comes, goes or calls `lib.touch(self)`. Modules with settings must call `lib.touch(self)` when a value changes outside the window (hands does; controls, avatar, tts, vtt, vrui, joints, agent_settings still to do). PC (zz_settings, 13) |
 | library | Batch 2. Tabs through `page_changed`; runs only while a model waits for its download. PC (zz_library, 0 failed) |
 | landscape | Batch 2. Physics only while it's the chosen tool; the ground is redrawn 20 times a second while painting, not every tick. PC (zz_landscape, 7) |

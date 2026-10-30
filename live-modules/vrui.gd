@@ -131,6 +131,7 @@ const MAX_IMAGES := 120  # pictures kept loaded; more and the oldest go
 signal panel_shown(id_panel: String, on: bool)
 signal page_changed(id_panel: String, page: String)
 signal panel_changed(id_panel: String)
+signal focus_changed  # the focused window or input box (focus(), focused_window()) may have changed
 var _reported := {}  # id_panel -> visible, as panel_shown last told it
 
 var panels: Array = []  # [panel dictionaries], see _check_panel
@@ -1010,6 +1011,7 @@ func _max_length(key: String) -> int:
 func _set_focus(key: String) -> void:
 	var before := _focus
 	_focus = key
+	focus_changed.emit()
 	for k in [before, key]:
 		if not k.is_empty():
 			var parts: PackedStringArray = k.split("/")
@@ -2328,6 +2330,7 @@ func focused_window() -> String:
 
 # Lights the focused window's edge, and puts the others' back.
 func _show_window_focus() -> void:
+	focus_changed.emit()
 	var focused := focused_window()
 	for id_panel in _views:
 		var style: StyleBoxFlat = _views[id_panel].get("frame_style")
