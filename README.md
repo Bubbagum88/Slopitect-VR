@@ -250,10 +250,10 @@ Files, questions, voice and live code:
 | `files_move`, `files_copy` | `from`, `to` | `{"cmd":"files_copy","from":"/sdcard/Android/obb/some.obb","to":"extract/some.obb"}` |
 | `files_config` | `unblock` or `block` (a personal folder) | PC only: `{"cmd":"files_config","unblock":"/sdcard/Download/models"}` |
 | `confirm_status` | | the questions waiting for your answer in the headset |
-| `tts_say` | `text`, optional `voice` | `{"cmd":"tts_say","text":"Hello!"}` (the tts live module) |
+| `tts_say` | `text`, optional `voice` (one from `tts_voices`) | `{"cmd":"tts_say","text":"Hello!"}` (the tts live module) |
 | `tts_stop`, `tts_voices`, `tts_status` | | |
-| `tts_set` | any of `speak_replies`, `voice`, `rate`, `pitch`, `volume` | comfort settings, also in the headset's Settings window |
-| `tts_config` | any `tts_set` setting, `tts_engine` (`"app"` or `"sherpa"`), `tts_sherpa_voice` | from the PC only |
+| `tts_set` | any of `speak_replies`, `rate`, `volume`, `tts_sherpa_voice` (a voice in `voices/`) | comfort settings, also in the headset's Settings window |
+| `tts_config` | any `tts_set` setting; `tts_sherpa_voice` may be any folder | from the PC only |
 | `vtt_status` | | whether hold-to-talk works, and what it heard last (the vtt live module) |
 | `vtt_set` | `send_to_agent` | a comfort setting, also in the Settings window |
 | `vtt_config` | any of `vtt_engine`, `vtt_local_model`, `vtt_url`, `vtt_key`, `vtt_model`, `vtt_language`, `send_to_agent` | PC only, see below |
@@ -294,36 +294,29 @@ and no button can run them.
 
 Two live modules, loaded like the others with `code_load` and a Yes:
 `tts` (speech out) and `vtt` (hold-to-talk). Their comfort settings (speed,
-pitch, volume, voice, reading replies, sending words straight to the agent)
+volume, voice, reading replies, sending words straight to the agent)
 are in the headset's Settings window; the speech-to-text service and its
 key change only from the PC with `vtt_config`. Settings kept by the old
 built-in voice module (`user://voice.json`) are taken over the first time.
 
-The agent's replies are read aloud by the headset's speech engine, if it
-has one (`tts_status` shows how many voices it found). If it has none,
-a speech engine app has to be installed on the headset (for example
-[SherpaTTS](https://f-droid.org/en/packages/org.woheller69.ttsengine/),
-which works on the Quest 1).
-
-Or Slopitect makes the speech itself (`tts_engine` `"sherpa"`, from the PC)
-with [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx), built into the
-APK, from a Piper voice folder in `/sdcard/Slopitect/voices`. Each sentence
-is made while the one before it plays, into one continuous sound, so speech
-starts sooner and runs without gaps while the voice keeps up (not yet tried
-on the headset). A small English voice,
+The agent's replies are read aloud by Slopitect itself, with
+[sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx), built into the APK,
+from a Piper voice folder in `/sdcard/Slopitect/voices`. Each sentence is
+made while the one before it plays, into one continuous sound, without
+gaps while the voice keeps up. The headset's Android speech engine isn't
+used. A small English voice,
 [vits-piper-en_US-amy-low](https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-en_US-amy-low.tar.bz2):
 
 ```
 tar -xf "$env:USERPROFILE\Downloads\vits-piper-en_US-amy-low.tar.bz2" -C "$env:USERPROFILE\Downloads"
 .\adb shell mkdir -p /sdcard/Slopitect/voices
 .\adb push "$env:USERPROFILE\Downloads\vits-piper-en_US-amy-low" /sdcard/Slopitect/voices/
-.\slopi.ps1 '{"cmd":"tts_config","tts_engine":"sherpa"}'
 ```
 
 Any other Piper voice from the same
 [tts-models](https://github.com/k2-fsa/sherpa-onnx/releases/tag/tts-models)
-page is another folder next to it; `tts_sherpa_voice` (from the PC) says
-which one is used. Speed and volume apply; pitch doesn't.
+page is another folder next to it, and the Settings window's Voice choice
+(or `tts_set tts_sherpa_voice`) picks among them. Speed and volume apply.
 
 Hold-to-talk turns what you say into text in one of three ways.
 

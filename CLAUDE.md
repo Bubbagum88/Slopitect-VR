@@ -41,8 +41,8 @@ module work, [docs/MODULE-FRAMEWORK.md](docs/MODULE-FRAMEWORK.md) and
   the agent, the network, files, pairing or code stays PC only.
   Exception (the owner's choice, 2026-10-29): the speech voice changes in the
   headset (Settings window, `tts_set tts_sherpa_voice`), but only to a voice
-  folder already in `Slopitect/voices`; any other folder, and the engine,
-  stay PC only (`tts_config`).
+  folder already in `Slopitect/voices`; any other folder stays PC only
+  (`tts_config`).
   Exception (the owner's choice, 2026-10-29): the agent's budget and model
   change in the headset through `agent_budget` (the Settings window's Agent
   budget section, `agent_settings.gd`): `max_request_tokens`,
