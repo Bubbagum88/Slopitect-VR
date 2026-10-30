@@ -13,6 +13,7 @@ The modules each test loads, in order (the order matters: some load lib last on 
 | `zz_avatar.gd` | `controls vrui tts avatar lib zz_avatar` |
 | `zz_chat.gd` | `controls chat vrui lib zz_chat` |
 | `zz_controls.gd` | `controls lib landscape zz_controls` |
+| `zz_gaps.gd` | `lib controls vrui tools inspect shapes physics grab multi doors textures joints save projects prefabs zz_gaps` (FRESH=1 after an APK change: it checks objects.gd) |
 | `zz_hands.gd` | `hands lib controls zz_hands` |
 | `zz_holster.gd` | `controls vrui tools pause avatar holster lib zz_holster` |
 | `zz_jelly.gd` | `avatar jelly lib zz_jelly` |
@@ -28,6 +29,7 @@ The modules each test loads, in order (the order matters: some load lib last on 
 | `zz_projects.gd` | `save projects lib zz_projects` |
 | `zz_settings.gd` | `settings controls vrui hands lib zz_settings` |
 | `zz_terminal.gd` | `controls vrui chat terminal lib zz_terminal` |
+| `zz_undo.gd` | `lib controls vrui tools inspect shapes physics grab multi doors textures prefabs zz_undo` |
 | `zz_voice.gd` | `controls vrui tts vtt lib pause zz_voice` |
 | `zz_vrui.gd` | `controls vrui lib zz_vrui` |
 
