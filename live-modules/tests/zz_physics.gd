@@ -66,6 +66,27 @@ func _go() -> void:
 	await _r({"cmd": "physics_set", "name": "zz_cube", "mode": "off"})
 	_check("off: idle", not physics.is_physics_processing())
 	await _r({"cmd": "delete", "name": "zz_cube"})
+
+	# Something else frees a physical thing, or its body (the headset agent hit
+	# both): physics lets go at once, and a freed body is made again.
+	var lib = ctx["modules"].module("lib")
+	await _r({"cmd": "spawn", "shape": "box", "name": "zz_freed", "position": [0, 5, -2], "scale": [0.3, 0.3, 0.3]})
+	await _r({"cmd": "physics_set", "name": "zz_freed", "mode": "dynamic"})
+	await _frames(2)
+	lib.world_node("zz_freed").free()
+	await _frames(2)
+	_check("thing freed: let go, idle", not physics.is_physics_processing() and physics.body(lib.world_node("zz_freed")) == null)
+	await _r({"cmd": "physics_set", "name": "zz_freed", "mode": "off"})
+	await _r({"cmd": "spawn", "shape": "box", "name": "zz_body", "position": [0, 5, -2], "scale": [0.3, 0.3, 0.3]})
+	await _r({"cmd": "physics_set", "name": "zz_body", "mode": "dynamic"})
+	await _frames(2)
+	var old_body = physics.body(lib.world_node("zz_body"))
+	old_body.free()
+	await _frames(2)
+	var new_body = physics.body(lib.world_node("zz_body"))
+	_check("body freed: made again", new_body != null and is_instance_valid(new_body))
+	_check("push works on the new body", (await _r({"cmd": "physics_push", "name": "zz_body", "velocity": [0, 1, 0]})).get("ok", false))
+	# Unloaded with a body still there: nothing made again afterwards.
 	await _r({"cmd": "code_unload", "name": "physics"})
 	await _frames(2)
 	_check("unloaded cleanly", ctx["modules"].module("physics") == null

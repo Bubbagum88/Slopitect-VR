@@ -15,6 +15,7 @@ The modules each test loads, in order (the order matters: some load lib last on 
 | `zz_aimsg.gd` | `lib aimsg zz_aimsg` |
 | `zz_assets.gd` | `lib assets zz_assets` |
 | `zz_avatar.gd` | `controls vrui tts avatar lib zz_avatar` |
+| `zz_beatsaber_path.gd` | `lib beatsaber_path zz_beatsaber_path` |
 | `zz_chat.gd` | `controls chat vrui lib zz_chat` |
 | `zz_controls.gd` | `controls lib landscape zz_controls` |
 | `zz_gaps.gd` | `lib controls vrui tools inspect shapes physics grab multi doors textures joints save projects prefabs zz_gaps` (FRESH=1 after an APK change: it checks objects.gd) |
@@ -29,12 +30,14 @@ The modules each test loads, in order (the order matters: some load lib last on 
 | `zz_memory_world.gd` | `save projects memory lib zz_memory_world` |
 | `zz_menu.gd` | `controls vrui lib zz_menu` |
 | `zz_net.gd` | `lib net zz_net` |
-| `zz_paths.gd` | `paths lib landscape zz_paths` |
+| `zz_paths.gd` | `paths lib landscape tools zz_paths` |
 | `zz_perf.gd` | `lib perf zz_perf` |
 | `zz_physics.gd` | `physics lib landscape zz_physics` |
 | `zz_projects.gd` | `save projects lib zz_projects` |
 | `zz_settings.gd` | `settings controls vrui hands lib zz_settings` |
+| `zz_sweet_potato.gd` | `lib assets tools sweet_potato zz_sweet_potato` |
 | `zz_terminal.gd` | `controls vrui chat terminal lib zz_terminal` |
+| `zz_tool_front.gd` | `controls vrui tools paths lib tool_front zz_tool_front` |
 | `zz_undo.gd` | `lib controls vrui tools inspect shapes physics grab multi doors textures prefabs zz_undo` |
 | `zz_voice.gd` | `controls vrui tts vtt lib pause zz_voice` |
 | `zz_vrui.gd` | `controls vrui lib zz_vrui` |
