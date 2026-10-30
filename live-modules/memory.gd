@@ -485,14 +485,33 @@ func _config_command(request: Dictionary) -> Dictionary:
 
 # --- Worlds and files ----------------------------------------------------------------
 
-# The world is the current project (projects.gd keeps it in user://projects.json).
+# The world is the current project: projects.gd owns it, and says when it
+# changes (project_changed); without projects it's the default world.
+var _project := ""
+
+
+func lib_ready(lib) -> void:
+	if lib == null:
+		return
+	lib.watch(self, "projects", _projects_here, _projects_gone)
+	lib.follow(self, "projects", "project_changed", _on_project)
+
+
+func _projects_here(_projects: SlopitectModule) -> void:
+	var current: Dictionary = ctx["server"].run({"cmd": "projects_current"})
+	_project = current.get("name", "") if current.get("ok", false) else ""
+
+
+func _projects_gone(_projects: SlopitectModule) -> void:
+	_project = ""
+
+
+func _on_project(project: String, _folder: String) -> void:
+	_project = project
+
+
 func _current_world() -> String:
-	if ctx["modules"].module("projects") == null or not FileAccess.file_exists("user://projects.json"):
-		return DEFAULT_WORLD
-	var state = JSON.parse_string(FileAccess.get_file_as_string("user://projects.json"))
-	if typeof(state) == TYPE_DICTIONARY and _good_name(state.get("current")):
-		return state["current"]
-	return DEFAULT_WORLD
+	return _project if _good_name(_project) else DEFAULT_WORLD
 
 
 func _use_world(world_name: String) -> void:
