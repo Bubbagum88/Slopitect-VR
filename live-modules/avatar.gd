@@ -530,11 +530,9 @@ func _tts_gone(_old: SlopitectModule) -> void:
 
 
 func _read_engine() -> bool:
-	# The tts module plays speech itself on the headset, so it knows best.
+	# The tts module makes and plays all speech; without it nothing speaks.
 	var tts: SlopitectModule = _tts if _lib else ctx["modules"].module("tts")
-	if tts != null:
-		return tts.speaking()
-	return ProjectSettings.get_setting("audio/general/text_to_speech", false) and DisplayServer.tts_is_speaking()
+	return tts != null and tts.speaking()
 
 
 # Reads the speech engine once a frame, and stops following it when it has

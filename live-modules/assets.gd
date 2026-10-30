@@ -17,6 +17,9 @@ extends SlopitectModule
 # credits.json of who made them. Placed models aren't saved yet: they're
 # gone when the app closes, the files stay.
 
+# A model was put in the world (assets_place, an undo or a world put back).
+signal placed(node_name: String, id: String)
+
 const HOSTS := ["api.polyhaven.com", "dl.polyhaven.org"]
 const USER_AGENT := "Slopitect/0.1"
 const LIST_URL := "https://api.polyhaven.com/assets?t=models"
@@ -422,6 +425,7 @@ func _place(request: Dictionary) -> Dictionary:
 	_holder.add_child(scene)
 	_placed[node_name] = {"id": id, "res": res}
 	_note("placed %s as %s (read in %d ms)" % [id, node_name, Time.get_ticks_msec() - started])
+	placed.emit(node_name, id)
 	var placed := _describe(scene)
 	var again := _again(placed)
 	var take_away := func():
@@ -492,6 +496,11 @@ func _find(request: Dictionary) -> Node3D:
 	if typeof(node_name) != TYPE_STRING or node_name.is_empty() or node_name.validate_node_name() != node_name:
 		return null
 	return _holder.get_node_or_null(NodePath(node_name)) as Node3D
+
+
+# Which Poly Haven model a placed model is ("" if it isn't one).
+func model_id(node_name: String) -> String:
+	return String(_placed.get(node_name, {}).get("id", ""))
 
 
 func _describe(node: Node3D) -> Dictionary:

@@ -78,7 +78,7 @@ Everything is chosen to keep it working.
 | XR | OpenXR through godot_openxr_vendors 5.1.0 | has the Quest 1 export switch; `supportedDevices` stays `quest|quest2` (CI checks it) |
 | Physics | **Jolt** (`3d/physics_engine="Jolt Physics"`, since PR #20) | faster and steadier; `physics_status` reports the engine (seen on the headset: Jolt) |
 | Speech to text | whisper.cpp through godot-whisper, built into the APK | stays on the headset; built for plain armv8-a |
-| Speech out | Android TTS (for example SherpaTTS), played inside the app | no extra library |
+| Speech out | sherpa-onnx with Piper voices, built into the APK (pinned 1.13.8, the last with espeak-ng) | the Android speech engine isn't used |
 
 Rules that come out of this:
 

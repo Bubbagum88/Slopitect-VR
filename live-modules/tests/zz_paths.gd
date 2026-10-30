@@ -1,5 +1,5 @@
 extends SlopitectModule
-# Headless checks for paths.gd. Run: tests/run.sh paths lib landscape zz_paths
+# Headless checks for paths.gd. Run: tests/run.sh paths lib landscape tools zz_paths
 var _fails := 0
 var _passes := 0
 
@@ -60,5 +60,39 @@ func _go() -> void:
 	await _r({"cmd": "landscape_reset"})
 	await _frames(2)
 	_check("follows the landscape changing", _top(paths) < 0.3, _top(paths))
+
+	# Textures from downloads/ (lib's Slopitect folder), one undo.
+	var folder: String = ctx["modules"].module("lib").home() + "/downloads/zz"
+	DirAccess.make_dir_recursive_absolute(folder)
+	var image := Image.create(8, 8, false, Image.FORMAT_RGB8)
+	image.fill(Color(0, 1, 0))
+	image.save_png(folder + "/green.png")
+	var id: String = r["path"]
+	_check("missing texture refused", not (await _r({"cmd": "paths_texture", "path": id, "texture": "zz/none.png"})).get("ok", true))
+	_check("texture outside downloads refused", not (await _r({"cmd": "paths_texture", "path": id, "texture": "../modules/lib.gd"})).get("ok", true))
+	_check("absolute texture refused", not (await _r({"cmd": "paths_texture", "path": id, "texture": "/etc/passwd"})).get("ok", true))
+	var t := await _r({"cmd": "paths_texture", "path": id, "texture": "zz/green.png", "texture_scale": 1.5})
+	_check("paths_texture", t.get("ok", false), t)
+	var mesh: MeshInstance3D = paths._meshes[id]
+	_check("wears the texture", (mesh.material_override as StandardMaterial3D).albedo_texture != null)
+	var listed: Dictionary = (await _r({"cmd": "paths_list"}))["paths"][0]
+	_check("listed with texture and scale", listed.get("texture") == "zz/green.png" and is_equal_approx(listed.get("texture_scale"), 1.5), listed)
+	var tools = ctx["modules"].module("tools")
+	if tools:
+		await _r({"cmd": "tools_undo"})
+		await _frames(1)
+		_check("undo takes the texture off", (paths._meshes[id].material_override as StandardMaterial3D).albedo_texture == null)
+		await _r({"cmd": "tools_redo"})
+		await _frames(1)
+	# A textured path loaded before lib is drawn again with its texture when lib comes.
+	await _r({"cmd": "code_unload", "name": "lib"})
+	await _r({"cmd": "code_unload", "name": "paths"})
+	await _r({"cmd": "code_load", "name": "paths"})
+	await _frames(2)
+	paths = ctx["modules"].module("paths")
+	_check("before lib: drawn plain", (paths._meshes[id].material_override as StandardMaterial3D).albedo_texture == null)
+	await _r({"cmd": "code_load", "name": "lib"})
+	await _frames(2)
+	_check("lib comes: textured again", (paths._meshes[id].material_override as StandardMaterial3D).albedo_texture != null)
 	print("RESULT %d passed, %d failed" % [_passes, _fails])
 	get_tree().quit()

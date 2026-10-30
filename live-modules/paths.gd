@@ -6,6 +6,8 @@ extends SlopitectModule
 # put down a point, then press Finish. The path is a smooth strip through
 # the points that follows the ground (the landscape module's, if loaded, or
 # the flat floor). With Flatten on, it also levels the ground under itself.
+# A path can wear a texture from the downloads folder (paths_texture, or
+# Texture on the settings), tiled every texture_scale metres.
 # Each new or deleted path is one undo. Paths are saved in the app's own
 # storage (user://paths.json).
 
@@ -17,10 +19,11 @@ const LIFT := 0.03  # how far above the ground the strip is drawn
 const RAY_LENGTH := 15.0
 const RAY_STEP := 0.05
 
-var settings := {"width": 1.0, "color": "#8a7a5c", "flatten": true}
+var settings := {"width": 1.0, "color": "#8a7a5c", "flatten": true, "texture": "", "texture_scale": 2.0}
 
-var _paths := {}  # id -> {"points": [[x, z]...], "width", "color", "flatten"}
+var _paths := {}  # id -> {"points": [[x, z]...], "width", "color", "flatten", "texture", "texture_scale"}
 var _meshes := {}  # id -> MeshInstance3D
+var _textures := {}  # texture path -> Texture2D
 var _draft: Array = []  # [[x, z]...] of the path being put down
 var _draft_node: Node3D
 var _marker: MeshInstance3D
@@ -39,22 +42,26 @@ func setup() -> String:
 	_load()
 	_rebuild_all()
 
-	register("paths_list", _list, "the paths: id, points ([x, z] each), width, colour, flatten")
-	register("paths_add", _add_command, "add a path (one undo): points (2 or more [x, z]), optional width (0.2 to 5 m), color, flatten (true levels the ground under it)")
+	register("paths_list", _list, "the paths: id, points ([x, z] each), width, colour, flatten, texture, texture_scale")
+	register("paths_add", _add_command, "add a path (one undo): points (2 or more [x, z]), optional width (0.2 to 5 m), color, flatten (true levels the ground under it), texture (path under downloads/, or \"\"), texture_scale (m per tile, 0.2 to 20)")
 	register("paths_delete", _delete_command, "delete a path (one undo): path (its id)")
-	register("paths_settings", _settings_command, "for the next path you put down: any of width (0.2 to 5 m), width_step (1 wider, -1 narrower), color, flatten (true/false)")
+	register("paths_settings", _settings_command, "for the next path you put down: any of width (0.2 to 5 m), width_step (1 wider, -1 narrower), color, flatten (true/false), texture (path under downloads/, or \"\"), texture_scale (0.2 to 20 m)")
 	register("paths_draft", _draft_command, "the path being put down with the trigger: action finish, cancel or remove_last")
+	register("paths_texture", _texture_command, "texture paths that exist (one undo): path (an id) or paths [ids] or all true; texture (path under downloads/, e.g. polyhaven/textures/concrete_floor_worn_001_1k.jpg, or \"\" for none); texture_scale (m per tile, 0.2 to 20, default 2)")
 	set_physics_process(false)  # only while it's the chosen tool
 	return ""
 
 
 # The landscape can be loaded, unloaded or changed at any time; paths follow it.
+# Textures come from lib's folder, so textured paths are drawn again with lib.
 func lib_ready(lib) -> void:
 	_lib = lib
 	if lib == null:
 		return
 	lib.watch(self, "landscape", _landscape_here, _landscape_gone)
 	lib.follow(self, "landscape", "changed", _rebuild_all)
+	if _paths.values().any(func(path): return not String(path.get("texture", "")).is_empty()):
+		_rebuild_all()
 
 
 func _landscape_here(landscape: SlopitectModule) -> void:
@@ -119,10 +126,13 @@ func _list(_request: Dictionary) -> Dictionary:
 func _add_command(request: Dictionary) -> Dictionary:
 	var path := settings.duplicate()
 	path["points"] = request.get("points")
-	for key in ["width", "color", "flatten"]:
+	for key in ["width", "color", "flatten", "texture", "texture_scale"]:
 		if request.has(key):
 			path[key] = request[key]
 	var problem := _check(path)
+	if not problem.is_empty():
+		return {"ok": false, "error": problem}
+	problem = _texture_problem(path["texture"])
 	if not problem.is_empty():
 		return {"ok": false, "error": problem}
 	return {"ok": true, "path": _add(path)}
@@ -144,16 +154,19 @@ func _settings_command(request: Dictionary) -> Dictionary:
 		if key in ["cmd", "id"]:
 			continue
 		match key:
-			"width", "color", "flatten":
+			"width", "color", "flatten", "texture", "texture_scale":
 				next[key] = request[key]
 			"width_step":
 				if typeof(request[key]) not in [TYPE_INT, TYPE_FLOAT] or request[key] == 0:
 					return {"ok": false, "error": "\"width_step\" must be 1 (wider) or -1 (narrower)"}
 				next["width"] = snappedf(clampf(next["width"] * (1.25 if request[key] > 0 else 0.8), 0.2, 5.0), 0.01)
 			_:
-				return {"ok": false, "error": "unknown field \"%s\" (width, width_step, color, flatten)" % key}
+				return {"ok": false, "error": "unknown field \"%s\" (width, width_step, color, flatten, texture, texture_scale)" % key}
 	next["points"] = [[0, 0], [1, 0]]
 	var problem := _check(next)
+	if not problem.is_empty():
+		return {"ok": false, "error": problem}
+	problem = _texture_problem(next["texture"])
 	if not problem.is_empty():
 		return {"ok": false, "error": problem}
 	next.erase("points")
@@ -182,6 +195,44 @@ func _draft_command(request: Dictionary) -> Dictionary:
 			return {"ok": false, "error": "\"action\" must be finish, cancel or remove_last"}
 	_show_draft()
 	return {"ok": true, "points": _draft.size()}
+
+
+func _texture_command(request: Dictionary) -> Dictionary:
+	var ids := []
+	if request.get("all", false) == true:
+		ids = _paths.keys()
+	else:
+		if request.has("path"):
+			ids.append(request["path"])
+		var many = request.get("paths", [])
+		if typeof(many) != TYPE_ARRAY:
+			return {"ok": false, "error": "\"paths\" must be a list of path ids"}
+		ids.append_array(many)
+	if ids.is_empty():
+		return {"ok": false, "error": "say which paths: path (an id), paths [ids] or all true"}
+	for id in ids:
+		if not _paths.has(id):
+			return {"ok": false, "error": "no path \"%s\" (paths_list shows them)" % str(id)}
+	var texture = request.get("texture", "")
+	if typeof(texture) != TYPE_STRING:
+		return {"ok": false, "error": "\"texture\" must be a path under downloads/, or \"\" for none"}
+	var problem := _texture_problem(texture)
+	if not problem.is_empty():
+		return {"ok": false, "error": problem}
+	var tile = request.get("texture_scale", 2.0)
+	if typeof(tile) not in [TYPE_INT, TYPE_FLOAT] or tile < 0.2 or tile > 20.0:
+		return {"ok": false, "error": "\"texture_scale\" must be 0.2 to 20 m per tile"}
+	var before := {}
+	var after := {}
+	for id in ids:
+		before[id] = _paths[id].duplicate(true)
+		var path: Dictionary = _paths[id].duplicate(true)
+		path["texture"] = texture
+		path["texture_scale"] = float(tile)
+		after[id] = path
+	_apply(after)
+	_undo_entry("texture %d path(s)" % ids.size(), _apply.bind(before), _apply.bind(after))
+	return {"ok": true, "textured": ids, "texture": texture, "texture_scale": float(tile)}
 
 
 # --- Paths ---------------------------------------------------------------------------
@@ -214,6 +265,14 @@ func _put(id: String, path: Dictionary, heights: PackedFloat32Array) -> void:
 			_landscape.call("flatten_along", _centre_line(path, true), path["width"] / 2.0)
 			_landscape.call("set_heights", _landscape.call("get_heights"))  # saves it and tells everyone
 	_rebuild(id)
+	_save()
+
+
+# Puts changed paths in place (texture changes, undo and redo of them).
+func _apply(data: Dictionary) -> void:
+	for id in data:
+		_paths[id] = data[id].duplicate(true)
+		_rebuild(id)
 	_save()
 
 
@@ -273,8 +332,31 @@ func _check(path: Dictionary) -> String:
 		return "\"color\" must be #rrggbb or a colour name"
 	if typeof(path["flatten"]) != TYPE_BOOL:
 		return "\"flatten\" must be true or false"
+	if typeof(path.get("texture", "")) != TYPE_STRING:
+		return "\"texture\" must be a path under downloads/, or \"\" for none"
+	var tile = path.get("texture_scale", 2.0)
+	if typeof(tile) not in [TYPE_INT, TYPE_FLOAT] or tile < 0.2 or tile > 20.0:
+		return "\"texture_scale\" must be 0.2 to 20 m per tile"
 	if _paths.size() >= MAX_PATHS:
 		return "there are already %d paths, the most allowed" % MAX_PATHS
+	return ""
+
+
+# The downloads folder textures come from (lib's Slopitect folder), or "".
+func _textures_folder() -> String:
+	return _lib.home() + "/downloads/" if _lib else ""
+
+
+# A texture name must be a file under the downloads folder ("" is none).
+func _texture_problem(name) -> String:
+	if typeof(name) != TYPE_STRING or name.is_empty():
+		return ""
+	if name.begins_with("/") or ".." in name.split("/"):
+		return "\"texture\" must be a path inside downloads/, without .."
+	if _lib == null:
+		return "textures need the lib module (load lib.gd)"
+	if not FileAccess.file_exists(_textures_folder() + name):
+		return "no texture file \"%s\" under downloads/ (files_list shows them)" % name
 	return ""
 
 
@@ -287,22 +369,30 @@ func _rebuild_all() -> void:
 
 
 # The strip: cross-sections every SPACING metres along a smooth curve
-# through the points, each end following the ground.
+# through the points, each end following the ground. Texture coordinates:
+# across the width and along the length, in texture_scale metres a tile.
 func _rebuild(id: String) -> void:
 	if _meshes.has(id):
 		_meshes[id].queue_free()
 	var path: Dictionary = _paths[id]
 	var line := _centre_line(path, false)
 	var half: float = path["width"] / 2.0
+	var tile: float = maxf(float(path.get("texture_scale", 2.0)), 0.2)
 	var vertices := PackedVector3Array()
 	var normals := PackedVector3Array()
+	var uvs := PackedVector2Array()
 	var indices := PackedInt32Array()
+	var along := 0.0
 	for s in line.size():
+		if s > 0:
+			along += Vector2(line[s].x - line[s - 1].x, line[s].z - line[s - 1].z).length()
 		var ahead := line[mini(s + 1, line.size() - 1)] - line[maxi(s - 1, 0)]
 		var side := Vector3(-ahead.z, 0, ahead.x).normalized() * half
-		for p in [line[s] + side, line[s] - side]:
+		for edge in 2:
+			var p: Vector3 = (line[s] + side) if edge == 0 else (line[s] - side)
 			vertices.append(Vector3(p.x, _ground(p.x, p.z) + LIFT, p.z))
 			normals.append(Vector3.UP)
+			uvs.append(Vector2(float(edge) * path["width"] / tile, along / tile))
 		if s > 0:
 			var k := s * 2
 			indices.append_array([k - 2, k - 1, k, k - 1, k + 1, k])
@@ -310,6 +400,7 @@ func _rebuild(id: String) -> void:
 	arrays.resize(Mesh.ARRAY_MAX)
 	arrays[Mesh.ARRAY_VERTEX] = vertices
 	arrays[Mesh.ARRAY_NORMAL] = normals
+	arrays[Mesh.ARRAY_TEX_UV] = uvs
 	arrays[Mesh.ARRAY_INDEX] = indices
 	var mesh := ArrayMesh.new()
 	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
@@ -317,12 +408,35 @@ func _rebuild(id: String) -> void:
 	node.name = id
 	node.mesh = mesh
 	var material := StandardMaterial3D.new()
-	material.albedo_color = Color.from_string(path["color"], Color(0.54, 0.48, 0.36))
+	var texture = _texture_for(path.get("texture", ""))
+	if texture != null:
+		material.albedo_texture = texture
+		material.albedo_color = Color.WHITE
+	else:
+		material.albedo_color = Color.from_string(path["color"], Color(0.54, 0.48, 0.36))
 	material.cull_mode = BaseMaterial3D.CULL_DISABLED
 	material.roughness = 1.0
 	node.material_override = material
 	add_child(node)
 	_meshes[id] = node
+
+
+# A texture from the downloads folder, loaded once; null for none or if it won't load.
+func _texture_for(name) -> Texture2D:
+	if typeof(name) != TYPE_STRING or name.is_empty():
+		return null
+	if _textures.has(name):
+		return _textures[name]
+	if not _texture_problem(name).is_empty():
+		return null
+	var image := Image.load_from_file(_textures_folder() + name)
+	if image == null or image.is_empty():
+		push_error("Slopitect paths: can't load texture %s" % name)
+		return null
+	image.generate_mipmaps()
+	var texture := ImageTexture.create_from_image(image)
+	_textures[name] = texture
+	return texture
 
 
 # Points every SPACING metres along a Catmull-Rom curve through the path's

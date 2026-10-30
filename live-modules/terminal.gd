@@ -850,6 +850,7 @@ func _build_panel() -> void:
 		# to the newest lines, and Up / Down scroll it.
 		elements[1]["height"] = screen_height - 0.02
 		elements[1]["scroll"] = true
+		elements[1]["select"] = true  # rows can be picked for the keyboard's Copy
 	if not own_keys:
 		elements.append({"type": "button", "id": "run", "label": "Send" if chat else "Run", "at": [width / 2.0 - 0.05, line_y + 0.012 - KEY / 2.0 + 0.012],
 			"size": [0.1, KEY], "action": {"cmd": "terminal_key", "key": "run"}, "color": "#2a6f3a"})

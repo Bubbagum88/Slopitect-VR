@@ -138,7 +138,7 @@ seen on the headset yet.
 | --- | --- |
 | lib | New; `world_file()` added in batch 4a. PC (tests/zz_lib.gd, 34 checks) |
 | projects | Batch 1. Emits `project_changed(project, folder)`; joins save through `lib.watch` instead of checking every frame; no `_process`. PC (zz_projects, 13) |
-| physics | Batch 1. Bodies come back when a thing joins the world (no 1 s scan); idle when nothing is physical; ground follows landscape through lib; `_find` is lib's `world_node`. PC (zz_physics, 13) |
+| physics | Batch 1. Bodies come back when a thing joins the world (no 1 s scan); idle when nothing is physical; ground follows landscape through lib; `_find` is lib's `world_node`. A thing or body freed by something else is let go at once (a freed body is made again), not tripped over every frame (found by the headset agent). PC (zz_physics, 16) |
 | jelly | Batch 1. Off without an avatar, on when it loads (`lib.watch`). PC (zz_jelly, 13) |
 | hands | Batch 1. No `module()` lookups per frame; idle while hidden, while beatsaber's sabers are chosen, or without controls. PC (zz_hands, 15) |
 | vrui | Batch 2 (signals only; its own polling comes later). `panel_shown(id_panel, on)`, `page_changed(id_panel, page)`, `panel_changed(id_panel)`, `focus_changed`. PC (zz_vrui, 8) |
@@ -150,7 +150,7 @@ seen on the headset yet.
 | settings | Batch 2. No 1 s scan: draws when the window opens, and while open when a module comes, goes or calls `lib.touch(self)`. Modules with settings must call `lib.touch(self)` when a value changes outside the window (hands does; controls, avatar, tts, vtt, vrui, joints, agent_settings still to do). PC (zz_settings, 13) |
 | library | Batch 2. Tabs through `page_changed`; runs only while a model waits for its download. PC (zz_library, 0 failed) |
 | landscape | Batch 2. Physics only while it's the chosen tool; the ground is redrawn 20 times a second while painting, not every tick. PC (zz_landscape, 7) |
-| paths | Batch 2. No per-frame landscape check (`lib.watch`/`follow`); aiming only while chosen. PC (zz_paths, 8) |
+| paths | Batch 2. No per-frame landscape check (`lib.watch`/`follow`); aiming only while chosen. Textures from `downloads/` (the headset agent's `paths_texture`), through `lib.home()`, names kept inside downloads/. PC (zz_paths, 17) |
 | vrui (Menu tiles) | Batch 3. The Menu's tiles are looked at again on module and window events, not every 0.5 s (still every 0.5 s without lib). Text `source`s stay polled while shown: that's their contract. PC (zz_menu, 5) |
 | controls | Batch 3. confirm and landscape kept at hand (they were looked up several times a frame); tells Settings when move settings change. Walking and turning read the sticks every frame: that's input. PC (zz_controls, 7) |
 | avatar | Batch 3. tts kept at hand (it was looked up every frame). Still reads agent_status twice a second (APK). PC (old test, all pass) |
@@ -163,6 +163,7 @@ seen on the headset yet.
 | agent_tuning | Batch 3b. The extra skills folder comes from `lib.home()`; without lib only the shipped skills. PC (zz_agent_tuning, 4) |
 | worlds, agent_settings | Batch 3b. Already fit (no per-frame work, no copied helpers); tests only. PC (zz_worlds, 9; zz_agent_settings, 3) |
 | textures, doors, multi | Batch 4a. Their per-world files come from the new `lib.world_file()` (save's folder) instead of each reading user://projects.json every 2 s; they load again on projects' `project_changed`. textures checks its shapes only while one has a texture; doors runs only while one swings; multi draws only while it's the chosen tool and keeps groups together only while there are some (grab found through lib, not every physics frame). multi uses lib's `things`/`thing`/`world_box`. PC (zz_textures, 8; zz_doors, 9; zz_multi, 10; zz_undo, zz_gaps) |
+| tool_front, sweet_potato, beatsaber_path | The headset agent's, rewritten to the rules. tool_front hears vrui's `panel_shown` (no 0.3 s scan of every module). sweet_potato hears assets' new `placed` signal and runs only while a potato waits or a tree grows, moving its shapes straight (not dozens of commands a second), and growing adds nothing to undo. beatsaber_path is idle without beatsaber; with it, it reads its `running` flag each frame (beatsaber has no signal and stays as it is). PC (zz_tool_front, 5; zz_sweet_potato, 14; zz_beatsaber_path, 7) |
 | grab, inspect, prefabs, shapes, tools, joints | Not yet rewritten (batches 4b, 4c) |
 | save, pause | Not yet rewritten (batch 4d) |
 | everything else | Not started |
