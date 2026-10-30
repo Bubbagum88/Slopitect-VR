@@ -14,6 +14,7 @@ extends SlopitectModule
 
 const CHECK_SECONDS := 5.0  # how often it looks for changes to save
 const MAX_CHECKPOINTS := 50
+const SLOW_MS := 4.0  # an autosave slower than this is logged, with where the time went
 const PARTS := {"models": "assets", "landscape": "landscape", "paths": "paths", "switches": "inspect", "made": "shapes", "joints": "joints"}  # part -> the module it needs
 
 var _folder := ""
@@ -22,6 +23,8 @@ var _since_check := 0.0
 var _pending := {}  # part -> its saved value, while its module isn't loaded; kept in every save until it is
 var _kept := {}  # part -> its value at the last snapshot, kept if its module is unloaded later
 var _restoring := false
+var _ground := ""  # the landscape's heights as saved text, made again only when it changes
+var _ground_from := 0  # the landscape module's instance id _ground was made from
 
 
 func setup() -> String:
@@ -48,10 +51,12 @@ func setup() -> String:
 func _notification(what: int) -> void:
 	# The headset can close the app at any time after this.
 	if what == NOTIFICATION_APPLICATION_PAUSED or what == NOTIFICATION_WM_CLOSE_REQUEST:
+		_ground = ""
 		_autosave()
 
 
 func _exit_tree() -> void:
+	_ground = ""
 	_autosave()
 
 
@@ -100,7 +105,7 @@ func _snapshot() -> Dictionary:
 			"models":
 				state["models"] = _run({"cmd": "assets_placed"}).get("placed", [])
 			"landscape":
-				state["landscape"] = Marshalls.raw_to_base64((module.call("get_heights") as PackedFloat32Array).to_byte_array())
+				state["landscape"] = _ground_text(module)
 			"paths":
 				state["paths"] = module.call("get_paths")
 			"switches":
@@ -199,6 +204,23 @@ func _load_world() -> void:
 		"" if problems.is_empty() else "; problems: " + "; ".join(problems)])
 
 
+# The ground as text. Its heights aren't turned into text again at every
+# check, only when the landscape says it changed (or another landscape
+# module is loaded), and before the app closes, for a stroke not finished.
+func _ground_text(landscape: SlopitectModule) -> String:
+	var id := landscape.get_instance_id()
+	if id != _ground_from or _ground.is_empty():
+		if not landscape.is_connected("changed", _ground_changed):
+			landscape.connect("changed", _ground_changed)
+		_ground_from = id
+		_ground = Marshalls.raw_to_base64((landscape.call("get_heights") as PackedFloat32Array).to_byte_array())
+	return _ground
+
+
+func _ground_changed() -> void:
+	_ground = ""
+
+
 # Without the time, so the same world compares the same.
 func _comparable(state: Dictionary) -> String:
 	var copy := state.duplicate()
@@ -209,15 +231,24 @@ func _comparable(state: Dictionary) -> String:
 func _autosave() -> void:
 	if _restoring or _folder.is_empty():
 		return
+	var started := Time.get_ticks_usec()
 	var state := _snapshot()
+	var taken := Time.get_ticks_usec()
 	var now := _comparable(state)
-	if now == _last_saved:
-		return
-	var problem := _write(_folder + "/world.json", state)
-	if problem.is_empty():
-		_last_saved = now
-	else:
-		push_error("Slopitect save: " + problem)
+	var compared := Time.get_ticks_usec()
+	var wrote := compared
+	if now != _last_saved:
+		var problem := _write(_folder + "/world.json", state)
+		wrote = Time.get_ticks_usec()
+		if problem.is_empty():
+			_last_saved = now
+		else:
+			push_error("Slopitect save: " + problem)
+	if (wrote - started) / 1000.0 > SLOW_MS:
+		print("Slopitect save: autosave took %.1f ms (snapshot %.1f, compare %.1f, write %s; %d shapes, %.0f KB)" % [
+			(wrote - started) / 1000.0, (taken - started) / 1000.0, (compared - taken) / 1000.0,
+			"%.1f" % ((wrote - compared) / 1000.0) if wrote != compared else "none, unchanged",
+			state.get("shapes", []).size(), now.length() / 1024.0])
 
 
 # For the projects module: saves this world where it belongs, then switches
@@ -257,7 +288,7 @@ func _write(path: String, state: Dictionary) -> String:
 	var out := FileAccess.open(temporary, FileAccess.WRITE)
 	if out == null:
 		return "couldn't write %s (error %d)" % [temporary, FileAccess.get_open_error()]
-	out.store_string(JSON.stringify(state, "\t"))
+	out.store_string(JSON.stringify(state))  # no indenting: less to write
 	out.close()
 	var moved := DirAccess.rename_absolute(temporary, path)
 	return "" if moved == OK else "couldn't move %s into place (error %d)" % [temporary, moved]
