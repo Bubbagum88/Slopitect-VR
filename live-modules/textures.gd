@@ -7,58 +7,69 @@ extends SlopitectModule
 # size, so a tile is "scale" metres on a big box and a small one alike, and
 # it's fitted again when the shape is resized. Optional metallic and
 # roughness make things shiny. Kept per project in saves/textures.json and
-# put back when the world loads.
+# put back when the world loads (it follows projects' project_changed).
+# While a shape has a texture it checks every CHECK_SECONDS that its
+# material is still the one made here (a colour change replaces it) and
+# that it hasn't been resized; with none it's idle.
+
+const CHECK_SECONDS := 2.0
 
 var _map := {}  # shape name -> {texture, scale, tint, metallic, roughness}
 var _images := {}  # texture path -> Texture2D
 var _mine := {}  # shape name -> the material we made
-var _file := ""
+var _file := ""  # "" until lib is there
 var _since := 0.0
+var _lib: SlopitectModule
 
 
 func setup() -> String:
-	_file = _textures_file()
-	_load()
+	set_process(false)
 	register("textures_apply", _apply_command, "texture shapes: names [..], texture (path under downloads/, like dl.polyhaven.org/tex/wood.jpg, or \"noise\"), optional scale (metres per tile, default 1), tint (true: times the shape's colour, default true), metallic (0-1, default 0), roughness (0-1, default 0.8; low is shiny)")
 	register("textures_clear", _clear_command, "take textures off: names [..]")
 	register("textures_status", _status_command, "which shapes have which texture")
 	return ""
 
 
+# The file is the open world's (lib.world_file): loaded once lib is there,
+# again when save comes or another project opens.
+func lib_ready(lib) -> void:
+	_lib = lib
+	if lib == null:
+		_file = ""
+		return
+	lib.watch(self, "save", _world_changed)
+	lib.follow(self, "projects", "project_changed", _world_changed)
+	_world_changed()
+
+
+func _world_changed(_a = null, _b = null) -> void:
+	var now: String = _lib.world_file("textures.json")
+	if now == _file:
+		return
+	_file = now
+	_mine.clear()
+	_load()
+	_check_now()
+
+
 func _process(delta: float) -> void:
 	_since += delta
-	if _since < 2.0:
-		return
-	_since = 0.0
-	var now := _textures_file()
-	if now != _file:
-		_file = now
-		_mine.clear()
-		_load()
+	if _since >= CHECK_SECONDS:
+		_since = 0.0
+		_check_now()
+
+
+func _check_now() -> void:
 	for n in _map:
 		var node := _find(n)
 		if node and (not _mine.has(n) or node.material_override != _mine[n] or node.scale != _mine[n].get_meta("scale", node.scale)):
 			_put(n, node)  # its material was replaced, or it was resized
-
-
-func _home() -> String:
-	return "/sdcard/Slopitect" if OS.get_name() == "Android" else OS.get_user_data_dir() + "/files_home"
-
-
-func _textures_file() -> String:
-	var folder := _home() + "/saves"
-	if FileAccess.file_exists("user://projects.json"):
-		var p = JSON.parse_string(FileAccess.get_file_as_string("user://projects.json"))
-		if typeof(p) == TYPE_DICTIONARY and typeof(p.get("current")) == TYPE_STRING and p["current"].is_valid_filename():
-			folder = "%s/projects/%s/saves" % [_home(), p["current"]]
-	return folder + "/textures.json"
+	set_process(not _map.is_empty())
 
 
 func _load() -> void:
 	_map.clear()
-	if not FileAccess.file_exists(_file):
-		return
-	var data = JSON.parse_string(FileAccess.get_file_as_string(_file))
+	var data = _lib.read_json(_file)
 	if typeof(data) == TYPE_DICTIONARY:
 		for n in data:
 			if typeof(data[n]) == TYPE_DICTIONARY:
@@ -66,17 +77,18 @@ func _load() -> void:
 
 
 func _save() -> void:
+	set_process(not _map.is_empty())
+	if _file.is_empty():
+		return  # no lib yet: kept until it comes
 	DirAccess.make_dir_recursive_absolute(_file.get_base_dir())
-	var f := FileAccess.open(_file, FileAccess.WRITE)
-	if f:
-		f.store_string(JSON.stringify(_map, "\t"))
+	var problem: String = _lib.write_json(_file, _map, "\t")
+	if not problem.is_empty():
+		push_error("Slopitect textures: " + problem)
 
 
+# A shape (textures go on shapes, not placed models).
 func _find(node_name) -> MeshInstance3D:
-	if typeof(node_name) != TYPE_STRING or node_name.is_empty() or node_name.validate_node_name() != node_name:
-		return null
-	var world: Node3D = ctx["world"]
-	return world.get_node_or_null(NodePath(node_name)) as MeshInstance3D
+	return _lib.world_node(node_name) as MeshInstance3D if _lib else null
 
 
 func _texture(path: String) -> Texture2D:
@@ -98,7 +110,9 @@ func _texture(path: String) -> Texture2D:
 		nt.color_ramp = ramp
 		tex = nt
 	else:
-		var img := Image.load_from_file(_home() + "/downloads/" + path)
+		if _lib == null:
+			return null
+		var img := Image.load_from_file(_lib.home() + "/downloads/" + path)
 		if img == null or img.is_empty():
 			return null
 		img.generate_mipmaps()

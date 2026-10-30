@@ -8,20 +8,20 @@ extends SlopitectModule
 # A and Y come through controls.gd like every button. They also show the
 # terminal and chat windows (vrui.gd), so this module is asked first, and
 # takes the press only when that hand is near a door.
+# It runs only while a door is swinging. The file is the open world's
+# (lib.world_file), loaded again when another project opens.
 
 const REACH := 0.15  # m from the door that counts as "near"
 const SPEED := 2.0  # opens in half a second
 const AXES := {"y": Vector3.UP, "x": Vector3.RIGHT, "z": Vector3.BACK}
 
 var _doors := {}  # id -> {parts, pivot Vector3, axis String, angle deg, rest {name: Transform3D}, open bool, t float}
-var _file := ""
-var _since := 0.0
-var _ready_pending := false
+var _file := ""  # "" until lib is there
+var _lib: SlopitectModule
 
 
 func setup() -> String:
-	_file = _doors_file()
-	_load()
+	set_process(false)
 	register("doors_add", _add_command, "make a hinged door: name (an id), parts [shape names, door first], hinge [x, z] (a vertical hinge line) or [x, y, z] (a point on it), optional axis (y default, or x or z for a horizontal hinge, like an oven door), angle (degrees it opens, right-hand rule round the axis: for y + is anticlockwise seen from above; for x + tips the top toward +z; default 100). Records the parts as closed now")
 	register("doors_toggle", _toggle_command, "open or close a door: name, optional open (true/false)")
 	register("doors_remove", _remove_command, "stop a door being a door (it closes first): name")
@@ -29,31 +29,30 @@ func setup() -> String:
 	return ""
 
 
-func _home() -> String:
-	return "/sdcard/Slopitect" if OS.get_name() == "Android" else OS.get_user_data_dir() + "/files_home"
+func lib_ready(lib) -> void:
+	_lib = lib
+	if lib == null:
+		_file = ""
+		return
+	lib.watch(self, "save", _world_changed)
+	lib.follow(self, "projects", "project_changed", _world_changed)
+	_world_changed()
 
 
-func _doors_file() -> String:
-	var folder := _home() + "/saves"
-	if FileAccess.file_exists("user://projects.json"):
-		var p = JSON.parse_string(FileAccess.get_file_as_string("user://projects.json"))
-		if typeof(p) == TYPE_DICTIONARY and typeof(p.get("current")) == TYPE_STRING and p["current"].is_valid_filename():
-			folder = "%s/projects/%s/saves" % [_home(), p["current"]]
-	return folder + "/doors.json"
+func _world_changed(_a = null, _b = null) -> void:
+	var now: String = _lib.world_file("doors.json")
+	if now != _file:
+		_file = now
+		_load()
 
 
 func _find(node_name) -> Node3D:
-	if typeof(node_name) != TYPE_STRING or node_name.is_empty() or node_name.validate_node_name() != node_name:
-		return null
-	var world: Node3D = ctx["world"]
-	return world.get_node_or_null(NodePath(node_name)) as Node3D
+	return _lib.world_node(node_name) if _lib else null
 
 
 func _load() -> void:
 	_doors.clear()
-	if not FileAccess.file_exists(_file):
-		return
-	_read(JSON.parse_string(FileAccess.get_file_as_string(_file)))
+	_read(_lib.read_json(_file))
 
 
 func _read(data) -> void:
@@ -73,14 +72,21 @@ func _read(data) -> void:
 		if not AXES.has(axis):
 			axis = "y"
 		_doors[id] = {"parts": d["parts"], "pivot": Vector3(float(pv[0]), float(pv[1]), float(pv[2])), "axis": axis, "angle": float(d.get("angle", 100.0)), "rest": rest, "open": false, "t": 0.0}
-	_ready_pending = true
+	_place_all.call_deferred()  # doors load closed, once their parts are back
+
+
+func _place_all() -> void:
+	for id in _doors:
+		_place(_doors[id])
 
 
 func _save() -> void:
+	if _file.is_empty():
+		return  # no lib yet
 	DirAccess.make_dir_recursive_absolute(_file.get_base_dir())
-	var f := FileAccess.open(_file, FileAccess.WRITE)
-	if f:
-		f.store_string(JSON.stringify(_written(), "\t"))
+	var problem: String = _lib.write_json(_file, _written(), "\t")
+	if not problem.is_empty():
+		push_error("Slopitect doors: " + problem)
 
 
 func _written() -> Dictionary:
@@ -164,17 +170,7 @@ func _place(d: Dictionary) -> void:
 
 
 func _process(delta: float) -> void:
-	_since += delta
-	if _since >= 2.0:
-		_since = 0.0
-		var now := _doors_file()
-		if now != _file:
-			_file = now
-			_load()
-	if _ready_pending:  # doors load closed
-		_ready_pending = false
-		for id in _doors:
-			_place(_doors[id])
+	var swinging := false
 	for id in _doors:
 		var d: Dictionary = _doors[id]
 		var goal := 1.0 if d["open"] else 0.0
@@ -182,6 +178,8 @@ func _process(delta: float) -> void:
 			continue
 		d["t"] = move_toward(float(d["t"]), goal, delta * SPEED)
 		_place(d)
+		swinging = true
+	set_process(swinging)
 
 
 func _distance(node: Node3D, at: Vector3) -> float:
@@ -233,6 +231,7 @@ func on_action(action: String, down: bool) -> bool:
 		return false
 	if down:
 		_doors[id]["open"] = not _doors[id]["open"]
+		set_process(true)
 	return true
 
 
@@ -281,6 +280,7 @@ func _toggle_command(request: Dictionary) -> Dictionary:
 	if typeof(want) != TYPE_BOOL:
 		return {"ok": false, "error": "\"open\" must be true or false"}
 	_doors[id]["open"] = want
+	set_process(true)
 	return {"ok": true, "door": id, "open": want}
 
 

@@ -3,8 +3,8 @@ extends SlopitectModule
 # Slopitect live module: lib, the shared helpers and the module events.
 # The one place for code more than one module needs, so it's never
 # copy-pasted: finding a thing in the world and its box, the Slopitect
-# folder, reading and writing JSON. And the events modules use instead of
-# checking on each other every frame:
+# folder and the open world's files, reading and writing JSON. And the
+# events modules use instead of checking on each other every frame:
 #   module_loaded(name), module_unloaded(name)  any module coming or going
 #   info_changed(name)  a module's menu_info/hand_info/tool_info/settings_info
 #       changed (it calls lib.touch(self)), for the windows that show them
@@ -217,6 +217,15 @@ func world_box(node: Node3D) -> AABB:
 # files_home.
 func home() -> String:
 	return "/sdcard/Slopitect" if OS.get_name() == "Android" else OS.get_user_data_dir() + "/files_home"
+
+
+# A file kept with the world that's open: in the save module's folder (each
+# project has its own), or the Slopitect folder's saves/ without it. Modules
+# with per-world files follow projects' project_changed to load again.
+func world_file(file_name: String) -> String:
+	var save := module("save")
+	var folder: String = save.call("folder") if save and save.has_method("folder") else home() + "/saves"
+	return folder + "/" + file_name
 
 
 # A JSON file's contents, or null when it's missing or isn't JSON.
