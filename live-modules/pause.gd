@@ -24,6 +24,10 @@ extends SlopitectModule
 # "hand_menu"), kept by the window module like every
 # panel; this fills them again each time the menu opens.
 # A part whose module isn't loaded says so.
+# The hand menu is built again (once, the next frame) when lib says a module
+# came, went or changed its hand_info() (lib.touch), or the window module
+# says the hand menu or the wrist panel changed; nothing runs per frame. It
+# needs lib for that; without it the pause menu still works.
 
 const PANEL := "pause"
 const LOAD_PANEL := "pause_load"
@@ -34,7 +38,6 @@ const MENUS := [PANEL, LOAD_PANEL, "pause_worlds"]
 const PAGES := {"main": PANEL, "load": LOAD_PANEL, "worlds": "pause_worlds"}
 const OLD_SETTINGS_PANEL := "pause_settings"  # settings.gd took the Settings page over
 const HAND_BUTTON := [0.16, 0.07]
-const CHECK_SECONDS := 1.0
 const WIDTH := 0.7
 const BUTTON := [0.7, 0.06]
 const HALF := [0.34, 0.07]  # the main menu's buttons, two to a row
@@ -42,10 +45,28 @@ const MAX_WORLDS := 6
 const MAX_CHECKPOINTS := 6
 
 
+var _lib: SlopitectModule
+var _hand_signature := ""  # what the hand menu was last built from
+var _hand_soon := false  # a rebuild is waiting for the next frame
+
+
 func setup() -> String:
+	set_process(false)
 	register("pause_do", _do, "the pause menu: act = toggle, show (optional page: main, load, worlds), hide, hand_menu (show or hide it), toggle_panel (panel), refresh, save (optional label), open_world (name), restore (checkpoint)")
 	register("pause_status", _status, "the world you're in and what the pause menu can reach, one line")
 	return ""
+
+
+func lib_ready(lib) -> void:
+	_lib = lib
+	if lib == null:
+		return
+	for signal_name in ["module_loaded", "module_unloaded", "info_changed"]:
+		lib.follow(self, "lib", signal_name, _module_news)
+	for ui_name in ["vrui", "ui"]:
+		lib.follow(self, ui_name, "panel_changed", _panel_changed)
+		lib.follow(self, ui_name, "panel_shown", _panel_shown)
+	_check_hand()
 
 
 func _exit_tree() -> void:
@@ -56,18 +77,34 @@ func _exit_tree() -> void:
 	ctx["server"].run({"cmd": "ui_show", "id_panel": WRIST_PANEL, "visible": true})
 
 
-var _hand_signature := ""  # what the hand menu was last built from
-var _since_check := CHECK_SECONDS
+func _module_news(_module_name: String) -> void:
+	_check_hand()
 
 
-func _process(delta: float) -> void:
-	_since_check += delta
-	if _since_check < CHECK_SECONDS:
+func _panel_changed(id_panel: String) -> void:
+	if id_panel == HAND_PANEL or id_panel == WRIST_PANEL:
+		_check_hand()
+
+
+func _panel_shown(id_panel: String, on: bool) -> void:
+	if id_panel == WRIST_PANEL and on:
+		_check_hand()  # hidden again: one hand menu
+
+
+# Many events in one frame (every module loading at the start) build it once.
+func _check_hand() -> void:
+	if not _hand_soon:
+		_hand_soon = true
+		_check_hand_now.call_deferred()
+
+
+# The hand menu is built on whichever window module is there, again when
+# it's reloaded or the panel is gone, and when a module with a button on it
+# (tools.gd's Undo / Redo, settings.gd, any hand_info()) comes or goes.
+func _check_hand_now() -> void:
+	_hand_soon = false
+	if not is_inside_tree():
 		return
-	_since_check = 0.0
-	# The hand menu is built on whichever window module is there, again
-	# when it's reloaded or the panel is gone, and when tools.gd (Undo /
-	# Redo) or save.gd comes or goes.
 	var ui := _ui()
 	if ui == null:
 		return
@@ -101,14 +138,19 @@ func _run(request: Dictionary) -> Dictionary:
 	return ctx["server"].run(request)
 
 
+# A module by name: lib's cached lookup, or the loader's without lib.
+func _module(module_name: String) -> SlopitectModule:
+	return _lib.module(module_name) if _lib else ctx["modules"].module(module_name)
+
+
 func _has(module_name: String) -> bool:
-	return ctx["modules"].module(module_name) != null
+	return _module(module_name) != null
 
 
 # The window module, by either name (it may be renamed vrui).
 func _ui() -> SlopitectModule:
-	var ui: SlopitectModule = ctx["modules"].module("vrui")
-	return ui if ui != null else ctx["modules"].module("ui")
+	var ui := _module("vrui")
+	return ui if ui != null else _module("ui")
 
 
 # --- Commands ------------------------------------------------------------------------

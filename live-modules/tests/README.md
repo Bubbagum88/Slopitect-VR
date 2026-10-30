@@ -35,11 +35,13 @@ The modules each test loads, in order (the order matters: some load lib last on 
 | `zz_menu.gd` | `controls vrui lib zz_menu` |
 | `zz_multi.gd` | `lib save projects tools multi zz_multi` |
 | `zz_net.gd` | `lib net zz_net` |
+| `zz_pause.gd` | `pause controls vrui tools lib zz_pause` |
 | `zz_paths.gd` | `paths lib landscape tools zz_paths` |
 | `zz_perf.gd` | `lib perf zz_perf` |
 | `zz_physics.gd` | `physics lib landscape zz_physics` |
 | `zz_prefabs.gd` | `lib tools prefabs zz_prefabs` |
 | `zz_projects.gd` | `save projects lib zz_projects` |
+| `zz_save.gd` | `save paths projects tools lib zz_save` |
 | `zz_settings.gd` | `settings controls vrui hands lib zz_settings` |
 | `zz_shapes.gd` | `lib tools shapes zz_shapes` |
 | `zz_sweet_potato.gd` | `lib assets tools sweet_potato zz_sweet_potato` |
