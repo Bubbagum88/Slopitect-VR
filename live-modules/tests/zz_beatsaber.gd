@@ -97,6 +97,8 @@ func _go() -> void:
 	_beat.started.connect(func(t): _signals.append("started " + t))
 	_beat.stopped.connect(func(): _signals.append("stopped"))
 	_beat.finished.connect(func(r): _signals.append("finished"))
+	var sky_env: Environment = ctx["world"].get_parent().get_node("WorldEnvironment").environment
+	var sun_energy: float = ctx["world"].get_parent().get_node("Sun").light_energy
 	var reply := _run({"cmd": "beatsaber_start", "song": "free"})
 	_check("free play starts", reply.get("ok", false) and _beat.running and _beat.is_processing() and reply.get("notes", 0) > 50, reply)
 	await get_tree().create_timer(1.0).timeout
@@ -107,9 +109,19 @@ func _go() -> void:
 	# Its own world: made on the first start, left with Leave, reused after
 	_check("starting took us to the Rhythm world", _world() == "rhythm_sabers", _world())
 	_check("in the game: sabers, automatically", hands.settings["style"] == "saber" and saber.visible)
+	var scene: Node = ctx["world"].get_parent()
+	var env_node: WorldEnvironment = scene.get_node("WorldEnvironment")
+	var sun: DirectionalLight3D = scene.get_node("Sun")
+	var main_floor: Node3D = scene.get_node("Floor")
+	_check("the Rhythm world's own surroundings", _beat._stage != null and env_node.environment != sky_env
+		and env_node.environment.background_mode == Environment.BG_COLOR and not main_floor.visible and sun.light_energy < sun_energy,
+		[_beat._stage, env_node.environment, main_floor.visible, sun.light_energy])
+	_check("its stage lies with the track", _beat._stage.global_transform.is_equal_approx(_beat.track_transform()))
 	reply = _run({"cmd": "beatsaber_leave"})
 	_check("Leave goes back to where we were", reply.get("ok", false) and _world() == "start", [reply, _world()])
 	_check("out of the game: hands back", hands.settings["style"] == "hand" and not saber.visible)
+	_check("outside it the sky, sun and floor come back", _beat._stage == null and env_node.environment == sky_env and main_floor.visible
+		and is_equal_approx(sun.light_energy, sun_energy))
 	_check("the tile takes us back in", _run({"cmd": "beatsaber_do", "act": "toggle"}).get("ok", false) and _world() == "rhythm_sabers")
 	_check("one Rhythm world, not one per visit", _run({"cmd": "projects_list"})["projects"].filter(func(p): return p["name"] == "rhythm_sabers").size() == 1)
 	_run({"cmd": "beatsaber_start", "song": "free"})
@@ -194,6 +206,80 @@ func _go() -> void:
 	_run({"cmd": "beatsaber_stop"})
 	_check("made songs are marked", _run({"cmd": "beatsaber_songs"})["songs"].filter(func(x): return x["folder"] == "zz_music")[0]["made"])
 
+	# Custom song folders: Info.dat version 2 with v2 and v3 difficulty files,
+	# and version 4 with a v4 file; music named in Info.dat.
+	var custom := {
+		"zz_v2": {"Info.dat": {"_version": "2.0.0", "_songName": "Two", "_songAuthorName": "Artist", "_levelAuthorName": "Mapper",
+			"_beatsPerMinute": 120, "_songTimeOffset": 0, "_songFilename": "music.wav", "_coverImageFilename": "cover.jpg",
+			"_difficultyBeatmapSets": [
+				{"_beatmapCharacteristicName": "Standard", "_difficultyBeatmaps": [
+					{"_difficulty": "Easy", "_beatmapFilename": "Easy.dat"}, {"_difficulty": "ExpertPlus", "_beatmapFilename": "ExpertPlus.dat"}]},
+				{"_beatmapCharacteristicName": "OneSaber", "_difficultyBeatmaps": [{"_difficulty": "Expert", "_beatmapFilename": "One.dat"}]},
+				{"_beatmapCharacteristicName": "Lightshow", "_difficultyBeatmaps": [{"_difficulty": "Easy", "_beatmapFilename": "Easy.dat"}]}]},
+			"Easy.dat": {"_version": "2.0.0", "_notes": [
+				{"_time": 2, "_lineIndex": 1, "_lineLayer": 0, "_type": 0, "_cutDirection": 6},
+				{"_time": 3, "_lineIndex": 2, "_lineLayer": 1, "_type": 1, "_cutDirection": 1},
+				{"_time": 4, "_lineIndex": 0, "_lineLayer": 2, "_type": 3, "_cutDirection": 0},
+				{"_time": 5, "_lineIndex": 5, "_lineLayer": 0, "_type": 1, "_cutDirection": 1}], "_obstacles": [], "_events": []},
+			"ExpertPlus.dat": {"_version": "2.0.0", "_notes": [{"_time": 2, "_lineIndex": 3, "_lineLayer": 0, "_type": 1, "_cutDirection": 8}]},
+			"One.dat": {"version": "3.0.0", "colorNotes": [{"b": 2, "x": 1, "y": 1, "c": 1, "d": 7}, {"b": 3, "x": 2, "y": 0, "c": 1, "d": 0}],
+				"bombNotes": [{"b": 4, "x": 3, "y": 2}]}},
+		"zz_v4": {"Info.dat": {"version": "4.0.0", "song": {"title": "Four", "author": "Band"}, "audio": {"songFilename": "music.wav", "bpm": 150},
+			"coverImageFilename": "cover.png", "difficultyBeatmaps": [{"characteristic": "Standard", "difficulty": "Normal",
+				"beatmapAuthors": {"mappers": ["Four mapper"]}, "beatmapDataFilename": "Normal.dat"}]},
+			"Normal.dat": {"version": "4.0.0", "colorNotes": [{"b": 1, "i": 0}, {"b": 2, "i": 1}, {"b": 3, "i": 7}],
+				"colorNotesData": [{"x": 0, "y": 0, "c": 0, "d": 4}, {"x": 3, "y": 1, "c": 1, "d": 3}],
+				"bombNotes": [{"b": 4, "i": 0}], "bombNotesData": [{"x": 1, "y": 2}]}},
+		"zz_nomusic": {"Info.dat": {"_songName": "Silent", "_beatsPerMinute": 100, "_songFilename": "gone.egg",
+			"_difficultyBeatmapSets": [{"_beatmapCharacteristicName": "Standard", "_difficultyBeatmaps": [{"_difficulty": "Hard", "_beatmapFilename": "Hard.dat"}]}]},
+			"Hard.dat": {"_notes": [{"_time": 1, "_lineIndex": 0, "_lineLayer": 0, "_type": 0, "_cutDirection": 1}]}}}
+	for song_dir in custom:
+		var path: String = lib.home() + "/songs/" + song_dir
+		DirAccess.make_dir_recursive_absolute(path)
+		for file in custom[song_dir]:
+			lib.write_json(path + "/" + file, custom[song_dir][file])
+		if song_dir != "zz_nomusic":
+			wav.save_to_wav(path + "/music.wav")
+	var listed: Array = _run({"cmd": "beatsaber_songs"})["songs"].map(func(x): return x["folder"])
+	_check("custom songs listed", "zz_v2" in listed and "zz_v4" in listed and "zz_nomusic" in listed, listed)
+	_check("Custom songs pack", "Custom songs" in _beat._packs(), _beat._packs())
+	_run({"cmd": "beatsaber_set", "difficulty": "normal"})
+	_run({"cmd": "beatsaber_do", "act": "show"})
+	_check("choosing a custom song picks its nearest difficulty", _run({"cmd": "beatsaber_do", "act": "select", "song": "zz_v2"}).get("ok", false)
+		and _beat.game["difficulty"] == "easy" and _beat._mode == "Standard", [_beat.game["difficulty"], _beat._mode])
+	_check("only its difficulties are shown", not _element("beatsaber", "diff_easy").is_empty() and not _element("beatsaber", "diff_expert_plus").is_empty()
+		and _element("beatsaber", "diff_normal").is_empty() and _element("beatsaber", "diff_expert_plus").get("label") == "Expert+")
+	_check("its modes are buttons (no Lightshow)", not _element("beatsaber", "mode_OneSaber").is_empty() and _element("beatsaber", "mode_Lightshow").is_empty()
+		and _element("beatsaber", "mode_Standard").get("color") == "accent")
+	_check("mapper shown", "mapped by Mapper" in str(_element("beatsaber", "song_info").get("text")), _element("beatsaber", "song_info"))
+	reply = _run({"cmd": "beatsaber_do", "act": "play"})
+	_check("v2 notes read, off-grid note left out", reply.get("ok", false) and reply.get("notes") == 3, reply)
+	var read_notes: Array = _beat._song.get("notes", [])
+	_check("v2 hands, diagonal and bomb", read_notes.size() == 3 and read_notes[0] == [2.0, 1, 0, "l", "dl"] and read_notes[1] == [3.0, 2, 1, "r", "d"]
+		and read_notes[2] == [4.0, 0, 2, "b", "a"], read_notes)
+	_run({"cmd": "beatsaber_stop"})
+	_check("No arrows isn't offered when it has none", not _run({"cmd": "beatsaber_do", "act": "mode", "mode": "NoArrows"}).get("ok", true))
+	reply = _run({"cmd": "beatsaber_do", "act": "mode", "mode": "OneSaber"})
+	_check("One saber mode moves to its difficulty", reply.get("ok", false) and reply.get("difficulty") == "expert"
+		and not _element("beatsaber", "diff_expert").is_empty() and _element("beatsaber", "diff_easy").is_empty(), reply)
+	reply = _run({"cmd": "beatsaber_do", "act": "play"})
+	read_notes = _beat._song.get("notes", [])
+	_check("v3 file read (colour and bomb notes)", reply.get("mode") == "OneSaber" and read_notes == [[2.0, 1, 1, "r", "dr"], [3.0, 2, 0, "r", "u"], [4.0, 3, 2, "b", "a"]],
+		[reply, read_notes])
+	await _frames(3)
+	_check("one saber: the left blade doesn't cut", not _beat._blade.has("left") and _beat._blade.has("right"), _beat._blade.keys())
+	_run({"cmd": "beatsaber_stop"})
+	_check("modes keep their own scores", _beat._score_key("zz_v2", "expert", "OneSaber") == "zz_v2|expert|OneSaber"
+		and _beat._score_key("zz_v2", "easy") == "zz_v2|easy")
+	reply = _run({"cmd": "beatsaber_start", "song": "zz_v4"})
+	read_notes = _beat._song.get("notes", [])
+	_check("v4 Info and file read (data lists, bad index left out)", reply.get("ok", false) and reply.get("mode") == "Standard" and reply.get("difficulty") == "normal"
+		and reply.get("bpm") == 150.0 and read_notes == [[1.0, 0, 0, "l", "ul"], [2.0, 3, 1, "r", "r"], [4.0, 1, 2, "b", "a"]], [reply, read_notes])
+	_check("v4 mapper shown", "mapped by Four mapper" in str(_beat._selected_info().get("detail")), _beat._selected_info())
+	_run({"cmd": "beatsaber_stop"})
+	reply = _run({"cmd": "beatsaber_start", "song": "zz_nomusic"})
+	_check("missing music is an error", not reply.get("ok", true) and "isn't there" in str(reply.get("error")), reply)
+
 	_check("Leave after the songs", _run({"cmd": "beatsaber_leave"}).get("back_in") == "start" and _world() == "start")
 
 	# The Settings tab's Hands / Sabers buttons
@@ -205,6 +291,8 @@ func _go() -> void:
 
 	ctx["modules"].unload("beatsaber")
 	await _frames(3)
+	_check("unload puts the sky, sun and floor back", ctx["world"].get_parent().get_node("WorldEnvironment").environment == sky_env
+		and ctx["world"].get_parent().get_node("Floor").visible and is_equal_approx(ctx["world"].get_parent().get_node("Sun").light_energy, sun_energy))
 	_check("unload takes the sabers and window", not is_instance_valid(saber) and not _run({"cmd": "ui_get", "id_panel": "beatsaber"}).get("ok", true))
 	print("RESULT %d passed, %d failed" % [_passes, _fails])
 	get_tree().quit()
