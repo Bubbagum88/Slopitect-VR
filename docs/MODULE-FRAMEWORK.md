@@ -125,3 +125,25 @@ Open decisions (the owner's):
   vrui.gd draws every panel the vrui way, only on a change. Still to see:
   frame time on the Quest 1 with several panels.
 - Which sites may web downloads come from? assets.gd's list is the start.
+
+## Rewriting every module to the design rules (from 2026-10-30)
+
+The owner's ten rules are in [CLAUDE.md](../CLAUDE.md#module-design-rules-the-owners-2026-10-30).
+The foundation is `live-modules/lib.gd` (shared helpers, module events,
+`lib_ready`). Each module is rewritten in a small batch with a test in
+`live-modules/tests/`. PC means tested headless; nothing below has been
+seen on the headset yet.
+
+| Module | State |
+| --- | --- |
+| lib | New. PC (tests/zz_lib.gd, 33 checks) |
+| projects | Batch 1. Emits `project_changed(project, folder)`; joins save through `lib.watch` instead of checking every frame; no `_process`. PC (zz_projects, 13) |
+| physics | Batch 1. Bodies come back when a thing joins the world (no 1 s scan); idle when nothing is physical; ground follows landscape through lib; `_find` is lib's `world_node`. PC (zz_physics, 13) |
+| jelly | Batch 1. Off without an avatar, on when it loads (`lib.watch`). PC (zz_jelly, 13) |
+| hands | Batch 1. No `module()` lookups per frame; idle while hidden, with beatsaber, or without controls. PC (zz_hands, 14) |
+| grab, inspect, multi, prefabs, shapes, textures, tools, joints, doors | Waiting for the undo-groups work to land, to avoid clashing edits |
+| save, pause | Being changed for the stutter; their rewrite comes after |
+| everything else | Not started |
+
+Still needs the APK (flagged, not done): loading lib.gd first, so `setup()`
+could use it directly.
