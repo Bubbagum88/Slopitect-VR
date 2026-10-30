@@ -70,10 +70,11 @@ var _skin: StandardMaterial3D
 var _nails := {}  # "left"/"right" -> 5 materials, thumb to pinky
 var _boxes := []  # the APK's controller boxes we hid
 var _beat := false  # true while the beatsaber module is loaded
+var _controls: SlopitectModule  # the controls module while it's loaded
+var _lib: SlopitectModule
 
 
 func setup() -> String:
-	_load()
 	_skin = StandardMaterial3D.new()
 	_skin.roughness = 0.75
 	for hand in ["left", "right"]:
@@ -101,6 +102,37 @@ func setup() -> String:
 	return ""
 
 
+# The saved colours and fit, and the modules the hands follow.
+func lib_ready(lib) -> void:
+	_lib = lib
+	if lib == null:
+		return
+	_load()
+	_refresh()
+	lib.watch(self, "controls", _controls_here, _controls_gone)
+	lib.watch(self, "beatsaber", _beat_here, _beat_gone)
+
+
+func _controls_here(controls: SlopitectModule) -> void:
+	_controls = controls
+	_apply_visible()
+
+
+func _controls_gone(_controls_module: SlopitectModule) -> void:
+	_controls = null
+	_apply_visible()
+
+
+func _beat_here(_beatsaber: SlopitectModule) -> void:
+	_beat = true
+	_apply_visible()
+
+
+func _beat_gone(_beatsaber: SlopitectModule) -> void:
+	_beat = false
+	_apply_visible()
+
+
 func _exit_tree() -> void:
 	for box in _boxes:
 		if is_instance_valid(box):
@@ -113,11 +145,7 @@ func _exit_tree() -> void:
 
 
 func _process(delta: float) -> void:
-	var beat: bool = ctx["modules"].module("beatsaber") != null
-	if beat != _beat:
-		_beat = beat
-		_apply_visible()
-	var controls: SlopitectModule = ctx["modules"].module("controls")
+	var controls := _controls
 	var k := clampf(delta * FOLLOW, 0.0, 1.0)
 	for h in _hands:
 		var grip := 0.0
@@ -150,13 +178,23 @@ func _process(delta: float) -> void:
 
 # --- Hiding ----------------------------------------------------------------------------
 
-# The hands show unless the person hid them in Settings or chose sabers while
-# beatsaber is loaded.
+# The hands show unless the person hid them in Settings or beatsaber is
+# loaded. The fingers move only while they show and controls is loaded.
 func _apply_visible() -> void:
 	var show: bool = not (settings["hidden"] == true or (_beat and settings["style"] == "saber"))
 	for h in _hands:
 		if is_instance_valid(h["node"]):
 			(h["node"] as Node3D).visible = show
+	set_process(show and _controls != null)
+
+
+func _refresh() -> void:
+	if _lib:
+		_lib.touch(self)  # the Settings window shows the new values
+	_apply_colours()
+	_apply_visible()
+	for h in _hands:
+		_fit(h)
 
 
 # For the beatsaber module: whether its sabers should show.
@@ -263,7 +301,7 @@ func _apply_colours() -> void:
 # --- Commands and settings -------------------------------------------------------------
 
 func _status(_request: Dictionary) -> Dictionary:
-	return {"ok": true, "settings": settings, "controls": ctx["modules"].module("controls") != null}
+	return {"ok": true, "settings": settings, "controls": _controls != null}
 
 
 # Its section of the Settings window (settings.gd): a few skin and nail
@@ -318,10 +356,7 @@ func _hide_command(request: Dictionary) -> Dictionary:
 func _config(request: Dictionary) -> Dictionary:
 	if request.get("reset", false) == true:
 		settings = DEFAULTS.duplicate(true)
-		_apply_colours()
-		_apply_visible()
-		for h in _hands:
-			_fit(h)
+		_refresh()
 		_save()
 		return _status({})
 	var changed := settings.duplicate(true)
@@ -368,10 +403,7 @@ func _config(request: Dictionary) -> Dictionary:
 			_:
 				return {"ok": false, "error": "unknown setting \"%s\" (one of: skin, nails, nails_left, nails_right, hidden, style, grip_angle, grip_offset, rest_curl, reset)" % key}
 	settings = changed
-	_apply_colours()
-	_apply_visible()
-	for h in _hands:
-		_fit(h)
+	_refresh()
 	_save()
 	return _status({})
 
@@ -389,18 +421,15 @@ func _colour(value) -> bool:
 
 
 func _save() -> void:
-	var out := FileAccess.open(SETTINGS_PATH, FileAccess.WRITE)
-	if out == null:
-		push_error("Slopitect hands: couldn't save %s (error %d)" % [SETTINGS_PATH, FileAccess.get_open_error()])
-		return
-	out.store_string(JSON.stringify(settings, "\t"))
-	out.close()
+	var problem: String = _lib.write_json(SETTINGS_PATH, settings, "\t") if _lib else "the lib module isn't loaded"
+	if not problem.is_empty():
+		push_error("Slopitect hands: couldn't save %s: %s" % [SETTINGS_PATH, problem])
 
 
 func _load() -> void:
 	if not FileAccess.file_exists(SETTINGS_PATH):
 		return
-	var saved = JSON.parse_string(FileAccess.get_file_as_string(SETTINGS_PATH))
+	var saved = _lib.read_json(SETTINGS_PATH)
 	if typeof(saved) != TYPE_DICTIONARY:
 		push_error("Slopitect hands: %s isn't readable; using the default colours" % SETTINGS_PATH)
 		return

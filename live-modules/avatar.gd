@@ -510,9 +510,28 @@ func _draw_mouth(wide: float, open: float, smile: float) -> void:
 	_mouth_mesh.surface_end()
 
 
+var _lib: SlopitectModule
+var _tts: SlopitectModule  # the speech module while it's loaded (asked every frame)
+
+
+func lib_ready(lib) -> void:
+	_lib = lib
+	_tts = null
+	if lib:
+		lib.watch(self, "tts", _tts_here, _tts_gone)
+
+
+func _tts_here(tts: SlopitectModule) -> void:
+	_tts = tts
+
+
+func _tts_gone(_old: SlopitectModule) -> void:
+	_tts = null
+
+
 func _read_engine() -> bool:
 	# The tts module plays speech itself on the headset, so it knows best.
-	var tts: SlopitectModule = ctx["modules"].module("tts")
+	var tts: SlopitectModule = _tts if _lib else ctx["modules"].module("tts")
 	if tts != null:
 		return tts.speaking()
 	return ProjectSettings.get_setting("audio/general/text_to_speech", false) and DisplayServer.tts_is_speaking()

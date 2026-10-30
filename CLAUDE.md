@@ -69,6 +69,54 @@ module work, [docs/MODULE-FRAMEWORK.md](docs/MODULE-FRAMEWORK.md) and
 - The Quest 1 must keep working: `com.oculus.supportedDevices` stays
   `quest|quest2` (CI checks it). Keep it light; it is a Snapdragon 835.
 
+## Module design rules (the owner's, 2026-10-30)
+
+Every live module follows these. Rewrites of older modules to fit them go a
+small batch at a time; a module not yet rewritten is listed as such in
+[docs/MODULE-FRAMEWORK.md](docs/MODULE-FRAMEWORK.md).
+
+1. **Settings live in the module.** A module with settings declares them in
+   its own `settings_info()`; settings.gd reads them into the Settings
+   window. Labels 40 characters or less (a longer one broke the window).
+2. **Tools the same way.** A module exposes its tool with `tool_info()`
+   (and `tool_selected`, `tool_trigger`); tools.gd reads them.
+3. **All UI through vrui.gd** (`menu_info()`, `hand_info()`, `ui_*`
+   commands). No module draws its own panels or reads the trigger itself.
+4. **Signals, not polling.** Modules hear about each other through lib.gd's
+   events (`module_loaded`, `module_unloaded`, `info_changed`) and the
+   owner's own signals (projects' `project_changed`, inspect's
+   `selection_changed`), connected with `lib.follow()` / `lib.watch()`.
+   Never call `module()` or re-read another module's info every frame.
+5. **Shared helpers live in lib.gd** (`world_node`, `thing`, `things`,
+   `world_box`, `home`, `read_json`, `write_json`, cached `module`). Never
+   copy a helper into a module; add it to lib.gd instead.
+6. **No hard dependencies.** A module still loads and works, or quietly
+   turns that one feature off, when another module isn't loaded. lib.gd is
+   the framework, not a feature: a module does anything that needs lib or
+   another module in `lib_ready(lib)` (called once both are loaded, in
+   either order, and with null as lib goes), not in `setup()`.
+7. **Clean load and unload.** `_exit_tree()` removes the module's own
+   nodes, signals and timers, and puts back anything it changed elsewhere,
+   so a live reload leaks nothing. Prefer method callables over lambdas for
+   anything connected, so it can be disconnected.
+8. **Idle means off.** `set_process(false)` / `set_physics_process(false)`
+   while its tool isn't chosen, its window is closed, or it has nothing to
+   do; turn it back on from the event that needs it.
+9. **One owner per piece of data.** save.gd owns the world file, tools.gd
+   the undo history, projects.gd the current project, inspect.gd the
+   selection; others use the owner's API and signals, never its file.
+10. **A test per module.** `live-modules/tests/zz_NAME.gd`, run headless
+    with `live-modules/tests/run.sh NEEDED... NAME zz_NAME` (it prints PASS /
+    FAIL lines and a RESULT line), so the headset agent can check its edits.
+
+The APK can't load lib.gd first yet (live modules load in the order they
+were approved), which is why `lib_ready` exists; a loader signal or load
+order would be an APK change, so flag it rather than doing it.
+The headset agent gets the same rules from
+`live-modules/agent_skills/slopitect-code/SKILL.md`, which replaces the
+APK's code skill (put it in the headset's `modules/agent_skills/` from the
+PC; the agent can't change it).
+
 ## Testing
 
 Every live module is tested headless on a PC with Godot 4.7.2 before it

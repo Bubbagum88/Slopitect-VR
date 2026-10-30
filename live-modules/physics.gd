@@ -8,39 +8,96 @@ extends SlopitectModule
 # the floor, or the landscape module's ground while that's loaded. With the
 # grab module, a dynamic thing you let go of is thrown with the hand's speed.
 # Each thing's physics is kept in user://physics.json by its name, so it
-# comes back with the save module's world.
+# comes back with the save module's world: a thing that joins the world
+# with saved physics gets its body then (no scanning). Idle when nothing
+# is physical.
 
 const SETTINGS_PATH := "user://physics.json"
 const MODES := ["off", "static", "dynamic"]
 const LOST_BELOW := -30.0  # a thing that falls this far is put back where it was made dynamic
-const SCAN_SECONDS := 1.0
 
 var _bodies := {}  # node name -> {"node", "body": RigidBody3D, "written": Transform3D, "scale": Vector3, "home": Transform3D, "held": bool}
 var _settings := {}  # node name -> {"mode", "mass", "bounce", "friction"}
 var _ground: StaticBody3D
 var _ground_landscape := false
-var _since_scan := SCAN_SECONDS
+var _lib: SlopitectModule
+var _holder: Node  # World/PolyHaven, the placed models', once there is one
 
 
 func setup() -> String:
-	_load()
 	_ground = StaticBody3D.new()
 	_ground.name = "Ground"
 	add_child(_ground)
-	_build_ground()
+	_build_ground(null)
+	set_physics_process(false)
 	register("physics_set", _set_command, "make a shape or model physical: name, mode (dynamic: falls and collides; static: stays, others hit it; off), optional mass (kg), bounce (0-1), friction (0-1)")
 	register("physics_push", _push, "set a dynamic thing moving: name, velocity [x, y, z] in m/s")
 	register("physics_status", _status, "every physical thing: mode, whether it's moving or resting, its speed")
 	register("physics_config", _config, "from the PC only: gravity (m/s², default 9.8)")
+	var world: Node = ctx["world"]
+	world.child_entered_tree.connect(_joined)
+	if world.has_node("PolyHaven"):
+		_joined(world.get_node("PolyHaven"))
 	return ""
+
+
+func lib_ready(lib) -> void:
+	_lib = lib
+	if lib == null:
+		return
+	_load()
+	_restore_all()
+	lib.watch(self, "landscape", _build_ground, _landscape_gone)
+	lib.follow(self, "landscape", "changed", _landscape_changed)
+
+
+func _exit_tree() -> void:
+	var world: Node = ctx["world"]
+	if world.child_entered_tree.is_connected(_joined):
+		world.child_entered_tree.disconnect(_joined)
+	if is_instance_valid(_holder) and _holder.child_entered_tree.is_connected(_joined):
+		_holder.child_entered_tree.disconnect(_joined)
+
+
+# A thing joined the world (made, put back by the save module, an undo):
+# with saved physics it gets its body, once it's in place.
+func _joined(node: Node) -> void:
+	if node.name == "PolyHaven" and node.get_parent() == ctx["world"]:
+		_holder = node
+		if not node.child_entered_tree.is_connected(_joined):
+			node.child_entered_tree.connect(_joined)
+		return
+	if _settings.has(String(node.name)):
+		_restore.call_deferred(String(node.name))
+
+
+func _restore(node_name: String) -> void:
+	if _bodies.has(node_name) or not _settings.has(node_name) or _settings[node_name]["mode"] == "off" or _lib == null:
+		return
+	var node: Node3D = _lib.world_node(node_name)
+	if node:
+		_make_body(node, _settings[node_name])
+
+
+func _restore_all() -> void:
+	for node_name in _settings:
+		_restore(node_name)
 
 
 # --- The ground ----------------------------------------------------------------------
 
-func _build_ground() -> void:
+func _landscape_changed() -> void:
+	_build_ground(_lib.module("landscape") if _lib else null)
+
+
+func _landscape_gone(_landscape: SlopitectModule) -> void:
+	_build_ground(null)
+
+
+# The landscape's ground while it's loaded (landscape), or the floor (null).
+func _build_ground(landscape) -> void:
 	for child in _ground.get_children():
 		child.queue_free()
-	var landscape: SlopitectModule = ctx["modules"].module("landscape")
 	_ground_landscape = landscape != null
 	var shape := CollisionShape3D.new()
 	if landscape:
@@ -57,8 +114,6 @@ func _build_ground() -> void:
 		map.map_data = heights
 		shape.shape = map
 		shape.scale = Vector3.ONE * step
-		if not landscape.is_connected("changed", _build_ground):
-			landscape.connect("changed", _build_ground)
 	else:
 		shape.shape = WorldBoundaryShape3D.new()  # the floor, y = 0, everywhere
 	_ground.add_child(shape)
@@ -67,13 +122,7 @@ func _build_ground() -> void:
 # --- Bodies --------------------------------------------------------------------------
 
 func _find(node_name) -> Node3D:
-	if typeof(node_name) != TYPE_STRING or node_name.is_empty() or node_name.validate_node_name() != node_name:
-		return null
-	var world: Node3D = ctx["world"]
-	var node := world.get_node_or_null(NodePath(node_name)) as Node3D
-	if node == null and world.has_node("PolyHaven"):
-		node = world.get_node("PolyHaven").get_node_or_null(NodePath(node_name)) as Node3D
-	return node
+	return _lib.world_node(node_name) if _lib else null
 
 
 # The thing's box in its own space (without its scale), from its meshes.
@@ -161,6 +210,7 @@ func _make_body(node: Node3D, config: Dictionary) -> void:
 	body.global_transform = unscaled
 	_bodies[String(node.name)] = {"node": node, "body": body, "written": node.global_transform, "scale": node.global_basis.get_scale(),
 		"home": unscaled, "held": false}
+	set_physics_process(true)
 
 
 func _drop_body(node_name: String) -> void:
@@ -169,6 +219,7 @@ func _drop_body(node_name: String) -> void:
 		if is_instance_valid(body):
 			body.queue_free()
 		_bodies.erase(node_name)
+	set_physics_process(not _bodies.is_empty())
 
 
 func _physics_process(_delta: float) -> void:
@@ -177,7 +228,7 @@ func _physics_process(_delta: float) -> void:
 		var node: Node3D = entry["node"]
 		var body: RigidBody3D = entry["body"]
 		if not is_instance_valid(node) or not node.is_inside_tree() or String(node.name) != node_name:
-			_drop_body(node_name)  # deleted or renamed; the scan picks it up again by name
+			_drop_body(node_name)  # deleted or renamed; it gets a body again when it's back
 			continue
 		var scale := node.global_basis.get_scale()
 		if not scale.is_equal_approx(entry["scale"]) and not entry["held"]:
@@ -200,21 +251,6 @@ func _physics_process(_delta: float) -> void:
 			body.linear_velocity = Vector3.ZERO
 		node.global_transform = Transform3D(body.global_basis * Basis.from_scale(scale), body.global_position)
 		entry["written"] = node.global_transform
-
-
-func _process(delta: float) -> void:
-	_since_scan += delta
-	if _since_scan < SCAN_SECONDS:
-		return
-	_since_scan = 0.0
-	# Things with saved physics that came back (the save module, a restart).
-	for node_name in _settings:
-		if not _bodies.has(node_name) and _settings[node_name]["mode"] != "off":
-			var node := _find(node_name)
-			if node:
-				_make_body(node, _settings[node_name])
-	if (ctx["modules"].module("landscape") != null) != _ground_landscape:
-		_build_ground()
 
 
 # For the grab module: a held thing follows the hand, not the physics.
@@ -257,6 +293,8 @@ func _number_in(request: Dictionary, key: String, low: float, high: float, fallb
 
 
 func _set_command(request: Dictionary) -> Dictionary:
+	if _lib == null:
+		return {"ok": false, "error": "physics is waiting for the lib module (load lib.gd)"}
 	var node := _find(request.get("name"))
 	if node == null:
 		return {"ok": false, "error": "no shape or model named %s (list and assets_placed show them)" % JSON.stringify(request.get("name"))}
@@ -319,7 +357,7 @@ func _config(request: Dictionary) -> Dictionary:
 func _load() -> void:
 	if not FileAccess.file_exists(SETTINGS_PATH):
 		return
-	var saved = JSON.parse_string(FileAccess.get_file_as_string(SETTINGS_PATH))
+	var saved = _lib.read_json(SETTINGS_PATH)
 	if typeof(saved) != TYPE_DICTIONARY:
 		push_error("Slopitect physics: %s isn't readable; starting with nothing physical" % SETTINGS_PATH)
 		return
@@ -330,9 +368,6 @@ func _load() -> void:
 
 
 func _save() -> void:
-	var out := FileAccess.open(SETTINGS_PATH, FileAccess.WRITE)
-	if out == null:
-		push_error("Slopitect physics: couldn't save %s" % SETTINGS_PATH)
-		return
-	out.store_string(JSON.stringify(_settings, "\t"))
-	out.close()
+	var problem: String = _lib.write_json(SETTINGS_PATH, _settings, "\t") if _lib else "the lib module isn't loaded"
+	if not problem.is_empty():
+		push_error("Slopitect physics: couldn't save %s: %s" % [SETTINGS_PATH, problem])

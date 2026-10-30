@@ -74,6 +74,9 @@ var _origin: XROrigin3D  # what walking and turning move (null: they're off)
 var _snapped := false
 var _walk_from = null  # where a walk started (Vector3), null when standing
 var _walk_stick := Vector2.ZERO  # the biggest push of this walk, for the log
+var _lib: SlopitectModule
+var _confirm: SlopitectModule  # the APK's Yes/No window, asked many times a frame
+var _landscape: SlopitectModule  # the ground walked on, while it's loaded
 
 
 func setup() -> String:
@@ -92,6 +95,24 @@ func setup() -> String:
 	register("move_config", _move_config, "from the PC only: any of speed (m/s), deadzone (0 to 0.9), turn (snap or smooth), snap_degrees, smooth_degrees (a second), follow_ground (true/false)")
 	register("controls_config", _config, "from the PC only: buttons {\"hand/button\": action, a command {\"cmd\": ...}, a window {\"panel\": id_panel} or \"\"}, sticks {hand: name or \"\"}, or reset true")
 	return ""
+
+
+# With lib, the modules asked every frame are kept at hand instead of looked
+# up each time (before lib arrives, they're looked up).
+func lib_ready(lib) -> void:
+	_lib = lib
+	_confirm = lib.module("confirm") if lib else null
+	_landscape = null
+	if lib:
+		lib.watch(self, "landscape", _landscape_here, _landscape_gone)
+
+
+func _landscape_here(landscape: SlopitectModule) -> void:
+	_landscape = landscape
+
+
+func _landscape_gone(_old: SlopitectModule) -> void:
+	_landscape = null
 
 
 func _exit_tree() -> void:
@@ -138,7 +159,7 @@ func pulse(hand: String, strength: float, seconds: float) -> void:
 
 
 func _asking() -> bool:
-	var confirm: SlopitectModule = ctx["modules"].module("confirm")
+	var confirm: SlopitectModule = _confirm if _confirm != null else ctx["modules"].module("confirm")
 	return confirm != null and confirm.call("asking")
 
 
@@ -255,7 +276,7 @@ func _turn_by(degrees: float) -> void:
 
 
 func _ground_under(at: Vector3) -> float:
-	var landscape: SlopitectModule = ctx["modules"].module("landscape")
+	var landscape: SlopitectModule = _landscape if _lib else ctx["modules"].module("landscape")
 	if landscape and landscape.call("inside", at.x, at.z):
 		return landscape.call("height_at", at.x, at.z)
 	return 0.0
@@ -379,6 +400,8 @@ func _move_config(request: Dictionary) -> Dictionary:
 		out.close()
 	else:
 		push_error("Slopitect controls: couldn't save %s (error %d)" % [MOVE_PATH, FileAccess.get_open_error()])
+	if _lib:
+		_lib.touch(self)  # the Settings window shows the new values
 	return {"ok": true, "settings": move}
 
 
@@ -507,3 +530,5 @@ func _save() -> void:
 		return
 	out.store_string(JSON.stringify({"buttons": buttons, "sticks": sticks}, "\t"))
 	out.close()
+	if _lib:
+		_lib.touch(self)  # the Settings window shows the new values

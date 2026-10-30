@@ -36,14 +36,14 @@ extends SlopitectModule
 const PANEL := "settings"
 const WIDTH := 0.42
 const FULL := [0.42, 0.055]
-const SCAN_SECONDS := 1.0  # while the window is open: redraw if a module or a value changed
 const KINDS := ["choice", "slider", "toggle", "button"]
 const PAGES := ["Move", "Look", "Other", "Speech"]
 const PAGE_OF := {"controls": "Move", "vrui": "Look", "hands": "Look", "avatar": "Look", "tts": "Speech", "vtt": "Speech"}
 const PAGE_OTHER := "Other"
 
 var _signature := ""  # what the window was last drawn from
-var _since_scan := 0.0
+var _is_open := false  # the window is showing (vrui's panel_shown)
+var _soon := false  # a redraw is due at the end of this frame
 var _reported := {}  # problems already logged, so an open window doesn't log one every second
 
 
@@ -52,6 +52,46 @@ func setup() -> String:
 	register("settings_set", _set_command, "change a setting the Settings window shows: module, id_setting (its id), value (what settings_list allows; not for a button)")
 	register("settings_do", _do, "the Settings window: act = toggle, show, hide, refresh, new_conversation")
 	return ""
+
+
+# No checking every second: the window is drawn again when it opens, and
+# while it's open when a module comes or goes or says its settings changed
+# (lib.touch).
+func lib_ready(lib) -> void:
+	if lib == null:
+		return
+	_is_open = _shown()
+	lib.follow(self, "vrui", "panel_shown", _on_shown)
+	lib.follow(self, "lib", "module_loaded", _on_module)
+	lib.follow(self, "lib", "module_unloaded", _on_module)
+	lib.follow(self, "lib", "info_changed", _on_module)
+
+
+func _on_shown(id_panel: String, on: bool) -> void:
+	if id_panel == PANEL:
+		_is_open = on
+		if on:
+			_redraw_soon()
+
+
+func _on_module(_module_name: String) -> void:
+	if _is_open:
+		_redraw_soon()
+
+
+# At the end of the frame, so a module being unloaded is gone by then, and
+# several changes at once draw once.
+func _redraw_soon() -> void:
+	if _soon:
+		return
+	_soon = true
+	_redraw_now.call_deferred()
+
+
+func _redraw_now() -> void:
+	_soon = false
+	if is_inside_tree() and _is_open:
+		_build()
 
 
 func _exit_tree() -> void:
@@ -69,15 +109,6 @@ func settings_info() -> Dictionary:
 	return {"title": "The agent", "order": 900, "settings": [
 		{"id": "new_conversation", "type": "button", "label": "New conversation", "set": {"cmd": "settings_do", "act": "new_conversation"}},
 	]}
-
-
-func _process(delta: float) -> void:
-	_since_scan += delta
-	if _since_scan < SCAN_SECONDS:
-		return
-	_since_scan = 0.0
-	if _shown():
-		_build()
 
 
 func _run(request: Dictionary) -> Dictionary:

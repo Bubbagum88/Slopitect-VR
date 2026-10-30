@@ -133,6 +133,13 @@ func setup() -> String:
 	return ""
 
 
+var _lib: SlopitectModule
+
+
+func lib_ready(lib) -> void:
+	_lib = lib
+
+
 func _exit_tree() -> void:
 	if _sherpa_thread and _sherpa_thread.is_started():
 		_sherpa_lock.lock()
@@ -177,9 +184,9 @@ func settings_info() -> Dictionary:
 
 func _process(delta: float) -> void:
 	_since_files += delta
-	if _since_files >= FILE_POLL_SECONDS:
+	if _since_files >= FILE_POLL_SECONDS and not (_jobs.is_empty() and _waiting.is_empty()):
 		_since_files = 0.0
-		_update_in_app()
+		_update_in_app()  # only while there's speech to write or play
 	if settings["tts_engine"] == "sherpa":
 		_sherpa_play()
 	_since_poll += delta
@@ -800,6 +807,8 @@ func _change(request: Dictionary) -> Dictionary:
 		settings[key] = changes[key]
 	if not changes.is_empty():
 		_save_settings()
+		if _lib:
+			_lib.touch(self)  # the Settings window shows the new values
 	if changes.has("speak_replies") and not settings["speak_replies"]:
 		_stop_command({})
 	if changes.has("tts_engine") or changes.has("tts_sherpa_voice"):

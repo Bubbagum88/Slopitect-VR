@@ -27,7 +27,6 @@ const GAP := 0.007
 const UNIT := KEY + GAP
 const COLS := 11  # keys in a row
 const ROW_Y := 0.14  # centre of the top row of keys, in the window
-const CHECK_SECONDS := 0.25
 const COMMAND_KEYS := ["1234567890-", "qwertyuiop/", "asdfghjkl_=", "zxcvbnm,.[]"]
 const WORD_KEYS := ["1234567890-", "qwertyuiop'", "asdfghjkl?!", "zxcvbnm,./:"]
 # Keyboard parts on the chat window (the row keys are key_R_C).
@@ -35,7 +34,8 @@ const OTHER_IDS := ["space", "del", "clear", "quote", "shift"]
 const DISPLAY := "display"
 const SHOWN := 36  # most characters the display line shows
 
-var _since := CHECK_SECONDS
+var _lib: SlopitectModule
+var _soon := false  # a check is due at the end of this frame
 var _layout := ""  # "command" or "words": the keys the window was built with
 var _text := ""  # typed on the display line, not sent yet
 var _shift := false  # the next letter is a capital
@@ -70,16 +70,36 @@ func _run(request: Dictionary) -> Dictionary:
 
 
 func _ui() -> SlopitectModule:
-	var ui: SlopitectModule = ctx["modules"].module("vrui")
+	var ui: SlopitectModule = _lib.module("vrui") if _lib else null
 	return ui if ui != null and ui.has_method("focus") else null
 
 
-func _process(delta: float) -> void:
-	_since += delta
-	if _since < CHECK_SECONDS:
+# Nothing is checked every frame: the keys are looked at again when a window
+# opens, closes or changes, the focus moves, the terminal switches mode, or
+# a module comes or goes.
+func lib_ready(lib) -> void:
+	_lib = lib
+	if lib == null:
 		return
-	_since = 0.0
-	if _ui() == null:
+	for sig in ["panel_shown", "panel_changed", "focus_changed"]:
+		lib.follow(self, "vrui", sig, _check_soon)
+	lib.follow(self, TERMINAL, "mode_changed", _check_soon)
+	lib.follow(self, "lib", "module_loaded", _check_soon)
+	lib.follow(self, "lib", "module_unloaded", _check_soon)
+	_check_soon()
+
+
+# Once at the end of the frame, however many things changed.
+func _check_soon(_a = null, _b = null) -> void:
+	if _soon:
+		return
+	_soon = true
+	_check.call_deferred()
+
+
+func _check() -> void:
+	_soon = false
+	if not is_inside_tree() or _ui() == null:
 		return
 	var shown := _shown()
 	var target := _target(shown)
@@ -96,7 +116,7 @@ func _target(shown: Dictionary) -> String:
 	var ui := _ui()
 	if ui == null:
 		return ""
-	var terminal: bool = ctx["modules"].module(TERMINAL) != null and shown.get(TERMINAL, false)
+	var terminal: bool = _lib.module(TERMINAL) != null and shown.get(TERMINAL, false)
 	var focus: String = ui.call("focus")
 	var window: String = ui.call("focused_window")
 	if terminal and window == TERMINAL:

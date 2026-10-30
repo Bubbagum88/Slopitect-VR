@@ -81,6 +81,8 @@ var _mic_player: AudioStreamPlayer
 var _http: HTTPRequest
 var _busy := false  # a recording is being turned into text
 var _last := ""  # what happened last, for vtt_status
+var _lib: SlopitectModule
+var _filling := false  # changing the hand menu's line ourselves
 var _status_shown := []  # [text, colour] last put on the hand menu
 var _status_retry_at := 0.0  # when to try again while there's no hand menu
 
@@ -116,6 +118,21 @@ func setup() -> String:
 	var problem := _vtt_problem()
 	print("Slopitect vtt: hold-to-talk %s (%s)" % ["on" if problem.is_empty() else "off: " + problem, settings["vtt_engine"]])
 	return ""
+
+
+# The hand menu (pause.gd's) may be built after this, or again: its status
+# line is filled then.
+func lib_ready(lib) -> void:
+	_lib = lib
+	if lib:
+		lib.follow(self, "vrui", "panel_changed", _on_panel)
+
+
+func _on_panel(id_panel: String) -> void:
+	if id_panel == "hand_menu" and not _filling:
+		_status_shown = []
+		_status_retry_at = 0.0
+		set_process(true)
 
 
 func _exit_tree() -> void:
@@ -166,16 +183,23 @@ func _show_status() -> void:
 	var now := Time.get_ticks_msec() / 1000.0
 	if status == _status_shown or now < _status_retry_at:
 		return
+	_filling = true
 	var reply: Dictionary = ctx["server"].run({"cmd": "ui_element_update", "id_panel": "hand_menu", "id_element": "st_vtt", "text": status[0], "color": status[1]})
+	_filling = false
 	if reply.get("ok", false):
 		_status_shown = status
+		_status_retry_at = 0.0
 	else:
 		_status_retry_at = now + 1.0  # no hand menu (yet): pause.gd builds it, with this line
 
 
+# On while you talk, while words are being turned into text, and until the
+# hand menu shows the latest line; off the rest of the time.
 func _process(_delta: float) -> void:
 	_show_status()
 	if not _recording:
+		if not _busy and (_status_shown == _status_now() or _status_retry_at > 0.0):
+			set_process(false)  # a hand menu that comes later is filled then (lib_ready)
 		return
 	if Time.get_ticks_msec() / 1000.0 - _started_at >= MAX_SECONDS:
 		_note("stopped listening after %d seconds" % MAX_SECONDS)
@@ -254,6 +278,7 @@ func _start_listening() -> void:
 	_mic_player.play()
 	_record.set_recording_active(true)
 	_recording = true
+	set_process(true)  # the hand menu line follows; off again once idle
 	_started_at = Time.get_ticks_msec() / 1000.0
 	print("Slopitect vtt: listening")
 
@@ -277,11 +302,13 @@ func _stop_listening() -> void:
 		# Nothing is turned into text: the press was too short to be talking.
 		if sherpa:
 			_busy = true  # until its thread has stopped
+			set_process(true)  # the hand menu line follows; off again once idle
 			_sherpa_end(true)
 		_note("ignored a %.1f s press (shorter than min_hold, %.1f s); hold the trigger while you talk" % [seconds, float(settings["min_hold"])])
 		return
 	if sherpa:
 		_busy = true
+		set_process(true)  # the hand menu line follows; off again once idle
 		_sherpa_end(false)
 		return
 	if settings["vtt_engine"] == "local":
@@ -311,6 +338,7 @@ func _transcribe_local(frames: PackedVector2Array, seconds: float) -> void:
 		language = "en"
 	_local.set("language", LOCAL_LANGUAGES[language])
 	_busy = true
+	set_process(true)  # the hand menu line follows; off again once idle
 	print("Slopitect vtt: heard %.1f s (%d frames at %d Hz), turning it into text on the headset" % [seconds, frames.size(), int(AudioServer.get_mix_rate())])
 	_local_thread = Thread.new()
 	_local_thread.start(_local_work.bind(frames, path))
@@ -635,6 +663,7 @@ func _sherpa_done(report: Dictionary, stream) -> void:
 
 func _transcribe(recording: AudioStreamWAV) -> void:
 	_busy = true
+	set_process(true)  # the hand menu line follows; off again once idle
 	var path := OS.get_cache_dir().path_join("slopitect-speech.wav") if OS.get_cache_dir() != "" else "user://speech.wav"
 	var err := recording.save_to_wav(path)
 	var audio := FileAccess.get_file_as_bytes(path)
@@ -710,6 +739,7 @@ func _deliver(words: String) -> void:
 
 func _note(text: String) -> void:
 	_last = text
+	set_process(true)  # the hand menu line follows; off again once idle
 	print("Slopitect vtt: ", text)
 
 
@@ -781,6 +811,8 @@ func _change(request: Dictionary) -> Dictionary:
 		_sherpa = null
 		_sherpa_model = ""
 		print("Slopitect vtt: sherpa-onnx speech-to-text model unloaded")
+	if _lib:
+		_lib.touch(self)  # the Settings window shows the new values
 	var shown := settings.duplicate()
 	shown["vtt_key"] = "(set)" if not String(settings["vtt_key"]).is_empty() else "(not set)"
 	return {"ok": true, "settings": shown}
