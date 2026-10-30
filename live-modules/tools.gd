@@ -15,7 +15,11 @@ extends SlopitectModule
 #   tool_trigger(down: bool) the "point" action (the right trigger), unless
 #                            you're pointing at a panel or a question is open
 # Any module can add to the shared undo list with
-# push_undo(label, undo: Callable, redo: Callable).
+# push_undo(label, undo: Callable, redo: Callable). Changes made between
+# undo_batch_begin(label) and undo_batch_end() are one undo (undone newest
+# first, redone oldest first), so a change made of many is one press;
+# undo_batch_end(undo, redo) instead replaces what was pushed inside with
+# that one pair (for a change that knows how to take itself back whole).
 
 const PANEL := "tools"
 const SCAN_SECONDS := 0.5
@@ -30,6 +34,9 @@ var _tools := {}  # id -> the module
 var _signature := ""  # what the panel was last built from
 var _undo: Array = []  # [{label, undo, redo}], newest last
 var _redo: Array = []
+var _batch: Array = []  # [label, [entries]] while a batch is open
+var _batch_depth := 0
+var _stepping := false  # while an undo or redo runs, its own changes add nothing
 var _trigger_down := false
 var _since_scan := SCAN_SECONDS
 
@@ -65,7 +72,50 @@ func _process(delta: float) -> void:
 # --- Shared undo -------------------------------------------------------------------
 
 func push_undo(label: String, undo: Callable, redo: Callable) -> void:
-	_undo.append({"label": label, "undo": undo, "redo": redo})
+	if _stepping:
+		return  # an undo putting a thing back through a command that keeps its own undo
+	if _batch_depth > 0:
+		_batch[1].append({"label": label, "undo": undo, "redo": redo})
+		return
+	_add({"label": label, "undo": undo, "redo": redo})
+
+
+# Batches nest: only the outermost one's label is kept.
+func undo_batch_begin(label: String) -> void:
+	if _stepping:
+		return
+	if _batch_depth == 0:
+		_batch = [label, []]
+	_batch_depth += 1
+
+
+func undo_batch_end(undo := Callable(), redo := Callable()) -> void:
+	if _batch_depth == 0:
+		return
+	_batch_depth -= 1
+	if _batch_depth > 0:
+		return
+	var label: String = _batch[0]
+	var entries: Array = _batch[1]
+	_batch = []
+	if undo.is_valid() and redo.is_valid():
+		_add({"label": label, "undo": undo, "redo": redo})
+	elif entries.size() == 1:
+		_add(entries[0])
+	elif entries.size() > 1:
+		var undo_all := func():
+			for i in range(entries.size() - 1, -1, -1):
+				if (entries[i]["undo"] as Callable).is_valid():
+					(entries[i]["undo"] as Callable).call()
+		var redo_all := func():
+			for entry in entries:
+				if (entry["redo"] as Callable).is_valid():
+					(entry["redo"] as Callable).call()
+		_add({"label": label, "undo": undo_all, "redo": redo_all})
+
+
+func _add(entry: Dictionary) -> void:
+	_undo.append(entry)
 	if _undo.size() > MAX_UNDO:
 		_undo.pop_front()
 	_redo.clear()
@@ -88,7 +138,9 @@ func _step(from: Array, to: Array, key: String, done: String) -> Dictionary:
 	if from.is_empty():
 		return {"ok": false, "error": "nothing to %s" % key}
 	var entry: Dictionary = from.pop_back()
+	_stepping = true
 	(entry[key] as Callable).call()
+	_stepping = false
 	to.append(entry)
 	_signature = ""
 	print("Slopitect tools: %s \"%s\"" % [done, entry["label"]])

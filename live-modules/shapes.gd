@@ -162,6 +162,19 @@ func recipe(node_name: String) -> Dictionary:
 	return _made.get(node_name, {}).duplicate(true)
 
 
+# A made shape's recipe and where it is (as get_made() has it), and making it
+# again from that with no undo of its own: for undoing a delete.
+func made_entry(node_name: String) -> Dictionary:
+	for entry in get_made()["shapes"]:
+		if entry["name"] == node_name:
+			return entry
+	return {}
+
+
+func remake(entry: Dictionary) -> void:
+	_recreate(entry)
+
+
 func attach_points(node_name: String) -> Array:
 	var node := _node(node_name)
 	if node == null:

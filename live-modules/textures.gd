@@ -184,7 +184,7 @@ func _clear_command(request: Dictionary) -> Dictionary:
 	for n in names:
 		_map.erase(n)
 		var node := _find(n)
-		if node and node.material_override == _mine.get(n):
+		if node and _mine.has(n) and node.material_override == _mine[n]:
 			var base = _mine[n].get_meta("base")
 			var m := StandardMaterial3D.new()
 			m.albedo_color = base

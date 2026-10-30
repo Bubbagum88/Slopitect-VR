@@ -4,8 +4,10 @@ extends SlopitectModule
 # Multi-select and groups. Choose "Multi" in the tool window, point at
 # shapes or models and pull the trigger to add or take them away (cyan
 # boxes). Group them: a group then selects as one, and moving any member
-# (grab, move, undo) moves the rest with it. Groups are kept per project
-# in saves/groups.json.
+# (grab, move, undo) moves the rest with it; while a member is held, the
+# rest follow that one even if physics moves them too. Grouping, ungrouping,
+# and the Delete / Hide / Grab buttons are each one undo. Groups are kept
+# per project in saves/groups.json.
 
 const REACH := 20.0
 const NO_COLOR := Color(0.2, 0.9, 1.0)
@@ -39,7 +41,7 @@ func setup() -> String:
 	register("multi_ungroup", _ungroup_command, "break a group: optional group (default every group in the selection)")
 	register("multi_move", _move_command, "move the selection (and its groups): offset [x, y, z] in m; one undo")
 	register("multi_set", _set_command, "switches for every selected thing: grabbable and/or hidden (true/false)")
-	register("multi_delete", _delete_command, "delete every selected thing (each one undo)")
+	register("multi_delete", _delete_command, "delete every selected thing (one undo)")
 	return ""
 
 
@@ -56,10 +58,15 @@ func _process(delta: float) -> void:
 
 
 func _physics_process(_delta: float) -> void:
+	var held := []
+	var grab: SlopitectModule = ctx["modules"].module("grab")
+	if grab and grab.has_method("held"):
+		held = grab.call("held")
 	for g in _groups:
 		var nodes := []
 		var moved: Node3D = null
 		var moved_count := 0
+		var leader: Node3D = null  # a member in a hand leads, whatever else moved
 		for m in _groups[g]:
 			var n := _find(m)
 			if n == null:
@@ -68,6 +75,11 @@ func _physics_process(_delta: float) -> void:
 			if _last.has(m) and not (_last[m] as Transform3D).is_equal_approx(n.global_transform):
 				moved_count += 1
 				moved = n
+				if leader == null and n in held:
+					leader = n
+		if leader != null:
+			moved = leader
+			moved_count = 1
 		if moved_count == 1:
 			var change: Transform3D = moved.global_transform * (_last[String(moved.name)] as Transform3D).affine_inverse()
 			for n in nodes:
@@ -75,6 +87,49 @@ func _physics_process(_delta: float) -> void:
 					n.global_transform = change * n.global_transform
 		for n in nodes:
 			_last[String(n.name)] = n.global_transform
+
+
+# --- For other modules ---------------------------------------------------------------
+
+# The things that move with node_name: its group, or just itself.
+func members(node_name: String) -> Array:
+	var g := _group_of(node_name)
+	return _groups[g].duplicate() if not g.is_empty() else [node_name]
+
+
+# Takes a deleted thing out of its group (a group left with one member
+# goes); what put_in needs to put it back, or {} if it was in none.
+func take_out(node_name: String) -> Dictionary:
+	_selection.erase(node_name)
+	_last.erase(node_name)
+	var g := _group_of(node_name)
+	if g.is_empty():
+		return {}
+	var info := {"group": g, "members": _groups[g].duplicate()}
+	_groups[g].erase(node_name)
+	if _groups[g].size() < 2:
+		_groups.erase(g)
+	_save()
+	return info
+
+
+func put_in(node_name: String, info: Dictionary) -> void:
+	var g: String = info.get("group", "")
+	if g.is_empty() or not _group_of(node_name).is_empty():
+		return
+	if not _groups.has(g):
+		# It went when this one left: back with the members that aren't in
+		# another group now.
+		_groups[g] = (info.get("members", []) as Array).filter(func(m): return m == node_name or _group_of(m).is_empty())
+	elif not node_name in _groups[g]:
+		_groups[g].append(node_name)
+	if _groups[g].size() < 2:
+		_groups.erase(g)
+	for m in _groups.get(g, []):
+		var node := _find(m)
+		if node:
+			_last[m] = node.global_transform
+	_save()
 
 
 # --- The tool ------------------------------------------------------------------------
@@ -310,11 +365,15 @@ func _group_command(request: Dictionary) -> Dictionary:
 	var g = request.get("group", "")
 	if typeof(g) != TYPE_STRING:
 		return {"ok": false, "error": "\"group\" must be a name"}
+	var joining := _groups_of(names)
+	if g.is_empty() and not joining.is_empty():
+		g = joining[0]  # adding to a group keeps its name
 	if g.is_empty():
 		var i := 1
 		while _groups.has("group%d" % i):
 			i += 1
 		g = "group%d" % i
+	var before := _groups.duplicate(true)
 	# A thing is in one group at most; grouping groups merges them.
 	var members := []
 	for n in names:
@@ -330,11 +389,8 @@ func _group_command(request: Dictionary) -> Dictionary:
 			if not m in members:
 				members.append(m)
 	_groups[g] = members
-	for m in members:
-		var node := _find(m)
-		if node:
-			_last[m] = node.global_transform
-	_save()
+	_put_groups(_groups)
+	_undo("group %d things" % members.size(), before)
 	return {"ok": true, "group": g, "members": members}
 
 
@@ -348,12 +404,30 @@ func _ungroup_command(request: Dictionary) -> Dictionary:
 		gs = _groups_of(_selection)
 	if gs.is_empty():
 		return {"ok": false, "error": "nothing selected is in a group"}
+	var before := _groups.duplicate(true)
 	for g in gs:
-		for m in _groups[g]:
-			_last.erase(m)
 		_groups.erase(g)
-	_save()
+	_put_groups(_groups)
+	_undo("ungroup " + ", ".join(PackedStringArray(gs)), before)
 	return {"ok": true, "ungrouped": gs}
+
+
+# Groups as they are now become one undo back to before.
+func _undo(label: String, before: Dictionary) -> void:
+	var tools: SlopitectModule = ctx["modules"].module("tools")
+	if tools:
+		tools.call("push_undo", label, _put_groups.bind(before), _put_groups.bind(_groups.duplicate(true)))
+
+
+func _put_groups(groups: Dictionary) -> void:
+	_groups = groups.duplicate(true)
+	_last.clear()  # seen afresh, so nothing counts as moved
+	for g in _groups:
+		for m in _groups[g]:
+			var node := _find(m)
+			if node:
+				_last[m] = node.global_transform
+	_save()
 
 
 func _move_command(request: Dictionary) -> Dictionary:
@@ -404,10 +478,27 @@ func _set_command(request: Dictionary) -> Dictionary:
 	if request_out.size() == 1:
 		return {"ok": false, "error": "multi_set needs grabbable and/or hidden"}
 	var failed := []
+	var before := {}  # name -> its switches before, for the undo
+	var after := {}
+	var inspect: SlopitectModule = ctx["modules"].module("inspect")
+	var switches: Dictionary = inspect.call("get_settings") if inspect else {}
 	for n in _selection:
+		var was: Dictionary = switches.get(n, {})
 		var r: Dictionary = ctx["server"].run(request_out.merged({"name": n}))
 		if not r.get("ok", false):
 			failed.append("%s: %s" % [n, r.get("error")])
+			continue
+		before[n] = {"grabbable": was.get("grabbable", true), "hidden": was.get("hidden", false)}
+		after[n] = {"grabbable": r["grabbable"], "hidden": r["hidden"]}
+	var tools: SlopitectModule = ctx["modules"].module("tools")
+	if tools and not before.is_empty():
+		var put := func(where: Dictionary):
+			for n in where:
+				ctx["server"].run({"cmd": "inspect_set", "name": n, "grabbable": where[n]["grabbable"], "hidden": where[n]["hidden"]})
+		var what := "grab on" if request_out.get("grabbable", false) else "grab off"
+		if request_out.has("hidden"):
+			what = "hide" if request_out["hidden"] else "show"
+		tools.call("push_undo", "%s %d things" % [what, before.size()], put.bind(before), put.bind(after))
 	if request_out.get("hidden", false):
 		_selection.clear()
 	return {"ok": failed.is_empty(), "error": "; ".join(PackedStringArray(failed))} if not failed.is_empty() else {"ok": true}
@@ -419,12 +510,17 @@ func _delete_command(_request: Dictionary) -> Dictionary:
 		return {"ok": false, "error": "nothing selected"}
 	var deleted := []
 	var failed := []
+	var tools: SlopitectModule = ctx["modules"].module("tools")
+	if tools:
+		tools.call("undo_batch_begin", "delete %d things" % _selection.size())
 	for n in _selection.duplicate():
 		var r: Dictionary = ctx["server"].run({"cmd": "inspect_delete", "name": n})
 		if r.get("ok", false):
 			deleted.append(n)
 		else:
 			failed.append("%s: %s" % [n, r.get("error")])
+	if tools:
+		tools.call("undo_batch_end")
 	_selection.clear()
 	var reply := {"ok": failed.is_empty(), "deleted": deleted}
 	if not failed.is_empty():

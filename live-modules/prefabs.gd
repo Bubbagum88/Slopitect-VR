@@ -9,7 +9,7 @@ extends SlopitectModule
 
 func setup() -> String:
 	register("prefabs_save", _save_command, "save things as a prefab asset: name (letters, digits, _ and -); which things: names [..] and/or prefixes [name starts], or (neither given) what the Multi tool has selected; optional origin [x, y, z] (default the middle of their footprint, on the floor)")
-	register("prefabs_place", _place_command, "place a copy of a prefab: name, position [x, y, z] (where its origin goes); optional suffix for the new names (default _2, _3, ...)")
+	register("prefabs_place", _place_command, "place a copy of a prefab: name, position [x, y, z] (where its origin goes); optional suffix for the new names (default _2, _3, ...); one undo")
 	register("prefabs_list", _list_command, "the saved prefabs: name, how many shapes and models")
 	register("prefabs_delete", _delete_command, "delete a saved prefab: name")
 	return ""
@@ -178,7 +178,38 @@ func _taken(n: String) -> bool:
 	return world.get_node_or_null(NodePath(n)) != null
 
 
+# Placing is one undo, which takes away all it placed; redo places it again.
 func _place_command(request: Dictionary) -> Dictionary:
+	var tools: SlopitectModule = ctx["modules"].module("tools")
+	if tools:
+		tools.call("undo_batch_begin", "place prefab %s" % str(request.get("name")))
+	var reply := _place(request)
+	if tools:
+		if reply.get("ok", false) and not reply["names"].is_empty():
+			var again := request.duplicate()
+			again["suffix"] = reply["suffix"]
+			tools.call("undo_batch_end", _take_away.bind(reply["names"], reply["door_names"]), _place.bind(again))
+		else:
+			tools.call("undo_batch_end")
+	return reply
+
+
+func _take_away(names: Array, door_names: Array) -> void:
+	for d in door_names:
+		_run({"cmd": "doors_remove", "name": d})
+	var multi: SlopitectModule = ctx["modules"].module("multi")
+	for n in names:
+		if multi:
+			multi.call("take_out", n)
+		var world: Node3D = ctx["world"]
+		if world.has_node(NodePath(n)):
+			_run({"cmd": "textures_clear", "names": [n]})
+			_run({"cmd": "delete", "name": n})
+		else:
+			_run({"cmd": "assets_remove", "name": n})
+
+
+func _place(request: Dictionary) -> Dictionary:
 	var name = request.get("name")
 	if not _good_name(name):
 		return {"ok": false, "error": "\"name\" must be a prefab name (prefabs_list)"}
@@ -213,6 +244,8 @@ func _place_command(request: Dictionary) -> Dictionary:
 		if _taken(n + suffix):
 			return {"ok": false, "error": "%s already exists; pick another suffix" % (n + suffix)}
 	var made := 0
+	var names := []  # what was placed, for the undo
+	var door_names := []
 	var failed := []
 	for o in data.get("shapes", []):
 		var req := {"cmd": "spawn", "shape": o.get("shape", "box"), "name": String(o["name"]) + suffix, "position": _arr(_vec(o.get("position")) + at), "rotation": o.get("rotation", [0, 0, 0]), "scale": o.get("scale", [1, 1, 1])}
@@ -230,6 +263,7 @@ func _place_command(request: Dictionary) -> Dictionary:
 		var r := _run(req)
 		if r.get("ok", false):
 			made += 1
+			names.append(req["name"])
 		else:
 			failed.append({"name": req["name"], "error": r.get("error", "?")})
 	for m in data.get("models", []):
@@ -239,6 +273,7 @@ func _place_command(request: Dictionary) -> Dictionary:
 		var r := _run(req)
 		if r.get("ok", false):
 			made += 1
+			names.append(req["name"])
 		else:
 			failed.append({"name": req["name"], "error": r.get("error", "?")})
 	var tex = data.get("textures", {})
@@ -264,7 +299,9 @@ func _place_command(request: Dictionary) -> Dictionary:
 		for p in d.get("parts", []):
 			parts.append(String(p) + suffix)
 		var r := _run({"cmd": "doors_add", "name": String(id) + suffix, "parts": parts, "hinge": hinge, "axis": d.get("axis", "y"), "angle": d.get("angle", 100.0)})
-		if not r.get("ok", false):
+		if r.get("ok", false):
+			door_names.append(String(id) + suffix)
+		else:
 			failed.append({"name": String(id) + suffix, "error": r.get("error", "?")})
 	var groups = data.get("groups", {})
 	for g in groups:
@@ -272,7 +309,7 @@ func _place_command(request: Dictionary) -> Dictionary:
 		for n in groups[g]:
 			members.append(String(n) + suffix)
 		_run({"cmd": "multi_group", "names": members, "group": String(g) + suffix})
-	return {"ok": true, "placed": made, "suffix": suffix, "doors": doors.size(), "groups": groups.size(), "failed": failed}
+	return {"ok": true, "placed": made, "names": names, "door_names": door_names, "suffix": suffix, "doors": doors.size(), "groups": groups.size(), "failed": failed}
 
 
 func _list_command(_request: Dictionary) -> Dictionary:

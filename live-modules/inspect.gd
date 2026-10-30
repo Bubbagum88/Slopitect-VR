@@ -306,6 +306,9 @@ func _delete_command(request: Dictionary) -> Dictionary:
 			make["color"] = again["color"]
 	var remove := {"cmd": "assets_remove" if is_model else "delete", "name": node_name}
 	var flags: Dictionary = settings.get(node_name, {}).duplicate()
+	# A shape made with shapes.gd comes back from its recipe, not as a primitive.
+	var shapes: SlopitectModule = ctx["modules"].module("shapes")
+	var made: Dictionary = shapes.call("made_entry", node_name) if shapes and not is_model else {}
 
 	var reply: Dictionary = ctx["server"].run(remove)
 	if not reply.get("ok", false):
@@ -313,17 +316,34 @@ func _delete_command(request: Dictionary) -> Dictionary:
 	settings.erase(node_name)
 	if _selected == node_name:
 		_selected = ""
+	# Out of its group (multi.gd), and back in on undo.
+	var multi: SlopitectModule = ctx["modules"].module("multi")
+	var group: Dictionary = multi.call("take_out", node_name) if multi else {}
 	var tools: SlopitectModule = ctx["modules"].module("tools")
 	if tools:
 		var put_back := func():
-			var made: Dictionary = ctx["server"].run(make)
-			if not made.get("ok", false):
-				push_error("Slopitect inspect: %s couldn't be put back: %s" % [node_name, made.get("error")])
-			elif not flags.is_empty():
+			if not made.is_empty():
+				var again_shapes: SlopitectModule = ctx["modules"].module("shapes")
+				if again_shapes == null:
+					push_error("Slopitect inspect: %s couldn't be put back: the shapes module isn't loaded" % node_name)
+					return
+				again_shapes.call("remake", made)
+			else:
+				var reply_back: Dictionary = ctx["server"].run(make)
+				if not reply_back.get("ok", false):
+					push_error("Slopitect inspect: %s couldn't be put back: %s" % [node_name, reply_back.get("error")])
+					return
+			if not flags.is_empty():
 				_store(node_name, flags)
+			var again_multi: SlopitectModule = ctx["modules"].module("multi")
+			if again_multi and not group.is_empty():
+				again_multi.call("put_in", node_name, group)
 		var take_away := func():
 			ctx["server"].run(remove)
 			settings.erase(node_name)
+			var again_multi: SlopitectModule = ctx["modules"].module("multi")
+			if again_multi:
+				again_multi.call("take_out", node_name)
 		tools.call("push_undo", "delete %s" % node_name, put_back, take_away)
 	print("Slopitect inspect: deleted %s" % node_name)
 	return {"ok": true, "deleted": node_name, "undo": tools != null}
