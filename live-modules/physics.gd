@@ -72,7 +72,7 @@ func _joined(node: Node) -> void:
 
 
 func _restore(node_name: String) -> void:
-	if _bodies.has(node_name) or not _settings.has(node_name) or _settings[node_name]["mode"] == "off" or _lib == null:
+	if not is_inside_tree() or _bodies.has(node_name) or not _settings.has(node_name) or _settings[node_name]["mode"] == "off" or _lib == null:
 		return
 	var node: Node3D = _lib.world_node(node_name)
 	if node:
@@ -206,6 +206,7 @@ func _make_body(node: Node3D, config: Dictionary) -> void:
 		body.freeze_mode = RigidBody3D.FREEZE_MODE_STATIC
 		body.freeze = true
 	add_child(body)
+	body.tree_exiting.connect(_body_gone.bind(String(node.name), body))
 	var unscaled := Transform3D(node.global_basis.orthonormalized(), node.global_position)
 	body.global_transform = unscaled
 	_bodies[String(node.name)] = {"node": node, "body": body, "written": node.global_transform, "scale": node.global_basis.get_scale(),
@@ -222,15 +223,24 @@ func _drop_body(node_name: String) -> void:
 	set_physics_process(not _bodies.is_empty())
 
 
+# A body freed by something else (not _drop_body): forgotten at once, and
+# made again if its thing is still there.
+func _body_gone(node_name: String, body: RigidBody3D) -> void:
+	if _bodies.has(node_name) and _bodies[node_name]["body"] == body:
+		_bodies.erase(node_name)
+		set_physics_process(not _bodies.is_empty())
+		_restore.call_deferred(node_name)
+
+
 func _physics_process(_delta: float) -> void:
 	for node_name in _bodies.keys():
 		var entry: Dictionary = _bodies[node_name]
-		var node: Node3D = entry["node"]
-		var body: RigidBody3D = entry["body"]
+		var node = entry["node"]  # untyped: the thing may have been freed
 		if not is_instance_valid(node) or not node.is_inside_tree() or String(node.name) != node_name:
 			_drop_body(node_name)  # deleted or renamed; it gets a body again when it's back
 			continue
-		var scale := node.global_basis.get_scale()
+		var body: RigidBody3D = entry["body"]
+		var scale: Vector3 = node.global_basis.get_scale()
 		if not scale.is_equal_approx(entry["scale"]) and not entry["held"]:
 			# Resized: a new shape to match. Not while a hand holds it (two-hand
 			# resizing changes it every frame); it's made when it's let go.
