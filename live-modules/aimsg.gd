@@ -24,13 +24,21 @@ const PREFIXES := [["you: ", "you"], ["agent: ", "ai"], ["thinking: ", "think"],
 var settings := DEFAULTS.duplicate()
 var _seen = null  # the events last formatted
 var _text := ""  # and what they made
+var _lib: SlopitectModule
 
 
 func setup() -> String:
-	_load()
 	register("aimsg_status", _status, "the chat log's width and height, and how many lines it has now")
 	register("aimsg_config", _config, "from the PC only: any of cols (%d to %d characters), rows (%d to %d lines)" % [LIMITS["cols"][0], LIMITS["cols"][1], LIMITS["rows"][0], LIMITS["rows"][1]])
 	return ""
+
+
+# Its saved width and height, once lib is there (the defaults until then).
+func lib_ready(lib) -> void:
+	_lib = lib
+	if lib:
+		_load()
+		_seen = null
 
 
 # Called by vrui.gd for a text source with "format": "aimsg": the agent's
@@ -160,19 +168,16 @@ func _config(request: Dictionary) -> Dictionary:
 		changes[key] = int(value)
 	settings.merge(changes, true)
 	_seen = null  # format again at the new size
-	var out := FileAccess.open(SETTINGS_PATH, FileAccess.WRITE)
-	if out == null:
-		push_error("Slopitect aimsg: couldn't save %s (error %d)" % [SETTINGS_PATH, FileAccess.get_open_error()])
-	else:
-		out.store_string(JSON.stringify(settings, "\t"))
-		out.close()
+	var problem: String = _lib.write_json(SETTINGS_PATH, settings, "\t") if _lib else "the lib module isn't loaded"
+	if not problem.is_empty():
+		push_error("Slopitect aimsg: couldn't save %s: %s" % [SETTINGS_PATH, problem])
 	return _status({})
 
 
 func _load() -> void:
 	if not FileAccess.file_exists(SETTINGS_PATH):
 		return
-	var saved = JSON.parse_string(FileAccess.get_file_as_string(SETTINGS_PATH))
+	var saved = _lib.read_json(SETTINGS_PATH)
 	if typeof(saved) != TYPE_DICTIONARY:
 		push_error("Slopitect aimsg: %s isn't readable; using the defaults" % SETTINGS_PATH)
 		return
