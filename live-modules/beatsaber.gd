@@ -10,9 +10,10 @@ extends SlopitectModule
 # project, projects.gd), made the first time and reused after that.
 # Getting in: the Rhythm tile on the Menu, or starting any song (the window,
 # the Settings window's Start, beatsaber_start) takes you to that world
-# first, saving the one you were in, and opens the Rhythm window (songs,
-# difficulty, Stop, Leave, the last results). Opening the world from the
-# Worlds window does the same.
+# first, saving the one you were in, and opens the game's three windows
+# (see _build: settings on the left, songs in the middle, scores on the
+# right). They step aside while a song plays and come back after it with
+# your score. Opening the world from the Worlds window does the same.
 # Getting out: Leave (in the Rhythm window or the Settings window, or
 # beatsaber_leave) stops the song and takes you back to the world you came
 # from (remembered even across a restart). Going to any other world stops
@@ -22,12 +23,14 @@ extends SlopitectModule
 #
 # Songs: a folder per song in the Slopitect folder's songs/, holding the
 # music (song.ogg, .mp3 or .wav, or the file "audio" names) and map.json:
-#   {"title": "My song", "artist": "...", "bpm": 120, "offset": 0.0,
-#    "audio": "song.ogg",
+#   {"title": "My song", "artist": "...", "pack": "My album", "bpm": 120,
+#    "offset": 0.0, "audio": "song.ogg",
 #    "notes": [[beat, lane, row, hand, dir], ...]}
 # beat counts from offset (seconds into the music); lane 0-3 left to right;
 # row 0-2 bottom to top; hand "l" (blue), "r" (red) or "b" (a bomb); dir
 # one of u d l r ul ur dl dr (the way to cut) or a (any way, a dot note).
+# An album cover can sit beside it as cover.png (or .jpg / .webp); songs
+# with the same "pack" are grouped as an album in the middle window.
 # A map.json without notes (just "bpm") gets notes made for the whole song,
 # so any song can be played by giving its tempo. Free play needs no song:
 # notes at the Settings window's tempo, 128 beats, no music.
@@ -115,7 +118,7 @@ const DIFFICULTIES := ["easy", "normal", "hard"]
 const DIFF_STEP := {"easy": 2.0, "normal": 1.0, "hard": 0.5}     # beats between notes
 const DIFF_DOUBLES := {"easy": 0.0, "normal": 0.08, "hard": 0.15}
 const DIFF_BOMBS := {"easy": 0.0, "normal": 0.04, "hard": 0.1}
-const GAME_DEFAULTS := {"difficulty": "normal", "speed": 8.0, "bpm": 100.0, "hit_sounds": true, "trails": true}
+const GAME_DEFAULTS := {"difficulty": "normal", "speed": 8.0, "bpm": 100.0, "hit_sounds": true, "trails": true, "auto_sabers": true}
 const SPEED_RANGE := [4.0, 14.0]
 const BPM_RANGE := [60.0, 200.0]
 const RANKS := [[97.0, "S"], [90.0, "A"], [80.0, "B"], [70.0, "C"], [60.0, "D"], [0.0, "F"]]
@@ -123,6 +126,18 @@ const FIT_DEFAULTS := {"angle": 45.0, "grip": [0.0, -1.8, 4.8], "hold": 10.0}  #
 const FIT_ANGLE_RANGE := [-30.0, 90.0]
 const FIT_CM_MAX := 15.0
 const SONG_ROWS := 5
+const PANEL_LEFT := "rhythm_left"
+const PANEL_SCORES := "rhythm_scores"
+const PANELS := ["rhythm_left", "beatsaber", "rhythm_scores"]
+const LEFT_TABS := ["Modifiers", "Colours", "Settings"]
+const SCORE_TABS := ["Local", "Global"]
+const LEFT_SIZE := Vector2(0.62, 0.56)
+const MAIN_SIZE := Vector2(1.1, 0.62)
+const SCORES_SIZE := Vector2(0.62, 0.56)
+const ROWS := 6                  # packs and songs shown at once
+const ALL_SONGS := "All songs"
+const FREE_PACK := "Free play"
+const TOP_SCORES := 10
 const WORLD := "rhythm_sabers"   # the game's own world (a project)
 
 var running := false
@@ -180,6 +195,11 @@ var _last := {}             # the last cut's details
 var _results := {}
 var _song_page := 0
 var _return_to := ""        # the world to go back to on Leave
+var _pack := "All songs"    # the pack shown in the middle window
+var _hands_before := ""     # the hands style to put back when you leave (auto sabers)
+var _placed := false        # the track was laid out with the windows
+var _selected := "free"     # the song chosen there ("free" for free play)
+var scores := {}            # "song|difficulty" -> your top 10 [{score, rank, accuracy, combo, date}]
 
 
 func setup() -> String:
@@ -187,8 +207,8 @@ func setup() -> String:
 	register("beatsaber_stop", _stop, "stop the song and clear the notes")
 	register("beatsaber_score", _score, "the score, combo, multiplier, cuts, misses, bad cuts, bombs hit, accuracy, and the last cut's points, direction and centre offset; after a song, its results")
 	register("beatsaber_songs", _songs_command, "the songs in the Slopitect folder's songs/ (folder, title, bpm, notes or made, best score)")
-	register("beatsaber_set", _set_command, "the game's settings (usable in the headset): any of difficulty (easy, normal, hard), speed (note speed m/s, 4 to 14), bpm (free play tempo, 60 to 200), hit_sounds, trails (true/false)")
-	register("beatsaber_do", _do, "the Rhythm window: act = toggle (goes to the Rhythm world first), show, refresh, page (page number for the song list), enter (go to the Rhythm world), leave (back to the world you came from)")
+	register("beatsaber_set", _set_command, "the game's settings (usable in the headset): any of difficulty (easy, normal, hard), speed (note speed m/s, 4 to 14), bpm (free play tempo, 60 to 200), hit_sounds, trails, auto_sabers (sabers in the Rhythm world, hands back after; true/false)")
+	register("beatsaber_do", _do, "the Rhythm window: act = toggle (goes to the Rhythm world first), show (optional page: a tab), refresh, page (page number for the song list), enter (go to the Rhythm world), leave (back to the world you came from)")
 	register("beatsaber_leave", _leave, "stop the song and go back from the Rhythm world to the world you came from")
 	register("beatsaber_config", _config, "from the PC only: how the saber sits in the hand: any of angle (degrees it tilts up from where the controller points, -30 to 90), grip ([x, y, z] cm from the controller's point to the handle's middle, right hand), hold (cm down the hilt the hand holds it, 0 to 15), or reset true")
 	_make_assets()
@@ -259,6 +279,7 @@ func _hands_gone(_old: SlopitectModule) -> void:
 func _on_info_changed(module_name: String) -> void:
 	if module_name == "hands":
 		_show_sabers()
+		_rebuild_if_open()
 
 
 func _exit_tree() -> void:
@@ -272,7 +293,8 @@ func _exit_tree() -> void:
 		if is_instance_valid(_sabers[side]):
 			_sabers[side].queue_free()
 	_sabers.clear()
-	ctx["server"].run({"cmd": "ui_remove", "id_panel": PANEL})
+	for id_panel in PANELS:
+		ctx["server"].run({"cmd": "ui_remove", "id_panel": id_panel})
 
 
 # --- Menu, Settings and the window ------------------------------------------------
@@ -296,6 +318,8 @@ func settings_info() -> Dictionary:
 			"set": {"cmd": "beatsaber_set", "hit_sounds": "{value}"}},
 		{"id": "trails", "type": "toggle", "label": "Saber trails", "value": game["trails"],
 			"set": {"cmd": "beatsaber_set", "trails": "{value}"}},
+		{"id": "auto_sabers", "type": "toggle", "label": "Sabers in the Rhythm world", "value": game["auto_sabers"],
+			"set": {"cmd": "beatsaber_set", "auto_sabers": "{value}"}},
 		{"id": "start", "type": "button", "label": "Start free play", "set": {"cmd": "beatsaber_start", "song": "free"}},
 		{"id": "stop", "type": "button", "label": "Stop", "set": {"cmd": "beatsaber_stop"}},
 		{"id": "leave", "type": "button", "label": "Leave the Rhythm world", "set": {"cmd": "beatsaber_leave"}},
@@ -313,93 +337,295 @@ func _has_ui() -> bool:
 func _do(request: Dictionary) -> Dictionary:
 	match request.get("act"):
 		"toggle":
-			var got := _run({"cmd": "ui_get", "id_panel": PANEL})
-			if in_world() and got.get("ok", false) and got.get("panel", {}).get("visible", false):
-				return _run({"cmd": "ui_show", "id_panel": PANEL, "visible": false})
+			if in_world() and _shown(PANEL):
+				_hide_windows()
+				return {"ok": true, "shown": false}
 			var problem := _enter()
 			if not problem.is_empty():
 				return {"ok": false, "error": problem}
-			return _show_window()
+			return _show_windows()
 		"enter":
 			var problem := _enter()
 			if not problem.is_empty():
 				return {"ok": false, "error": problem}
-			return _show_window()
+			return _show_windows()
 		"leave":
 			return _leave({})
 		"show":
-			return _show_window()
+			var page = request.get("page", "")
+			if not (page == "" or page in LEFT_TABS or page in SCORE_TABS):
+				return {"ok": false, "error": "\"page\" must be one of %s or %s" % [LEFT_TABS, SCORE_TABS]}
+			return _show_windows(page)
 		"refresh":
 			var problem := _build()
-			return {"ok": problem.is_empty(), "error": problem} if not problem.is_empty() else {"ok": true}
+			return {"ok": false, "error": problem} if not problem.is_empty() else {"ok": true}
+		"pack":
+			var pack = request.get("pack")
+			if typeof(pack) != TYPE_STRING or not pack in _packs():
+				return {"ok": false, "error": "\"pack\" must be one of %s" % [_packs()]}
+			_pack = pack
+			_song_page = 0
+			var drawn := _build()
+			if not drawn.is_empty():
+				return {"ok": false, "error": drawn}
+			return {"ok": true, "pack": _pack}
+		"select":
+			var song = request.get("song")
+			if typeof(song) != TYPE_STRING or not (song == "free" or _songs().any(func(x): return x["id"] == song)):
+				return {"ok": false, "error": "\"song\" must be \"free\" or a folder in songs/"}
+			_selected = song
+			var drawn := _build()
+			if not drawn.is_empty():
+				return {"ok": false, "error": drawn}
+			return {"ok": true, "selected": _selected}
+		"play":
+			return _start({"song": _selected})
+		"practice":
+			return {"ok": false, "error": "Practice comes in a later step"}
 		"page":
 			var page = request.get("page")
 			if typeof(page) not in [TYPE_INT, TYPE_FLOAT]:
 				return {"ok": false, "error": "\"page\" must be a number"}
 			_song_page = maxi(0, int(page))
-			_build()
+			var drawn := _build()
+			if not drawn.is_empty():
+				return {"ok": false, "error": drawn}
 			return {"ok": true, "page": _song_page}
-	return {"ok": false, "error": "\"act\" must be toggle, show, refresh, page, enter or leave"}
+	return {"ok": false, "error": "\"act\" must be toggle, show, refresh, pack, select, play, practice, page, enter or leave"}
 
 
-func _show_window() -> Dictionary:
-	var problem := _build()
+func _shown(id_panel: String) -> bool:
+	var got := _run({"cmd": "ui_get", "id_panel": id_panel})
+	return got.get("ok", false) and got.get("panel", {}).get("visible", false)
+
+
+# The three windows come up in front of you, and the track will run
+# between them the way you're facing now.
+func _show_windows(page := "") -> Dictionary:
+	if not running:
+		_place_track()
+		_placed = true
+	var problem := _build(page, true)
 	if not problem.is_empty():
 		return {"ok": false, "error": problem}
-	return _run({"cmd": "ui_show", "id_panel": PANEL, "visible": true})
+	for id_panel in PANELS:
+		_run({"cmd": "ui_show", "id_panel": id_panel, "visible": true})
+	return {"ok": true, "shown": true}
 
 
-# The window: what's happening, the difficulty, the songs, Start / Stop.
-# Built when it opens and when a song starts, stops or ends; never per frame.
-func _build() -> String:
+func _hide_windows() -> void:
 	if not _has_ui():
-		return "the Rhythm window needs the vrui module"
-	var w := 0.66
-	var h := 0.56
-	var top := h / 2.0 - 0.06
+		return
+	for id_panel in PANELS:
+		if _run({"cmd": "ui_get", "id_panel": id_panel}).get("ok", false):
+			_run({"cmd": "ui_show", "id_panel": id_panel, "visible": false})
+
+
+# The game's three windows, like a stage around you:
+#   left ("rhythm_left"): tabs Modifiers, Colours, Settings
+#   middle ("beatsaber"): song packs (albums) and their songs on its left
+#       half; the chosen song's cover, its difficulty, the mode, Play and
+#       Practice on its right
+#   right ("rhythm_scores"): tabs Local (your top 10 for the song and
+#       difficulty) and Global (needs an online score service; none yet)
+# Built when they open, when a setting or the chosen song changes, and when
+# a song starts or ends; never per frame. A tab you're on stays. With
+# place_them, they go to their spots on the stage (from the track's place).
+func _build(page := "", place_them := false) -> String:
+	if not _has_ui():
+		return "the Rhythm windows need the vrui module"
+	var problems := []
+	for spec in [[PANEL_LEFT, "Game settings", LEFT_SIZE, _left_elements(), LEFT_TABS, Vector3(-0.95, 1.3, -0.85), 50.0],
+			[PANEL, TITLE, MAIN_SIZE, _main_elements(), [], Vector3(0.0, 1.35, -1.15), 0.0],
+			[PANEL_SCORES, "Scores", SCORES_SIZE, _scores_elements(), SCORE_TABS, Vector3(0.95, 1.3, -0.85), -50.0]]:
+		var id_panel: String = spec[0]
+		var tabs: Array = spec[4]
+		var at: Transform3D = _track.global_transform * Transform3D(Basis(Vector3.UP, deg_to_rad(spec[6])), spec[5])
+		var where := {"place": "world", "position": [at.origin.x, at.origin.y, at.origin.z],
+			"rotation": [0.0, rad_to_deg(at.basis.get_euler().y), 0.0]}
+		var request := {"id_panel": id_panel, "elements": spec[3]}
+		if page != "" and page in tabs:
+			request["page"] = page
+		if _run({"cmd": "ui_get", "id_panel": id_panel}).get("ok", false):
+			request["cmd"] = "ui_update"
+			if place_them:
+				request.merge(where)
+				request["home"] = where.duplicate()
+				request["keep_place"] = true
+		else:
+			request.merge({"cmd": "ui_add", "title": spec[1], "size": [spec[2].x, spec[2].y], "chrome": true, "visible": false,
+				"home": where.duplicate(), "keep_place": true})  # stage windows stay at their spots (vrui opens others in front)
+			request.merge(where)
+			if not tabs.is_empty():
+				request["pages"] = tabs
+				if not request.has("page"):
+					request["page"] = tabs[0]
+		var reply := _run(request)
+		if not reply.get("ok", false):
+			problems.append("%s: %s" % [id_panel, reply.get("error", "couldn't be drawn")])
+	return "; ".join(problems)
+
+
+func _left_elements() -> Array:
 	var els := []
-	els.append({"type": "text", "id": "status", "text": _status_text(), "at": [0.0, top], "width": w - 0.06, "color": "text"})
-	var y := top - 0.1
+	var top := LEFT_SIZE.y / 2.0 - 0.06
+	for tab in ["Modifiers", "Colours"]:
+		els.append({"type": "text", "id": "soon_" + tab.to_lower(), "page": tab, "text": "%s: coming in a later step." % tab,
+			"at": [0.0, top], "width": LEFT_SIZE.x - 0.06, "color": "muted"})
+	var w := LEFT_SIZE.x - 0.1
+	var y := top
+	els.append({"type": "slider", "id": "speed", "page": "Settings", "label": "Note speed (m/s)", "at": [0.0, y], "size": [w, 0.06],
+		"min": SPEED_RANGE[0], "max": SPEED_RANGE[1], "step": 0.5, "value": game["speed"], "action": {"cmd": "beatsaber_set", "speed": "{value}"}})
+	y -= 0.085
+	els.append({"type": "slider", "id": "bpm", "page": "Settings", "label": "Free play tempo (beats a minute)", "at": [0.0, y], "size": [w, 0.06],
+		"min": BPM_RANGE[0], "max": BPM_RANGE[1], "step": 5.0, "value": game["bpm"], "action": {"cmd": "beatsaber_set", "bpm": "{value}"}})
+	y -= 0.085
+	els.append({"type": "toggle", "id": "hit_sounds", "page": "Settings", "label": "Hit sounds", "at": [-w / 4.0 - 0.01, y], "size": [w / 2.0 - 0.02, 0.055],
+		"on": game["hit_sounds"], "action": {"cmd": "beatsaber_set", "hit_sounds": "{on}"}})
+	els.append({"type": "toggle", "id": "trails", "page": "Settings", "label": "Saber trails", "at": [w / 4.0 + 0.01, y], "size": [w / 2.0 - 0.02, 0.055],
+		"on": game["trails"], "action": {"cmd": "beatsaber_set", "trails": "{on}"}})
+	if _hands and is_instance_valid(_hands):
+		y -= 0.085
+		var style = _hands.get("settings").get("style") if typeof(_hands.get("settings")) == TYPE_DICTIONARY else ""
+		els.append({"type": "text", "id": "style_label", "page": "Settings", "text": "Hands or sabers", "at": [0.0, y + 0.01], "width": w, "color": "muted"})
+		y -= 0.055
+		for i in 2:
+			var v: String = ["hand", "saber"][i]
+			els.append({"type": "button", "id": "style_" + v, "page": "Settings", "label": ["Hands", "Sabers"][i], "at": [(i - 0.5) * w / 2.0, y],
+				"size": [w / 2.0 - 0.02, 0.055], "color": "accent" if style == v else "button", "action": {"cmd": "hands_style", "style": v}})
+		y -= 0.075
+		els.append({"type": "toggle", "id": "auto_sabers", "page": "Settings", "label": "Sabers in here, hands outside", "at": [0.0, y],
+			"size": [w, 0.055], "on": game["auto_sabers"], "action": {"cmd": "beatsaber_set", "auto_sabers": "{on}"}})
+	return els
+
+
+# Packs: every "pack" named in a map.json, then All songs, then Free play.
+func _packs() -> Array:
+	var named := []
+	for s in _songs():
+		if not s["pack"].is_empty() and not s["pack"] in named:
+			named.append(s["pack"])
+	named.sort()
+	return named + [ALL_SONGS, FREE_PACK]
+
+
+func _main_elements() -> Array:
+	var els := []
+	var w := MAIN_SIZE.x
+	var h := MAIN_SIZE.y
+	var top := h / 2.0 - 0.06
+	var bottom := -h / 2.0 + 0.04
+	# Left half: the packs, then the songs in the chosen pack.
+	var packs := _packs()
+	if not _pack in packs:
+		_pack = ALL_SONGS
+	var pack_x := -w / 2.0 + 0.14
+	els.append({"type": "text", "id": "packs_label", "text": "Packs", "at": [pack_x, top], "width": 0.24, "color": "muted"})
+	for i in mini(packs.size(), ROWS):
+		els.append({"type": "button", "id": "pack_%d" % i, "label": str(packs[i]).left(24), "at": [pack_x, top - 0.065 * (i + 1)], "size": [0.24, 0.055],
+			"color": "accent" if packs[i] == _pack else "button", "action": {"cmd": "beatsaber_do", "act": "pack", "pack": packs[i]}})
+	var rows := []
+	if _pack == FREE_PACK:
+		rows.append({"id": "free", "label": "Free play (%d a minute)" % int(game["bpm"])})
+	else:
+		for s in _songs():
+			if _pack == ALL_SONGS or s["pack"] == _pack:
+				rows.append({"id": s["id"], "label": s["title"]})
+	var song_x := -w / 2.0 + 0.45
+	els.append({"type": "text", "id": "songs_label", "text": "Songs", "at": [song_x, top], "width": 0.34, "color": "muted"})
+	var pages := maxi(1, ceili(rows.size() / float(ROWS)))
+	_song_page = clampi(_song_page, 0, pages - 1)
+	var y := top - 0.065
+	for i in range(_song_page * ROWS, mini(rows.size(), (_song_page + 1) * ROWS)):
+		els.append({"type": "button", "id": "song_%d" % i, "label": str(rows[i]["label"]).left(40), "at": [song_x, y], "size": [0.34, 0.055],
+			"color": "accent" if rows[i]["id"] == _selected else "button", "action": {"cmd": "beatsaber_do", "act": "select", "song": rows[i]["id"]}})
+		y -= 0.065
+	if rows.is_empty():
+		els.append({"type": "text", "id": "hint", "text": "No songs yet: add folders to Slopitect/songs", "at": [song_x, y], "width": 0.34, "color": "muted"})
+	if pages > 1:
+		els.append({"type": "button", "id": "prev", "label": "Back", "at": [song_x - 0.11, bottom + 0.07], "size": [0.12, 0.05],
+			"action": {"cmd": "beatsaber_do", "act": "page", "page": _song_page - 1}})
+		els.append({"type": "text", "id": "pages", "text": "%d / %d" % [_song_page + 1, pages], "at": [song_x, bottom + 0.07], "width": 0.1, "color": "muted"})
+		els.append({"type": "button", "id": "next", "label": "More", "at": [song_x + 0.11, bottom + 0.07], "size": [0.12, 0.05],
+			"action": {"cmd": "beatsaber_do", "act": "page", "page": _song_page + 1}})
+	# Right half: the chosen song, its difficulty and mode, Play and Practice.
+	var info := _selected_info()
+	var right_x := w / 4.0
+	var rw := w / 2.0 - 0.08
+	var text_x := right_x
+	var text_w := rw
+	if not info["cover"].is_empty():
+		els.append({"type": "button", "id": "cover", "label": "Play", "image": info["cover"], "at": [right_x - rw / 2.0 + 0.07, top - 0.035],
+			"size": [0.14, 0.14], "color": "button", "action": {"cmd": "beatsaber_do", "act": "play"}})
+		text_x = right_x + 0.08
+		text_w = rw - 0.16
+	els.append({"type": "text", "id": "song_title", "text": info["title"], "at": [text_x, top], "width": text_w, "font_size": 40, "color": "text"})
+	els.append({"type": "text", "id": "song_info", "text": info["detail"], "at": [text_x, top - 0.07], "width": text_w, "color": "muted"})
+	els.append({"type": "text", "id": "diff_label", "text": "Difficulty", "at": [right_x, top - 0.14], "width": rw, "color": "muted"})
 	for i in DIFFICULTIES.size():
 		var d: String = DIFFICULTIES[i]
-		els.append({"type": "button", "id": "diff_" + d, "label": d.capitalize(), "at": [-0.2 + i * 0.2, y], "size": [0.18, 0.055],
-			"color": "accent" if game["difficulty"] == d else "button", "action": {"cmd": "beatsaber_set", "difficulty": d}})
-	y -= 0.075
-	var songs := _songs()
-	var rows := [{"id": "free", "label": "Free play (%d beats a minute)" % int(game["bpm"])}]
-	for s in songs:
-		var label := str(s["title"])
-		if best.has(s["id"]):
-			label += "  best %d" % int(best[s["id"]])
-		rows.append({"id": s["id"], "label": label})
-	var pages := maxi(1, ceili(rows.size() / float(SONG_ROWS)))
-	_song_page = clampi(_song_page, 0, pages - 1)
-	for i in range(_song_page * SONG_ROWS, mini(rows.size(), (_song_page + 1) * SONG_ROWS)):
-		els.append({"type": "button", "id": "song_%d" % i, "label": rows[i]["label"].left(40), "at": [0.0, y], "size": [w - 0.08, 0.05],
-			"color": "button", "action": {"cmd": "beatsaber_start", "song": rows[i]["id"]}})
-		y -= 0.058
-	if pages > 1:
-		els.append({"type": "button", "id": "prev", "label": "Back", "at": [-0.2, -h / 2.0 + 0.1], "size": [0.14, 0.05],
-			"action": {"cmd": "beatsaber_do", "act": "page", "page": _song_page - 1}})
-		els.append({"type": "text", "id": "pages", "text": "%d / %d" % [_song_page + 1, pages], "at": [0.0, -h / 2.0 + 0.1], "width": 0.12, "color": "muted"})
-		els.append({"type": "button", "id": "next", "label": "More", "at": [0.2, -h / 2.0 + 0.1], "size": [0.14, 0.05],
-			"action": {"cmd": "beatsaber_do", "act": "page", "page": _song_page + 1}})
-	if songs.is_empty():
-		els.append({"type": "text", "id": "hint", "text": "Add songs as folders in Slopitect/songs (see beatsaber.gd)", "at": [0.0, y], "width": w - 0.06, "color": "muted"})
+		els.append({"type": "button", "id": "diff_" + d, "label": d.capitalize(), "at": [right_x - rw / 3.0 + i * rw / 3.0, top - 0.2],
+			"size": [rw / 3.0 - 0.02, 0.055], "color": "accent" if game["difficulty"] == d else "button", "action": {"cmd": "beatsaber_set", "difficulty": d}})
+	els.append({"type": "text", "id": "mode", "text": "Mode: Standard (two sabers)", "at": [right_x, top - 0.27], "width": rw, "color": "muted"})
+	els.append({"type": "button", "id": "play", "label": "Play", "at": [right_x - rw / 4.0, top - 0.35], "size": [rw / 2.0 - 0.02, 0.07],
+		"color": "ok", "action": {"cmd": "beatsaber_do", "act": "play"}})
+	els.append({"type": "button", "id": "practice", "label": "Practice", "at": [right_x + rw / 4.0, top - 0.35], "size": [rw / 2.0 - 0.02, 0.07],
+		"color": "button", "action": {"cmd": "beatsaber_do", "act": "practice"}})
+	els.append({"type": "text", "id": "status", "text": _status_text(), "at": [right_x, top - 0.43], "width": rw, "color": "text"})
 	var leave := _projects() != null
-	els.append({"type": "button", "id": "stop", "label": "Stop", "at": [-0.12 if leave else 0.0, -h / 2.0 + 0.04], "size": [0.2, 0.05],
+	els.append({"type": "button", "id": "stop", "label": "Stop", "at": [right_x - (0.11 if leave else 0.0), bottom], "size": [0.2, 0.05],
 		"color": "notice" if running else "button", "action": {"cmd": "beatsaber_stop"}})
 	if leave:
-		els.append({"type": "button", "id": "leave", "label": "Leave", "at": [0.12, -h / 2.0 + 0.04], "size": [0.2, 0.05],
+		els.append({"type": "button", "id": "leave", "label": "Leave", "at": [right_x + 0.11, bottom], "size": [0.2, 0.05],
 			"color": "button", "action": {"cmd": "beatsaber_leave"}})
-	var got := _run({"cmd": "ui_get", "id_panel": PANEL})
-	var reply: Dictionary
-	if got.get("ok", false):
-		reply = _run({"cmd": "ui_update", "id_panel": PANEL, "elements": els})
-	else:
-		reply = _run({"cmd": "ui_add", "id_panel": PANEL, "title": TITLE, "place": "front", "distance": 0.6, "height": -0.15,
-			"size": [w, h], "chrome": true, "visible": false, "elements": els})
-	return "" if reply.get("ok", false) else str(reply.get("error", "the window couldn't be drawn"))
+	return els
+
+
+# The chosen song's title and a line about it, for the middle window.
+func _selected_info() -> Dictionary:
+	if _selected == "free":
+		return {"title": "Free play", "detail": "Notes at %d beats a minute, no music" % int(game["bpm"]), "cover": ""}
+	for s in _songs():
+		if s["id"] == _selected:
+			var detail := "%d beats a minute" % int(s["bpm"])
+			if not s["artist"].is_empty():
+				detail = s["artist"] + ", " + detail
+			if s["made"]:
+				detail += ", notes made for it"
+			return {"title": s["title"], "detail": detail, "cover": s["cover"]}
+	_selected = "free"
+	return _selected_info()
+
+
+func _scores_elements() -> Array:
+	var els := []
+	var top := SCORES_SIZE.y / 2.0 - 0.06
+	var w := SCORES_SIZE.x - 0.06
+	var list: Array = scores.get(_score_key(_selected, game["difficulty"]), [])
+	els.append({"type": "text", "id": "local_head", "page": "Local", "text": "%s, %s" % [_selected_info()["title"], game["difficulty"].capitalize()],
+		"at": [0.0, top], "width": w, "color": "muted"})
+	if list.is_empty():
+		els.append({"type": "text", "id": "local_none", "page": "Local", "text": "No scores yet. Play it!", "at": [0.0, top - 0.06], "width": w, "color": "muted"})
+	for i in list.size():
+		var e: Dictionary = list[i]
+		els.append({"type": "text", "id": "local_%d" % i, "page": "Local", "mono": true, "color": "text", "at": [0.0, top - 0.06 - i * 0.042], "width": w,
+			"text": "%2d. %8d  %s  %3d%%  %s" % [i + 1, int(e["score"]), e["rank"], int(e["accuracy"]), str(e.get("date", ""))]})
+	els.append({"type": "text", "id": "global_none", "page": "Global", "text": "Global scores need an online score service, and there isn't one set up.",
+		"at": [0.0, top], "width": w, "color": "muted"})
+	return els
+
+
+func _score_key(song: String, difficulty: String) -> String:
+	return "%s|%s" % ["free play" if song == "free" else song, difficulty]
+
+
+# After a song: the windows come back where they were, with the results.
+func _bring_back() -> void:
+	if not _has_ui() or not in_world() or not _run({"cmd": "ui_get", "id_panel": PANEL}).get("ok", false):
+		return
+	_build("Local")
+	for id_panel in PANELS:
+		_run({"cmd": "ui_show", "id_panel": id_panel, "visible": true})
 
 
 func _rebuild_if_open() -> void:
@@ -449,6 +675,7 @@ func _start(request: Dictionary) -> Dictionary:
 		if loaded.has("error"):
 			return {"ok": false, "error": loaded["error"]}
 		song = loaded
+	_selected = "free" if song["id"] == "free play" else song["id"]
 	if running:
 		_clear()
 	_begin(song)
@@ -462,7 +689,9 @@ func _stop(_request: Dictionary) -> Dictionary:
 	set_process(false)
 	if was:
 		stopped.emit()
-		_rebuild_if_open()
+		_bring_back()
+		if _projects() == null:
+			_hands_back()
 	return {"ok": true}
 
 
@@ -501,14 +730,14 @@ func _set_command(request: Dictionary) -> Dictionary:
 				if not _number(v) or v < r[0] or v > r[1]:
 					return {"ok": false, "error": "\"%s\" must be %d to %d" % [key, r[0], r[1]]}
 				changed[key] = float(v)
-			"hit_sounds", "trails":
+			"hit_sounds", "trails", "auto_sabers":
 				if typeof(v) == TYPE_STRING:
 					v = v == "true"
 				if typeof(v) != TYPE_BOOL:
 					return {"ok": false, "error": "\"%s\" must be true or false" % key}
 				changed[key] = v
 			_:
-				return {"ok": false, "error": "unknown setting \"%s\" (one of: difficulty, speed, bpm, hit_sounds, trails)" % key}
+				return {"ok": false, "error": "unknown setting \"%s\" (one of: difficulty, speed, bpm, hit_sounds, trails, auto_sabers)" % key}
 	game = changed
 	if not game["trails"]:
 		for side in _trails:
@@ -556,8 +785,8 @@ func _enter() -> String:
 
 func _leave(_request: Dictionary) -> Dictionary:
 	_stop({})
-	if _has_ui():
-		_run({"cmd": "ui_show", "id_panel": PANEL, "visible": false})
+	_hide_windows()
+	_placed = false
 	if _projects() == null or not in_world():
 		return {"ok": true}
 	var back := _return_to if not _return_to.is_empty() and _return_to != WORLD else "start"
@@ -576,12 +805,36 @@ func _leave(_request: Dictionary) -> Dictionary:
 # outside the Rhythm world, and its window opens in it.
 func _on_world_changed(project: String, _folder: String) -> void:
 	if project == WORLD:
-		_show_window.call_deferred()
+		_sabers_on()
+		_show_windows.call_deferred()
 	else:
 		if running:
 			_stop({})
-		if _has_ui():
-			_run({"cmd": "ui_show", "id_panel": PANEL, "visible": false})
+		_hide_windows()
+		_hands_back()
+
+
+# Auto sabers: in the game you hold sabers; back out, the hands module's
+# style goes back to what it was (kept across a restart). Without
+# projects.gd, that's while a song plays.
+func _sabers_on() -> void:
+	if not game["auto_sabers"] or _hands == null or not is_instance_valid(_hands):
+		return
+	var style = _hands.get("settings").get("style") if typeof(_hands.get("settings")) == TYPE_DICTIONARY else null
+	if style == null or style == "saber":
+		return
+	_hands_before = style
+	_run({"cmd": "hands_style", "style": "saber"})
+	_save_settings()
+
+
+func _hands_back() -> void:
+	if _hands_before.is_empty():
+		return
+	if _hands and is_instance_valid(_hands):
+		_run({"cmd": "hands_style", "style": _hands_before})
+	_hands_before = ""
+	_save_settings()
 
 
 # --- Songs and maps ------------------------------------------------------------------
@@ -604,8 +857,19 @@ func _songs() -> Array:
 			continue
 		var notes = map.get("notes")
 		out.append({"id": dir_name, "title": str(map.get("title", dir_name)).left(60), "bpm": float(map["bpm"]),
-			"made": typeof(notes) != TYPE_ARRAY or notes.is_empty()})
+			"made": typeof(notes) != TYPE_ARRAY or notes.is_empty(),
+			"pack": str(map.get("pack", "")).left(24) if typeof(map.get("pack")) == TYPE_STRING else "",
+			"artist": str(map.get("artist", "")).left(40) if typeof(map.get("artist")) == TYPE_STRING else "",
+			"cover": _cover(folder + "/" + dir_name)})
 	return out
+
+
+# The song's album cover: cover.png, .jpg or .webp in its folder, or "".
+func _cover(folder: String) -> String:
+	for ext in ["png", "jpg", "jpeg", "webp"]:
+		if FileAccess.file_exists(folder + "/cover." + ext):
+			return folder + "/cover." + ext
+	return ""
 
 
 # A song ready to play, or {"error"}.
@@ -740,14 +1004,17 @@ func _begin(song: Dictionary) -> void:
 	var first: float = _beat_time(notes[0][0]) if not notes.is_empty() else 0.0
 	_clock = -maxf(LEAD_MIN, _ahead() - first)
 	_song_player.stream = song["audio"]
-	_place_track()
+	if _projects() == null:
+		_sabers_on()
+	if not _placed:
+		_place_track()
 	_track.visible = true
 	_blade.clear()
 	running = true
 	_update_board()
 	set_process(true)
 	started.emit(song["title"])
-	_rebuild_if_open()
+	_hide_windows()  # out of the way while you play
 
 
 # The track starts at your feet and runs the way you're looking.
@@ -867,15 +1134,17 @@ func _spawn(n: Array) -> void:
 		var dot: Node3D = node.get_child(1)
 		arrow.visible = dir != Vector2.ZERO
 		dot.visible = dir == Vector2.ZERO
-		if arrow.visible:
-			arrow.rotation = Vector3(0, 0, atan2(-dir.x, dir.y))
-			arrow.position = Vector3(dir.x * 0.03, dir.y * 0.03, NOTE_HALF + 0.01)
+	# The whole cube turns to its direction (a diagonal note is a cube on
+	# its corner), so the arrow always sits straight on the face, toward
+	# the edge to cut through.
+	var rot := atan2(-dir.x, dir.y) if dir != Vector2.ZERO else 0.0
+	node.rotation = Vector3(0, 0, rot)
 	var pos := _note_pos(n)
 	var t := _beat_time(n[0])
 	pos.z = HIT_Z - (t - _clock) * float(game["speed"])
 	node.position = pos
 	node.visible = true
-	_active.append({"node": node, "kind": "bomb" if bomb else "note", "hand": n[3], "dir": dir, "time": t, "pos": pos})
+	_active.append({"node": node, "kind": "bomb" if bomb else "note", "hand": n[3], "dir": dir, "time": t, "pos": pos, "rot": rot})
 
 
 func _release(a: Dictionary) -> void:
@@ -950,7 +1219,7 @@ func _which_blade(a: Dictionary, moved: float) -> String:
 			continue
 		var b: Dictionary = _blade[side]
 		var need := MIN_SPEED if (side == own or a["kind"] == "bomb") else WRONG_SPEED
-		if float(b["speed"]) >= need and _swept_hit(b, a["pos"], moved):
+		if float(b["speed"]) >= need and _swept_hit(b, a["pos"], moved, a["rot"]):
 			return side
 	return ""
 
@@ -958,12 +1227,13 @@ func _which_blade(a: Dictionary, moved: float) -> String:
 # Does the blade's path between last frame and now pass through the note's
 # box? Tested in the note's own frame (the note moved too): a few blade
 # positions in between, each a segment against the box.
-func _swept_hit(b: Dictionary, centre: Vector3, moved: float) -> bool:
+func _swept_hit(b: Dictionary, centre: Vector3, moved: float, rot: float) -> bool:
 	var was_centre := centre - Vector3(0, 0, moved)
-	var pb: Vector3 = b["pbase"] - was_centre
-	var pt: Vector3 = b["ptip"] - was_centre
-	var nb: Vector3 = b["base"] - centre
-	var nt: Vector3 = b["tip"] - centre
+	var undo := Basis(Vector3.BACK, -rot)  # into the turned cube's own frame
+	var pb: Vector3 = undo * (b["pbase"] - was_centre)
+	var pt: Vector3 = undo * (b["ptip"] - was_centre)
+	var nb: Vector3 = undo * (b["base"] - centre)
+	var nt: Vector3 = undo * (b["tip"] - centre)
 	for k in SWEEP_STEPS + 1:
 		var s := float(k) / SWEEP_STEPS
 		if _seg_hits_box(pb.lerp(nb, s), pt.lerp(nt, s), NOTE_HALF + HIT_MARGIN):
@@ -1092,7 +1362,13 @@ func _finish() -> void:
 	var new_best := score > int(best.get(id, 0))
 	if new_best:
 		best[id] = score
-		_save_settings()
+	var key := "%s|%s" % [id, game["difficulty"]]
+	var list: Array = scores.get(key, [])
+	list.append({"score": score, "rank": rank, "accuracy": snappedf(acc, 0.1), "combo": max_combo,
+		"date": Time.get_date_string_from_system()})
+	list.sort_custom(func(a, b): return a["score"] > b["score"])
+	scores[key] = list.slice(0, TOP_SCORES)
+	_save_settings()
 	_results = {"title": _song["title"], "score": score, "max_combo": max_combo, "accuracy": snappedf(acc, 0.1), "rank": rank,
 		"cuts": cuts, "misses": missed, "bad_cuts": bad, "bombs_hit": bombs_hit, "new_best": new_best, "best": best.get(id, score)}
 	running = false
@@ -1100,7 +1376,9 @@ func _finish() -> void:
 	_board.text = "%s\n%d  rank %s\n%d%%  best combo %d" % [_song["title"], score, rank, int(acc), max_combo]
 	finished.emit(_results)
 	stopped.emit()
-	_rebuild_if_open()
+	_bring_back()
+	if _projects() == null:
+		_hands_back()
 
 
 func _update_board() -> void:
@@ -1320,6 +1598,7 @@ func _new_note() -> MeshInstance3D:
 	var a := MeshInstance3D.new()
 	a.mesh = _arrow_mesh
 	a.material_override = _mat["marker"]
+	a.position = Vector3(0, 0.03, NOTE_HALF + 0.01)  # straight up on the face; the cube turns
 	m.add_child(a)
 	var d := MeshInstance3D.new()
 	d.mesh = _dot_mesh
@@ -1544,7 +1823,9 @@ func _save_settings() -> void:
 	var out := fit.duplicate(true)
 	out["game"] = game
 	out["best"] = best
+	out["scores"] = scores
 	out["return_to"] = _return_to
+	out["hands_before"] = _hands_before
 	var problem: String = _lib.call("write_json", SETTINGS_PATH, out, "\t")
 	if not problem.is_empty():
 		push_error("Slopitect beatsaber: " + problem)
@@ -1574,9 +1855,17 @@ func _load_settings() -> void:
 			var r: Array = SPEED_RANGE if key == "speed" else BPM_RANGE
 			if _number(g.get(key)) and g[key] >= r[0] and g[key] <= r[1]:
 				game[key] = float(g[key])
-		for key in ["hit_sounds", "trails"]:
+		for key in ["hit_sounds", "trails", "auto_sabers"]:
 			if typeof(g.get(key)) == TYPE_BOOL:
 				game[key] = g[key]
+	var sc = saved.get("scores")
+	if typeof(sc) == TYPE_DICTIONARY:
+		for key in sc:
+			if typeof(key) == TYPE_STRING and typeof(sc[key]) == TYPE_ARRAY:
+				scores[key] = (sc[key] as Array).filter(func(e): return typeof(e) == TYPE_DICTIONARY and _number(e.get("score")) \
+					and typeof(e.get("rank")) == TYPE_STRING and _number(e.get("accuracy"))).slice(0, TOP_SCORES)
+	if saved.get("hands_before") in ["hand", "saber"]:
+		_hands_before = saved["hands_before"]
 	if typeof(saved.get("return_to")) == TYPE_STRING:
 		_return_to = saved["return_to"]
 	var b = saved.get("best")
