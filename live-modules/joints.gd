@@ -31,6 +31,8 @@ extends SlopitectModule
 # when you point near it. Remove: the trigger takes a thing's joints off
 # (or an attach point, pointed at). Every change is one undo.
 # Joints and points are kept with the world (save.gd).
+# It runs each physics frame only while there are joints, and draws its
+# marks only while they're shown (Show: always, or tool while chosen).
 
 const TYPES := ["hinge", "slider", "ball", "fixed"]
 const AXES := ["normal", "up", "side"]  # the tool's axis: out of the surface, straight up, along the surface level
@@ -58,10 +60,13 @@ var _first := {}  # the connect tool's first pick: {name, position, normal, poin
 var _chosen := false
 var _marks: MeshInstance3D
 var _triangles := {}  # mesh instance id -> TriangleMesh, for pointing
+var _lib: SlopitectModule
+var _physics: SlopitectModule
 
 
 func setup() -> String:
-	_load_prefs()
+	set_process(false)
+	set_physics_process(false)
 	process_physics_priority = 10  # after grab.gd and physics.gd have moved things this frame
 	_marks = MeshInstance3D.new()
 	_marks.mesh = ImmediateMesh.new()
@@ -118,10 +123,39 @@ func tool_info() -> Dictionary:
 	return {"id": "joints", "label": "Joints", "order": 30, "buttons": buttons, "status": _line()}
 
 
+func lib_ready(lib) -> void:
+	_lib = lib
+	if lib == null:
+		_physics = null
+		return
+	_load_prefs()
+	lib.watch(self, "physics", _physics_here, _physics_gone)
+	_update_running()
+
+
+func _physics_here(physics: SlopitectModule) -> void:
+	_physics = physics if physics.has_method("body") else null
+
+
+func _physics_gone(_old) -> void:
+	_physics = null
+
+
+# Joints to keep: each physics frame. Marks to show: each frame.
+func _update_running() -> void:
+	set_physics_process(not _joints.is_empty())
+	var marks: bool = _prefs["show"] == "always" or (_prefs["show"] == "tool" and _chosen)
+	set_process(marks)
+	if not marks:
+		(_marks.mesh as ImmediateMesh).clear_surfaces()
+		_marks.visible = false
+
+
 func tool_selected(on: bool) -> void:
 	_chosen = on
 	if not on:
 		_first = {}
+	_update_running()
 
 
 func tool_trigger(down: bool) -> void:
@@ -207,6 +241,8 @@ func _tool_command(request: Dictionary) -> Dictionary:
 			_open()
 		_:
 			return {"ok": false, "error": "\"act\" must be open, cancel or world"}
+	if _lib:
+		_lib.touch(self)  # its tool buttons show these
 	return {"ok": true, "mode": _mode, "type": _type, "axis": _axis, "snap": _prefs["snap"], "first": _first.get("name", ""), "line": _line()}
 
 
@@ -241,13 +277,7 @@ func _things() -> Array:
 
 
 func _find(node_name) -> Node3D:
-	if typeof(node_name) != TYPE_STRING or node_name.is_empty() or node_name == "PolyHaven" or node_name.validate_node_name() != node_name:
-		return null
-	var world: Node3D = ctx["world"]
-	var node := world.get_node_or_null(NodePath(node_name)) as Node3D
-	if node == null and world.has_node("PolyHaven"):
-		node = world.get_node("PolyHaven").get_node_or_null(NodePath(node_name)) as Node3D
-	return node
+	return _lib.world_node(node_name) if _lib else null
 
 
 # Where a thing is and how it's turned, without its size.
@@ -256,8 +286,7 @@ func _pose(node: Node3D) -> Transform3D:
 
 
 func _body(node: Node3D) -> RigidBody3D:
-	var physics: SlopitectModule = ctx["modules"].module("physics")
-	return physics.call("body", node) if physics and physics.has_method("body") else null
+	return _physics.call("body", node) if is_instance_valid(_physics) else null
 
 
 # What the right controller points at: {name, position, normal, point} on a
@@ -494,6 +523,7 @@ func _sort() -> void:
 			placed.append_array(left)
 			break
 	_joints = placed
+	_update_running()
 
 
 # Makes a joint from world-space values: {type, a, b, at, axis, lower, upper,
@@ -568,6 +598,7 @@ func _take(id: String) -> Dictionary:
 			_joints.erase(joint)
 			_drop_engine(_live.get(id, {}))
 			_live.erase(id)
+			_update_running()
 			return joint
 	return {}
 
@@ -1103,19 +1134,19 @@ func _prefs_command(request: Dictionary) -> Dictionary:
 	for key in ["show", "snap"]:
 		if request.has(key):
 			_prefs[key] = request[key]
-	var out := FileAccess.open(PREFS_PATH, FileAccess.WRITE)
-	if out == null:
-		push_error("Slopitect joints: couldn't save %s" % PREFS_PATH)
-	else:
-		out.store_string(JSON.stringify(_prefs))
-		out.close()
+	_update_running()
+	var problem: String = _lib.write_json(PREFS_PATH, _prefs) if _lib else "the lib module isn't loaded"
+	if not problem.is_empty():
+		push_error("Slopitect joints: couldn't save %s: %s" % [PREFS_PATH, problem])
+	if _lib:
+		_lib.touch(self)  # its Settings section and tool buttons show them
 	return {"ok": true, "show": _prefs["show"], "snap": _prefs["snap"]}
 
 
 func _load_prefs() -> void:
 	if not FileAccess.file_exists(PREFS_PATH):
 		return
-	var saved = JSON.parse_string(FileAccess.get_file_as_string(PREFS_PATH))
+	var saved = _lib.read_json(PREFS_PATH)
 	if typeof(saved) != TYPE_DICTIONARY:
 		push_error("Slopitect joints: %s isn't readable; using the defaults" % PREFS_PATH)
 		return

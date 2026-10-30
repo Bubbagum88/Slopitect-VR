@@ -133,6 +133,7 @@ signal panel_shown(id_panel: String, on: bool)
 signal page_changed(id_panel: String, page: String)
 signal panel_changed(id_panel: String)
 signal focus_changed  # the focused window or input box (focus(), focused_window()) may have changed
+signal pressed(id_panel: String, id_element: String)  # a button, toggle or slider ran its action
 var _reported := {}  # id_panel -> visible, as panel_shown last told it
 var _lib: SlopitectModule
 var _apps_due := false  # the Menu's tiles are looked at again at the end of this frame
@@ -771,6 +772,7 @@ func _after_press(id_panel: String, element: Dictionary, fill: Dictionary, pendi
 
 func _pressed(id_panel: String, element: Dictionary, fill: Dictionary, reply: Dictionary) -> void:
 	var id_element: String = element["id"]
+	pressed.emit(id_panel, id_element)
 	if reply.get("ok", false):
 		if element.has("open"):
 			_open_menu(id_panel, element["open"])
