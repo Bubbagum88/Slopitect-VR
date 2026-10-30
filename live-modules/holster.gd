@@ -65,7 +65,30 @@ func setup() -> String:
 	register("holster_toggle", _toggle_command, "stow the avatar, or bring it out if it's stowed")
 	for side in ["left", "right"]:
 		_rings[side] = _make_ring()
+	set_process(false)  # on while there's an avatar to hold
 	return ""
+
+
+var _lib: SlopitectModule
+var _avatar_module: SlopitectModule  # the avatar while it's loaded
+
+
+func lib_ready(lib) -> void:
+	_lib = lib
+	if lib:
+		lib.watch(self, "avatar", _avatar_here, _avatar_gone)
+
+
+func _avatar_here(avatar: SlopitectModule) -> void:
+	_avatar_module = avatar if avatar.has_method("root") else null
+	set_process(_avatar_module != null)
+
+
+func _avatar_gone(_old: SlopitectModule) -> void:
+	_avatar_module = null
+	_mode = "free"
+	_show_rings(false)
+	set_process(false)
 
 
 func _exit_tree() -> void:
@@ -313,10 +336,7 @@ func _origin() -> Node3D:
 # --- The avatar ------------------------------------------------------------------------
 
 func _avatar() -> SlopitectModule:
-	var avatar: SlopitectModule = ctx["modules"].module("avatar")
-	if avatar == null or not avatar.has_method("root"):
-		return null
-	return avatar
+	return _avatar_module if is_instance_valid(_avatar_module) else null
 
 
 # The node that holds the whole avatar (avatar.gd's root()).
@@ -359,7 +379,7 @@ func _show_rings(shown: bool) -> void:
 
 
 func _pulse(hand: String, strength: float, seconds: float) -> void:
-	var controls: SlopitectModule = ctx["modules"].module("controls")
+	var controls: SlopitectModule = _lib.module("controls") if _lib else null
 	if controls:
 		controls.call("pulse", hand, strength, seconds)
 

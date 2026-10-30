@@ -133,6 +133,36 @@ signal page_changed(id_panel: String, page: String)
 signal panel_changed(id_panel: String)
 signal focus_changed  # the focused window or input box (focus(), focused_window()) may have changed
 var _reported := {}  # id_panel -> visible, as panel_shown last told it
+var _lib: SlopitectModule
+var _apps_due := false  # the Menu's tiles are looked at again at the end of this frame
+
+
+# The Menu's tiles (every module's menu_info(), lit while their window is
+# open) are looked at again when a module comes, goes or calls lib.touch(),
+# and when a window opens, closes or changes.
+func lib_ready(lib) -> void:
+	_lib = lib
+	if lib == null:
+		return
+	for sig in ["module_loaded", "module_unloaded", "info_changed"]:
+		lib.follow(self, "lib", sig, _apps_soon)
+	for sig in ["panel_shown", "panel_changed"]:
+		if not is_connected(sig, _apps_soon):
+			connect(sig, _apps_soon)
+	_apps_soon()
+
+
+func _apps_soon(_a = null, _b = null) -> void:
+	if _apps_due:
+		return
+	_apps_due = true
+	_apps_now.call_deferred()
+
+
+func _apps_now() -> void:
+	_apps_due = false
+	if is_inside_tree():
+		_scan_apps()
 
 var panels: Array = []  # [panel dictionaries], see _check_panel
 # While a question from the confirm module is up, the pointer only works on
@@ -304,10 +334,11 @@ func _physics_process(_delta: float) -> void:
 
 func _process(delta: float) -> void:
 	_follow(delta)
-	_since_apps += delta
-	if _since_apps >= APPS_SECONDS:
-		_since_apps = 0.0
-		_scan_apps()
+	if _lib == null:  # with lib, the Menu's tiles are looked at again on events
+		_since_apps += delta
+		if _since_apps >= APPS_SECONDS:
+			_since_apps = 0.0
+			_scan_apps()
 	_since_poll += delta
 	if _since_poll < POLL_SECONDS:
 		return

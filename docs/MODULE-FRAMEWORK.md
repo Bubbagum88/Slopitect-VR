@@ -151,6 +151,12 @@ seen on the headset yet.
 | library | Batch 2. Tabs through `page_changed`; runs only while a model waits for its download. PC (zz_library, 0 failed) |
 | landscape | Batch 2. Physics only while it's the chosen tool; the ground is redrawn 20 times a second while painting, not every tick. PC (zz_landscape, 7) |
 | paths | Batch 2. No per-frame landscape check (`lib.watch`/`follow`); aiming only while chosen. PC (zz_paths, 8) |
+| vrui (Menu tiles) | Batch 3. The Menu's tiles are looked at again on module and window events, not every 0.5 s (still every 0.5 s without lib). Text `source`s stay polled while shown: that's their contract. PC (zz_menu, 5) |
+| controls | Batch 3. confirm and landscape kept at hand (they were looked up several times a frame); tells Settings when move settings change. Walking and turning read the sticks every frame: that's input. PC (zz_controls, 7) |
+| avatar | Batch 3. tts kept at hand (it was looked up every frame). Still reads agent_status twice a second (APK). PC (old test, all pass) |
+| holster | Batch 3. Off without an avatar; no per-frame lookups. PC (old test, 35) |
+| memory | Batch 3. Follows projects' `project_changed` instead of reading projects' own file (one owner per piece of data). Still reads agent_status (APK). PC (zz_memory, zz_memory_world, 4) |
+| net, assets, worlds, aimsg, perf, agent_settings, agent_tuning | Looked at: no per-frame work or copied helpers to fix; perf measures every frame on purpose. Their `_home` copies stay until the APK loads lib first (they need it in `setup()`) |
 | grab, inspect, multi, prefabs, shapes, textures, tools, joints, doors | Waiting for the undo-groups work to land, to avoid clashing edits |
 | save, pause | Being changed for the stutter; their rewrite comes after |
 | everything else | Not started |
