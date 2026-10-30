@@ -31,8 +31,9 @@ param(
 )
 
 $remoteDir = "/sdcard/Slopitect/modules"
-# The order modules need each other in; any others load after, by name.
-$order = @("controls", "ui", "vrui", "tools", "landscape", "paths", "assets", "save", "grab", "physics", "projects", "inspect")
+# The order modules need each other in; any others load after, by name. lib
+# first, so the others find it as they load (they also manage if it comes later).
+$order = @("lib", "controls", "ui", "vrui", "tools", "landscape", "paths", "assets", "save", "grab", "physics", "projects", "inspect")
 
 # --- Finding adb and slopi.ps1 ----------------------------------------------------
 

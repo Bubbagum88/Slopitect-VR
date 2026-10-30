@@ -10,11 +10,18 @@ extends SlopitectModule
 # loaded is kept as it was saved and put back once the module loads.
 # Checkpoints keep the whole world at a moment to go back to later; going
 # back is one undo in the tools window (if the tools module is loaded).
+# A checkpoint also keeps the groups, textures, doors and physics (each of
+# those modules keeps its own file per project, so world.json doesn't), and
+# deleting a checkpoint is one undo.
 # With the projects module, each project has its own saves folder.
 
 const CHECK_SECONDS := 5.0  # how often it looks for changes to save
 const MAX_CHECKPOINTS := 50
+const SLOW_MS := 4.0  # an autosave slower than this is logged, with where the time went
 const PARTS := {"models": "assets", "landscape": "landscape", "paths": "paths", "switches": "inspect", "made": "shapes", "joints": "joints"}  # part -> the module it needs
+# In checkpoints only: part -> [module, its getter, its setter].
+const CHECKPOINT_PARTS := {"groups": ["multi", "get_grouping", "set_grouping"], "textures": ["textures", "get_textures", "set_textures"],
+	"doors": ["doors", "get_doors", "set_doors"], "physics": ["physics", "get_physics", "set_physics"]}
 
 var _folder := ""
 var _last_saved := ""  # what world.json holds, to save only on a change
@@ -22,6 +29,8 @@ var _since_check := 0.0
 var _pending := {}  # part -> its saved value, while its module isn't loaded; kept in every save until it is
 var _kept := {}  # part -> its value at the last snapshot, kept if its module is unloaded later
 var _restoring := false
+var _ground := ""  # the landscape's heights as saved text, made again only when it changes
+var _ground_from := 0  # the landscape module's instance id _ground was made from
 
 
 func setup() -> String:
@@ -48,10 +57,12 @@ func setup() -> String:
 func _notification(what: int) -> void:
 	# The headset can close the app at any time after this.
 	if what == NOTIFICATION_APPLICATION_PAUSED or what == NOTIFICATION_WM_CLOSE_REQUEST:
+		_ground = ""
 		_autosave()
 
 
 func _exit_tree() -> void:
+	_ground = ""
 	_autosave()
 
 
@@ -85,6 +96,17 @@ func _shapes(made_too := false) -> Array:
 		return node == null or not node.get_meta("made", false))
 
 
+# The whole world, and with checkpoint the parts only checkpoints keep.
+func _checkpoint_snapshot() -> Dictionary:
+	var state := _snapshot()
+	for part in CHECKPOINT_PARTS:
+		var spec: Array = CHECKPOINT_PARTS[part]
+		var module: SlopitectModule = ctx["modules"].module(spec[0])
+		if module and module.has_method(spec[1]):
+			state[part] = module.call(spec[1])
+	return state
+
+
 # The whole world. A part whose module isn't loaded is the one last saved.
 func _snapshot() -> Dictionary:
 	var state := {"version": 2, "saved": Time.get_datetime_string_from_system(true), "shapes": _shapes()}
@@ -100,7 +122,7 @@ func _snapshot() -> Dictionary:
 			"models":
 				state["models"] = _run({"cmd": "assets_placed"}).get("placed", [])
 			"landscape":
-				state["landscape"] = Marshalls.raw_to_base64((module.call("get_heights") as PackedFloat32Array).to_byte_array())
+				state["landscape"] = _ground_text(module)
 			"paths":
 				state["paths"] = module.call("get_paths")
 			"switches":
@@ -113,7 +135,16 @@ func _snapshot() -> Dictionary:
 	return state
 
 
+# Putting a world back isn't a change to undo: the deletes and spawns in it
+# add nothing to the undo list.
 func _put_back(state: Dictionary) -> PackedStringArray:
+	var tools: SlopitectModule = ctx["modules"].module("tools")
+	if tools and tools.has_method("quiet"):
+		return tools.call("quiet", _put_back_now.bind(state))
+	return _put_back_now(state)
+
+
+func _put_back_now(state: Dictionary) -> PackedStringArray:
 	_restoring = true
 	_pending.clear()
 	_kept.clear()
@@ -137,6 +168,11 @@ func _put_back(state: Dictionary) -> PackedStringArray:
 			_pending[part] = state[part]  # put back when its module loads
 		else:
 			problems.append_array(_put_part(part, state[part]))
+	for part in CHECKPOINT_PARTS:
+		var spec: Array = CHECKPOINT_PARTS[part]
+		var module: SlopitectModule = ctx["modules"].module(spec[0])
+		if state.has(part) and module and module.has_method(spec[2]):
+			module.call(spec[2], state[part])
 	_restoring = false
 	for problem in problems:
 		push_error("Slopitect save: " + problem)
@@ -199,6 +235,23 @@ func _load_world() -> void:
 		"" if problems.is_empty() else "; problems: " + "; ".join(problems)])
 
 
+# The ground as text. Its heights aren't turned into text again at every
+# check, only when the landscape says it changed (or another landscape
+# module is loaded), and before the app closes, for a stroke not finished.
+func _ground_text(landscape: SlopitectModule) -> String:
+	var id := landscape.get_instance_id()
+	if id != _ground_from or _ground.is_empty():
+		if not landscape.is_connected("changed", _ground_changed):
+			landscape.connect("changed", _ground_changed)
+		_ground_from = id
+		_ground = Marshalls.raw_to_base64((landscape.call("get_heights") as PackedFloat32Array).to_byte_array())
+	return _ground
+
+
+func _ground_changed() -> void:
+	_ground = ""
+
+
 # Without the time, so the same world compares the same.
 func _comparable(state: Dictionary) -> String:
 	var copy := state.duplicate()
@@ -209,15 +262,24 @@ func _comparable(state: Dictionary) -> String:
 func _autosave() -> void:
 	if _restoring or _folder.is_empty():
 		return
+	var started := Time.get_ticks_usec()
 	var state := _snapshot()
+	var taken := Time.get_ticks_usec()
 	var now := _comparable(state)
-	if now == _last_saved:
-		return
-	var problem := _write(_folder + "/world.json", state)
-	if problem.is_empty():
-		_last_saved = now
-	else:
-		push_error("Slopitect save: " + problem)
+	var compared := Time.get_ticks_usec()
+	var wrote := compared
+	if now != _last_saved:
+		var problem := _write(_folder + "/world.json", state)
+		wrote = Time.get_ticks_usec()
+		if problem.is_empty():
+			_last_saved = now
+		else:
+			push_error("Slopitect save: " + problem)
+	if (wrote - started) / 1000.0 > SLOW_MS:
+		print("Slopitect save: autosave took %.1f ms (snapshot %.1f, compare %.1f, write %s; %d shapes, %.0f KB)" % [
+			(wrote - started) / 1000.0, (taken - started) / 1000.0, (compared - taken) / 1000.0,
+			"%.1f" % ((wrote - compared) / 1000.0) if wrote != compared else "none, unchanged",
+			state.get("shapes", []).size(), now.length() / 1024.0])
 
 
 # For the projects module: saves this world where it belongs, then switches
@@ -257,7 +319,7 @@ func _write(path: String, state: Dictionary) -> String:
 	var out := FileAccess.open(temporary, FileAccess.WRITE)
 	if out == null:
 		return "couldn't write %s (error %d)" % [temporary, FileAccess.get_open_error()]
-	out.store_string(JSON.stringify(state, "\t"))
+	out.store_string(JSON.stringify(state))  # no indenting: less to write
 	out.close()
 	var moved := DirAccess.rename_absolute(temporary, path)
 	return "" if moved == OK else "couldn't move %s into place (error %d)" % [temporary, moved]
@@ -303,7 +365,7 @@ func _checkpoint(request: Dictionary) -> Dictionary:
 	if not files.is_empty():
 		number = int(files[-1].get_slice("-", 0)) + 1
 	var id := "%04d" % number
-	var state := _snapshot()
+	var state := _checkpoint_snapshot()
 	state["label"] = label
 	var problem := _write("%s/checkpoints/%s-checkpoint.json" % [_folder, id], state)
 	if not problem.is_empty():
@@ -345,7 +407,7 @@ func _restore_command(request: Dictionary) -> Dictionary:
 	var read := _read_checkpoint(request.get("checkpoint"))
 	if read.has("error"):
 		return {"ok": false, "error": read["error"]}
-	var before := _snapshot()
+	var before := _checkpoint_snapshot()
 	var state: Dictionary = read["state"]
 	var problems := _put_back(state)
 	var tools: SlopitectModule = ctx["modules"].module("tools")
@@ -361,5 +423,14 @@ func _delete(request: Dictionary) -> Dictionary:
 	var read := _read_checkpoint(request.get("checkpoint"))
 	if read.has("error"):
 		return {"ok": false, "error": read["error"]}
-	DirAccess.remove_absolute(read["path"])
+	var path: String = read["path"]
+	var kept := FileAccess.get_file_as_string(path)
+	DirAccess.remove_absolute(path)
+	var tools: SlopitectModule = ctx["modules"].module("tools")
+	if tools:
+		var put_back := func():
+			var out := FileAccess.open(path, FileAccess.WRITE)
+			if out:
+				out.store_string(kept)
+		tools.call("push_undo", "delete checkpoint %s" % read["id"], put_back, func(): DirAccess.remove_absolute(path))
 	return {"ok": true, "deleted": read["id"]}

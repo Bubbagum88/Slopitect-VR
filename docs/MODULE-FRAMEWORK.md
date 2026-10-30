@@ -125,3 +125,46 @@ Open decisions (the owner's):
   vrui.gd draws every panel the vrui way, only on a change. Still to see:
   frame time on the Quest 1 with several panels.
 - Which sites may web downloads come from? assets.gd's list is the start.
+
+## Rewriting every module to the design rules (from 2026-10-30)
+
+The owner's ten rules are in [CLAUDE.md](../CLAUDE.md#module-design-rules-the-owners-2026-10-30).
+The foundation is `live-modules/lib.gd` (shared helpers, module events,
+`lib_ready`). Each module is rewritten in a small batch with a test in
+`live-modules/tests/`. PC means tested headless; nothing below has been
+seen on the headset yet.
+
+| Module | State |
+| --- | --- |
+| lib | New. PC (tests/zz_lib.gd, 33 checks) |
+| projects | Batch 1. Emits `project_changed(project, folder)`; joins save through `lib.watch` instead of checking every frame; no `_process`. PC (zz_projects, 13) |
+| physics | Batch 1. Bodies come back when a thing joins the world (no 1 s scan); idle when nothing is physical; ground follows landscape through lib; `_find` is lib's `world_node`. PC (zz_physics, 13) |
+| jelly | Batch 1. Off without an avatar, on when it loads (`lib.watch`). PC (zz_jelly, 13) |
+| hands | Batch 1. No `module()` lookups per frame; idle while hidden, while beatsaber's sabers are chosen, or without controls. PC (zz_hands, 15) |
+| vrui | Batch 2 (signals only; its own polling comes later). `panel_shown(id_panel, on)`, `page_changed(id_panel, page)`, `panel_changed(id_panel)`, `focus_changed`. PC (zz_vrui, 8) |
+| keyboard | Batch 2b. No 0.25 s check: looks again when a window opens, closes or changes, the focus moves, the terminal switches mode, or a module comes or goes. PC (zz_keyboard, 10) |
+| terminal | Batch 2b. `mode_changed(mode)`; no 0.25 s window check; Chat mode follows chat.gd's `transcript_changed`, and reads the agent itself only when chat.gd isn't loaded; idle otherwise. PC (zz_terminal, 9) |
+| chat | Batch 2b. `transcript_changed`; refills its window on vrui loading or its panel changing, not every second. Still reads agent_status twice a second: the agent has no signals (an APK change). PC (zz_chat, 4) |
+| tts | Batch 2b. Sound files checked only while there's speech to write or play; tells Settings when a value changes. Still reads the agent's replies twice a second (APK). PC (zz_voice) |
+| vtt | Batch 2b. Runs only while you talk, while words are turned into text, and until the hand menu shows the line; tells Settings when a value changes. PC (zz_voice, 8) |
+| settings | Batch 2. No 1 s scan: draws when the window opens, and while open when a module comes, goes or calls `lib.touch(self)`. Modules with settings must call `lib.touch(self)` when a value changes outside the window (hands does; controls, avatar, tts, vtt, vrui, joints, agent_settings still to do). PC (zz_settings, 13) |
+| library | Batch 2. Tabs through `page_changed`; runs only while a model waits for its download. PC (zz_library, 0 failed) |
+| landscape | Batch 2. Physics only while it's the chosen tool; the ground is redrawn 20 times a second while painting, not every tick. PC (zz_landscape, 7) |
+| paths | Batch 2. No per-frame landscape check (`lib.watch`/`follow`); aiming only while chosen. PC (zz_paths, 8) |
+| vrui (Menu tiles) | Batch 3. The Menu's tiles are looked at again on module and window events, not every 0.5 s (still every 0.5 s without lib). Text `source`s stay polled while shown: that's their contract. PC (zz_menu, 5) |
+| controls | Batch 3. confirm and landscape kept at hand (they were looked up several times a frame); tells Settings when move settings change. Walking and turning read the sticks every frame: that's input. PC (zz_controls, 7) |
+| avatar | Batch 3. tts kept at hand (it was looked up every frame). Still reads agent_status twice a second (APK). PC (old test, all pass) |
+| holster | Batch 3. Off without an avatar; no per-frame lookups. PC (old test, 35) |
+| memory | Batch 3. Follows projects' `project_changed` instead of reading projects' own file (one owner per piece of data). Still reads agent_status (APK). PC (zz_memory, zz_memory_world, 4) |
+| net | Batch 3b. Folder and saving through lib; `downloads/` made in `lib_ready`, `net_fetch` waits for lib. The allowed hosts still load in `setup()` so the safety list is never at its default. PC (zz_net, 10, no network) |
+| assets | Batch 3b. Its models folder is made in `lib_ready` (no copied Slopitect-folder path); `assets_get` and `assets_place` wait for lib; tools found through lib. PC (zz_assets, 9, no network) |
+| aimsg | Batch 3b. Its size loads and saves through lib's JSON helpers, once lib is there (the defaults until then). PC (zz_aimsg, 7) |
+| perf | Batch 3b. `perf_load` finds the modules folder through `lib.home()` (says it needs lib otherwise); it still notes every frame time on purpose (perf_status looks back 10 s). PC (zz_perf, 5) |
+| agent_tuning | Batch 3b. The extra skills folder comes from `lib.home()`; without lib only the shipped skills. PC (zz_agent_tuning, 4) |
+| worlds, agent_settings | Batch 3b. Already fit (no per-frame work, no copied helpers); tests only. PC (zz_worlds, 9; zz_agent_settings, 3) |
+| grab, inspect, multi, prefabs, shapes, textures, tools, joints, doors | Waiting for the undo-groups work to land, to avoid clashing edits |
+| save, pause | Being changed for the stutter; their rewrite comes after |
+| everything else | Not started |
+
+Still needs the APK (flagged, not done): loading lib.gd first, so `setup()`
+could use it directly.

@@ -70,6 +70,7 @@ func setup() -> String:
 		return "library can't make its folder %s/library (error %d)" % [_home, made]
 	register("library_do", _do, "the Library window (textures, assets, prefabs): act = toggle (optional tab), show (optional tab), hide, page (tab, page: next, prev or a number), category (tab, optional category; none cycles), pick (tab, id), refresh")
 	register("library_status", _status_command, "what the Library window shows: each tab's page, category and items, and the last thing it did")
+	set_process(false)  # on only while a model waits for its download
 	return ""
 
 
@@ -92,19 +93,26 @@ func hand_info() -> Array:
 	return out
 
 
+# A tab pressed in the window: fill it (its list may not be fetched yet).
+func lib_ready(lib) -> void:
+	if lib:
+		lib.follow(self, "vrui", "page_changed", _on_page)
+
+
+func _on_page(id_panel: String, page: String) -> void:
+	if id_panel == PANEL and page != _shown_page:
+		_shown_page = page
+		_build()
+
+
+# Runs only while a model waits for its download, to place it once it's in.
 func _process(delta: float) -> void:
 	_since_check += delta
 	if _since_check < CHECK_SECONDS:
 		return
 	_since_check = 0.0
-	var panel := _panel()
-	if not panel.get("visible", false):
-		return
-	# A tab pressed in the window: fill it (its list may not be fetched yet).
-	if panel.get("page", "") != _shown_page:
-		_shown_page = panel.get("page", "")
-		_build()
 	_finish_placing()
+	set_process(not _place_when_done.is_empty())
 
 
 func _run(request: Dictionary) -> Dictionary:
@@ -567,6 +575,7 @@ func _pick_model(id: String) -> Dictionary:
 	var reply := _run({"cmd": "assets_get", "id": id})
 	if reply.get("ok", false):
 		_place_when_done[id] = true
+		set_process(true)
 		_say("Downloading %s; it appears in front of you when it's done." % id)
 	else:
 		_say("Couldn't download %s: %s" % [id, reply.get("error", "?")])

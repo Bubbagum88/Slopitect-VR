@@ -26,6 +26,7 @@ var _draft_node: Node3D
 var _marker: MeshInstance3D
 var _selected := false
 var _landscape: SlopitectModule
+var _lib: SlopitectModule
 var _next := 1
 
 
@@ -43,17 +44,27 @@ func setup() -> String:
 	register("paths_delete", _delete_command, "delete a path (one undo): path (its id)")
 	register("paths_settings", _settings_command, "for the next path you put down: any of width (0.2 to 5 m), width_step (1 wider, -1 narrower), color, flatten (true/false)")
 	register("paths_draft", _draft_command, "the path being put down with the trigger: action finish, cancel or remove_last")
+	set_physics_process(false)  # only while it's the chosen tool
 	return ""
 
 
-func _process(_delta: float) -> void:
-	# The landscape can be loaded, unloaded or changed at any time; paths follow it.
-	var now: SlopitectModule = ctx["modules"].module("landscape")
-	if now != _landscape:
-		_landscape = now
-		if _landscape:
-			_landscape.connect("changed", _rebuild_all)
-		_rebuild_all()
+# The landscape can be loaded, unloaded or changed at any time; paths follow it.
+func lib_ready(lib) -> void:
+	_lib = lib
+	if lib == null:
+		return
+	lib.watch(self, "landscape", _landscape_here, _landscape_gone)
+	lib.follow(self, "landscape", "changed", _rebuild_all)
+
+
+func _landscape_here(landscape: SlopitectModule) -> void:
+	_landscape = landscape
+	_rebuild_all()
+
+
+func _landscape_gone(_old: SlopitectModule) -> void:
+	_landscape = null
+	_rebuild_all()
 
 
 # --- As a tool -----------------------------------------------------------------------
@@ -71,6 +82,7 @@ func tool_info() -> Dictionary:
 
 func tool_selected(on: bool) -> void:
 	_selected = on
+	set_physics_process(on)
 	_marker.visible = false
 
 
@@ -243,7 +255,7 @@ func _remove(id: String) -> void:
 
 
 func _undo_entry(label: String, undo: Callable, redo: Callable) -> void:
-	var tools: SlopitectModule = ctx["modules"].module("tools")
+	var tools: SlopitectModule = _lib.module("tools") if _lib else null
 	if tools:
 		tools.call("push_undo", "paths: " + label, undo, redo)
 

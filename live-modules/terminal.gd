@@ -58,7 +58,6 @@ const GAP := 0.007
 const ROWS_OF_KEYS := ["1234567890-", "qwertyuiop/", "asdfghjkl_=", "zxcvbnm,.[]"]
 const CHAT_KEYS := ["1234567890-", "qwertyuiop'", "asdfghjkl?!", "zxcvbnm,./:"]
 const CHAT_POLL_SECONDS := 0.5
-const CHECK_SECONDS := 0.25
 const ASK_POLL_SECONDS := 0.5
 
 var _line := ""
@@ -73,11 +72,18 @@ var _asking := false
 var _since_ask_poll := 0.0
 var _ui_id := 0  # the ui module the window was built on (its instance id)
 var _keyboard_id := 0  # the keyboard module there was when it was built (0: none, so it has its own keys)
-var _since_check := CHECK_SECONDS
+var _lib: SlopitectModule
+var _soon := false  # a window check is due at the end of this frame
+var _visible := false  # the window is showing (vrui's panel_shown)
 var _mode := "terminal"  # or "chat"
 var _other_line := ""  # what's typed in the other mode, kept for when you switch back
 var _chat_text := ""  # the conversation as last shown
 var _since_chat_poll := CHAT_POLL_SECONDS
+
+
+# The window switched between the command line and the chat (the keyboard
+# follows it for its layout).
+signal mode_changed(mode: String)
 
 
 func setup() -> String:
@@ -91,7 +97,72 @@ func setup() -> String:
 	register("terminal_status", _status, "the terminal's mode (terminal or chat), line, last screen lines and history")
 	register("terminal_mode", _mode_command, "switch the terminal's window between the command line and the agent's chat: mode (terminal or chat)")
 	_print("Slopitect terminal. Type a command and press Run; Help lists them.")
+	set_process(false)
 	return ""
+
+
+# No checks every frame: the window is looked at again when the window
+# module or the keyboard comes or goes, when it's taken away, or when the
+# agent's own chat window opens.
+func lib_ready(lib) -> void:
+	_lib = lib
+	if lib == null:
+		return
+	lib.follow(self, "vrui", "panel_shown", _on_shown)
+	lib.follow(self, "vrui", "panel_changed", _on_changed)
+	lib.follow(self, "lib", "module_loaded", _on_module)
+	lib.follow(self, "lib", "module_unloaded", _on_module)
+	lib.follow(self, "chat", "transcript_changed", _on_transcript)
+	_check_soon()
+
+
+func _on_transcript() -> void:
+	if _mode == "chat" and _visible:
+		_show_chat()
+
+
+func _on_shown(id_panel: String, on: bool) -> void:
+	if id_panel == PANEL:
+		_visible = on
+		_since_chat_poll = CHAT_POLL_SECONDS  # shown: the chat straight away
+		_update_process()
+	elif id_panel == CHAT_PANEL and on:
+		_check_soon()
+
+
+func _on_changed(id_panel: String) -> void:
+	if id_panel == PANEL:
+		_check_soon()
+
+
+func _on_module(module_name: String) -> void:
+	if module_name in ["vrui", "ui", "keyboard"]:
+		_check_soon()
+	if module_name == "chat":
+		_update_process.call_deferred()  # once it's in or out
+
+
+func _check_soon() -> void:
+	if _soon:
+		return
+	_soon = true
+	_check_deferred.call_deferred()
+
+
+func _check_deferred() -> void:
+	_soon = false
+	if is_inside_tree():
+		_check_window()
+
+
+# Runs only while an Ask waits for its answer, or the chat shows here and
+# chat.gd isn't loaded to tell it of changes (the agent itself has no
+# signals yet: an APK change).
+func _update_process() -> void:
+	var told: bool = _lib != null and _lib.module("chat") != null
+	set_process((_mode == "chat" and _visible and not told) or _asking)
+	if _mode == "chat" and _visible and told:
+		_show_chat()
 
 
 func _exit_tree() -> void:
@@ -111,10 +182,6 @@ func hand_info() -> Dictionary:
 
 
 func _process(delta: float) -> void:
-	_since_check += delta
-	if _since_check >= CHECK_SECONDS:
-		_since_check = 0.0
-		_check_window()
 	if _mode == "chat":
 		_since_chat_poll += delta
 		if _since_chat_poll >= CHAT_POLL_SECONDS:
@@ -141,7 +208,7 @@ func _check_window() -> void:
 	var panels := {}
 	for panel in ctx["server"].run({"cmd": "ui_list"}).get("panels", []):
 		panels[panel.get("id_panel")] = panel
-	var keyboard: Node = ctx["modules"].module("keyboard")
+	var keyboard: Node = _lib.module("keyboard") if _lib else null
 	var keyboard_id := keyboard.get_instance_id() if keyboard != null else 0
 	if id != _ui_id or keyboard_id != _keyboard_id or not panels.has(PANEL):
 		_build_panel()
@@ -433,7 +500,7 @@ func _show_lines(lines: PackedStringArray) -> void:
 # The conversation: chat.gd's screen when it's loaded, else the agent's
 # recent events (laid out by aimsg.gd when that's loaded).
 func _chat_lines() -> PackedStringArray:
-	var chat: SlopitectModule = ctx["modules"].module("chat")
+	var chat: SlopitectModule = _lib.module("chat") if _lib else ctx["modules"].module("chat")
 	if chat != null and chat.has_method("transcript"):
 		return PackedStringArray(chat.call("transcript"))
 	var lines := PackedStringArray()
@@ -473,6 +540,8 @@ func _set_mode(mode: String) -> void:
 	_history_at = -1
 	_scroll = 0
 	_build_panel()
+	_update_process()
+	mode_changed.emit(mode)
 
 
 func _send_chat(text: String) -> Dictionary:
@@ -633,6 +702,7 @@ func _ask() -> Dictionary:
 	_show_line()
 	_asking = true
 	_since_ask_poll = 0.0
+	_update_process()
 	return reply
 
 
@@ -640,11 +710,13 @@ func _check_ask() -> void:
 	var status: Dictionary = ctx["server"].run({"cmd": "agent_status"})
 	if not status.get("ok", false):
 		_asking = false
+		_update_process()
 		_print("error: %s" % status.get("error", "?"))
 		return
 	if status.get("busy", false):
 		return
 	_asking = false
+	_update_process()
 	var error := String(status.get("last_error", ""))
 	if not error.is_empty():
 		_print("agent error: " + error)

@@ -8,6 +8,8 @@ extends SlopitectModule
 # are the controls module's "grab_left" and "grab_right" actions; pointing
 # at a panel, the right grip moves the panel instead (the ui module is
 # asked first).
+# A thing in a group (multi.gd) brings its group along, and the undo puts
+# the whole group back.
 # Grip a held thing with the other hand too and pull your hands apart or
 # together to make it bigger or smaller; it keeps its shape. Letting go
 # with either hand leaves it in the other. The whole hold, moves and resizes,
@@ -18,7 +20,7 @@ const SPEED_FRAMES := 6  # hand speed is taken over this many frames
 const SMALLEST := 0.02  # metres: a resized thing's longest side stays at least this
 const BIGGEST := 20.0  # and at most this
 
-var _held := {}  # hand name -> {"node", "offset": Transform3D, "before": Transform3D}
+var _held := {}  # hand name -> {"node", "offset": Transform3D, "before": {name: Transform3D} of it and its group}
 # While both hands hold one thing: {"node", "hand": the one it follows,
 # "distance": between the hands when the second took it, "scale": its scale
 # then, "longest": its longest side then, "from_middle": where it was from
@@ -36,6 +38,15 @@ func setup() -> String:
 func _exit_tree() -> void:
 	for hand in _held.keys():
 		_let_go(hand)
+
+
+# For multi.gd: what the hands hold now, so a group follows the held one.
+func held() -> Array:
+	var out := []
+	for hand in _held:
+		if is_instance_valid(_held[hand]["node"]):
+			out.append(_held[hand]["node"])
+	return out
 
 
 func _physics_process(_delta: float) -> void:
@@ -114,7 +125,7 @@ func _grip(hand: String) -> bool:
 		_start_resize(hand, other, best)
 		return true
 	_held[hand] = {"node": best, "offset": (ctx[hand] as Node3D).global_transform.affine_inverse() * best.global_transform,
-		"before": best.global_transform}
+		"before": _where(_moving_with(best))}
 	var physics: SlopitectModule = ctx["modules"].module("physics")
 	if physics:
 		physics.call("hold", best, true)
@@ -159,13 +170,20 @@ func _let_go(hand: String) -> void:
 	if physics:
 		physics.call("hold", node, false)
 		physics.call("throw", node, _hand_speed(hand))
-	var before: Transform3D = held["before"]
-	var after := node.global_transform
+	var before: Dictionary = held["before"]
+	var after := _where(before.keys())
 	var tools: SlopitectModule = ctx["modules"].module("tools")
-	if tools and not before.is_equal_approx(after):
-		var put := func(t: Transform3D): if is_instance_valid(node): node.global_transform = t
-		var what := "move" if before.basis.get_scale().is_equal_approx(after.basis.get_scale()) else "resize"
-		tools.call("push_undo", "%s %s" % [what, node.name], put.bind(before), put.bind(after))
+	var node_name := String(node.name)
+	if tools and before.has(node_name) and after.has(node_name) and not (before[node_name] as Transform3D).is_equal_approx(after[node_name]):
+		var put := func(where: Dictionary):
+			for n in where:
+				var thing := _thing(n)
+				if thing:
+					thing.global_transform = where[n]
+		var same_size := (before[node_name] as Transform3D).basis.get_scale().is_equal_approx((after[node_name] as Transform3D).basis.get_scale())
+		var what := "move" if same_size else "resize"
+		var label := "%s %s" % [what, node_name] if before.size() == 1 else "%s %s's group" % [what, node_name]
+		tools.call("push_undo", label, put.bind(before), put.bind(after))
 	print("Slopitect grab: %s hand let go of %s" % [hand, node.name])
 
 
@@ -187,6 +205,29 @@ func _grabbable() -> Array:
 		elif child.name == "PolyHaven":
 			found.append_array(child.get_children())
 	return found
+
+
+func _thing(node_name: String) -> Node3D:
+	for thing in _grabbable():
+		if String(thing.name) == node_name:
+			return thing
+	return null
+
+
+# The names that move with node: its group in multi.gd, or just itself.
+func _moving_with(node: Node3D) -> Array:
+	var multi: SlopitectModule = ctx["modules"].module("multi")
+	return multi.call("members", String(node.name)) if multi else [String(node.name)]
+
+
+# name -> where it is now, for those that exist.
+func _where(names: Array) -> Dictionary:
+	var out := {}
+	for n in names:
+		var thing := _thing(n)
+		if thing:
+			out[n] = thing.global_transform
+	return out
 
 
 # From a point to the thing's box (0 inside it), in world space.

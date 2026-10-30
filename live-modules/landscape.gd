@@ -67,6 +67,9 @@ var _selected := false
 var _painting := false
 var _before := PackedFloat32Array()  # the heights when the stroke began
 var _flatten_to := 0.0
+var _since_upload := 0.0
+var _lib: SlopitectModule
+const UPLOAD_SECONDS := 0.05  # while painting, the ground is drawn again 20 times a second
 
 
 func setup() -> String:
@@ -114,7 +117,12 @@ func setup() -> String:
 	register("landscape_sculpt", _sculpt_command, "shape the ground at one spot (one undo): position [x, z], mode (%s), size (radius in m), amount (m for raise/lower, 0 to 1 for smooth), height (for flatten)" % ", ".join(MODES))
 	register("landscape_height", _height_command, "the ground's height at position [x, z]")
 	register("landscape_reset", _reset_command, "make the ground flat again (one undo)")
+	set_physics_process(false)  # only while it's the chosen tool
 	return ""
+
+
+func lib_ready(lib) -> void:
+	_lib = lib
 
 
 func _exit_tree() -> void:
@@ -138,6 +146,7 @@ func tool_info() -> Dictionary:
 
 func tool_selected(on: bool) -> void:
 	_selected = on
+	set_physics_process(on)
 	if not on:
 		_finish_stroke()
 		_marker.visible = false
@@ -166,13 +175,16 @@ func _physics_process(delta: float) -> void:
 	_marker.scale = Vector3.ONE * brush["size"]
 	if _painting:
 		_apply(brush["mode"], hit.x, hit.z, brush["size"], brush["strength"] * delta, _flatten_to)
-		_upload()
+		_since_upload += delta
+		if _since_upload >= UPLOAD_SECONDS:
+			_upload()
 
 
 func _finish_stroke() -> void:
 	if not _painting:
 		return
 	_painting = false
+	_upload()
 	_record("%s stroke" % brush["mode"], _before)
 
 
@@ -367,7 +379,7 @@ func _record(label: String, before: PackedFloat32Array) -> void:
 		return
 	_save()
 	changed.emit()
-	_tools = ctx["modules"].module("tools")
+	_tools = _lib.module("tools") if _lib else null
 	if _tools:
 		_tools.call("push_undo", "landscape: " + label, set_heights.bind(before), set_heights.bind(after))
 
@@ -426,6 +438,7 @@ func _grid_mesh() -> ArrayMesh:
 
 
 func _upload() -> void:
+	_since_upload = 0.0
 	_image.set_data(N, N, false, Image.FORMAT_RF, _heights.to_byte_array())
 	_texture.update(_image)
 

@@ -50,20 +50,31 @@ var _jobs := {}  # id -> {id, url, file, state, bytes, error}
 var _next_id := 1
 var _running := 0
 var _found: Array = []  # addresses from the newest searches, oldest first
+var _lib: SlopitectModule
 
 
 func setup() -> String:
-	_load()
-	_home = ("/sdcard/Slopitect" if OS.get_name() == "Android" else OS.get_user_data_dir() + "/files_home") + "/downloads"
-	var made := DirAccess.make_dir_recursive_absolute(_home)
-	if made != OK:
-		return "net can't make its folder %s (error %d; does the app have storage permission? files_status shows it)" % [_home, made]
+	_load()  # the allowed hosts, straight away: they're the safety rule, never left at a default
 	register("net_fetch", _fetch_command, "download a file from an allowed host into downloads/HOST/: url (https), optional file (a name: letters, digits, . _ - and / for folders; default the URL's last part), licence (text kept with it); returns an id")
 	register("net_search", _search_command, "search the web (DuckDuckGo): query (text), optional count (1-%d); returns title, url and snippet for each result" % SEARCH_RESULTS)
 	register("net_read", _read_command, "the text of a web page that net_search found (or one on an allowed host): url, optional offset and max_chars (default %d, at most %d)" % [READ_CHARS, MAX_READ_CHARS])
 	register("net_status", _status, "the allowed hosts and the downloads: optional id for one")
 	register("net_config", _config, "from the PC only: hosts [names], or add / remove (a host name)")
 	return ""
+
+
+# downloads/ is in the Slopitect folder (lib.home()); net_fetch waits for lib.
+# fetch() takes its own path, so other modules' downloads don't.
+func lib_ready(lib) -> void:
+	_lib = lib
+	if lib == null:
+		return
+	var folder: String = lib.home() + "/downloads"
+	var made := DirAccess.make_dir_recursive_absolute(folder)
+	if made != OK:
+		push_error("Slopitect net: can't make its folder %s (error %d; does the app have storage permission? files_status shows it)" % [folder, made])
+		return
+	_home = folder
 
 
 # Whether a URL is on an allowed host (https, and the host followed by "/",
@@ -160,6 +171,8 @@ func _location(headers: PackedStringArray, from: String) -> String:
 # --- Commands -------------------------------------------------------------------------
 
 func _fetch_command(request: Dictionary) -> Dictionary:
+	if _home.is_empty():
+		return {"ok": false, "error": "net is waiting for the lib module (load lib.gd)"}
 	var url = request.get("url")
 	if typeof(url) != TYPE_STRING or url.length() > 2000:
 		return {"ok": false, "error": "\"url\" must be an https address"}
@@ -390,12 +403,9 @@ func _config(request: Dictionary) -> Dictionary:
 			return {"ok": false, "error": "%s isn't an allowed host" % JSON.stringify(request["remove"])}
 		changed.erase(request["remove"])
 	hosts = changed
-	var out := FileAccess.open(SETTINGS_PATH, FileAccess.WRITE)
-	if out == null:
-		push_error("Slopitect net: couldn't save %s (error %d)" % [SETTINGS_PATH, FileAccess.get_open_error()])
-	else:
-		out.store_string(JSON.stringify({"hosts": hosts}, "\t"))
-		out.close()
+	var problem: String = _lib.write_json(SETTINGS_PATH, {"hosts": hosts}, "\t") if _lib else "the lib module isn't loaded"
+	if not problem.is_empty():
+		push_error("Slopitect net: couldn't save %s: %s" % [SETTINGS_PATH, problem])
 	return {"ok": true, "hosts": hosts}
 
 

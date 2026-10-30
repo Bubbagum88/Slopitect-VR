@@ -170,10 +170,12 @@ func _apply_command(request: Dictionary) -> Dictionary:
 	var roughness = request.get("roughness", 0.8)
 	if not typeof(roughness) in [TYPE_INT, TYPE_FLOAT] or roughness < 0 or roughness > 1:
 		return {"ok": false, "error": "\"roughness\" must be 0 to 1"}
+	var before := _entries(names)
 	for n in names:
 		_map[n] = {"texture": path, "scale": float(scale), "tint": tint, "metallic": float(metallic), "roughness": float(roughness)}
 		_put(n, _find(n))
 	_save()
+	_undo("texture %s" % (names[0] if names.size() == 1 else "%d shapes" % names.size()), before, _entries(names))
 	return {"ok": true, "textured": names}
 
 
@@ -181,17 +183,84 @@ func _clear_command(request: Dictionary) -> Dictionary:
 	var names = request.get("names")
 	if typeof(names) != TYPE_ARRAY:
 		return {"ok": false, "error": "\"names\" must be a list of shape names"}
+	var before := _entries(names)
+	_take_off(names)
+	_save()
+	if not before.values().all(func(e): return e == null):
+		_undo("untexture %s" % (names[0] if names.size() == 1 else "%d shapes" % names.size()), before, _entries(names))
+	return {"ok": true}
+
+
+func _take_off(names: Array) -> void:
 	for n in names:
 		_map.erase(n)
 		var node := _find(n)
-		if node and node.material_override == _mine.get(n):
+		if node and _mine.has(n) and node.material_override == _mine[n]:
 			var base = _mine[n].get_meta("base")
 			var m := StandardMaterial3D.new()
 			m.albedo_color = base
 			node.material_override = m
 		_mine.erase(n)
+
+
+# name -> its texture entry, or null for none.
+func _entries(names: Array) -> Dictionary:
+	var out := {}
+	for n in names:
+		out[n] = _map[n].duplicate() if _map.has(n) else null
+	return out
+
+
+func _put_entries(entries: Dictionary) -> void:
+	for n in entries:
+		if entries[n] == null:
+			_take_off([n])
+		else:
+			_map[n] = entries[n].duplicate()
+			var node := _find(n)
+			if node:
+				_put(n, node)
 	_save()
-	return {"ok": true}
+
+
+func _undo(label: String, before: Dictionary, after: Dictionary) -> void:
+	var tools: SlopitectModule = ctx["modules"].module("tools")
+	if tools:
+		tools.call("push_undo", label, _put_entries.bind(before), _put_entries.bind(after))
+
+
+# --- For the save module, and for undoing a delete (tools.gd) ----------------------------
+
+func get_textures() -> Dictionary:
+	return _map.duplicate(true)
+
+
+func set_textures(data) -> void:
+	if typeof(data) != TYPE_DICTIONARY:
+		return
+	_take_off(_map.keys())
+	for n in data:
+		if typeof(n) == TYPE_STRING and typeof(data[n]) == TYPE_DICTIONARY:
+			_map[n] = data[n].duplicate()
+			var node := _find(n)
+			if node:
+				_put(n, node)
+	_save()
+
+
+func thing_state(node_name: String) -> Dictionary:
+	return {"texture": _map[node_name].duplicate()} if _map.has(node_name) else {}
+
+
+func thing_forget(node_name: String) -> void:
+	if _map.has(node_name):
+		_take_off([node_name])
+		_save()
+
+
+func thing_restore(node_name: String, state: Dictionary) -> void:
+	if typeof(state.get("texture")) == TYPE_DICTIONARY:
+		_put_entries({node_name: state["texture"]})
 
 
 func _status_command(_request: Dictionary) -> Dictionary:
