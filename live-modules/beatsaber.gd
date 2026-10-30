@@ -37,6 +37,12 @@ extends SlopitectModule
 # Made notes follow the swing flow (each hand alternates down and up, and
 # the free hand's bombs sit where that hand isn't), from a fixed seed, so
 # a song's made map is the same every time.
+# Custom song folders (the common community format) play too: Info.dat
+# (version 2 or 4) naming the music (song.egg is Ogg) and cover, and a
+# difficulty file per chart (versions 2, 3 or 4). They go in the "Custom
+# songs" pack. The middle window shows only the difficulties (Easy to
+# Expert+) and modes (Standard, One saber, No arrows) a song has; each mode
+# keeps its own scores. Walls, arcs, chains and lights aren't played yet.
 #
 # Scoring, per cut, up to 100 points: 50 for the swing's direction against
 # the arrow (full within about 15 degrees, none past about 50, where it
@@ -114,10 +120,17 @@ const SETTINGS_PATH := "user://beatsaber.json"
 const DIRS := {"u": Vector2(0, 1), "d": Vector2(0, -1), "l": Vector2(-1, 0), "r": Vector2(1, 0),
 	"ul": Vector2(-0.70710678, 0.70710678), "ur": Vector2(0.70710678, 0.70710678),
 	"dl": Vector2(-0.70710678, -0.70710678), "dr": Vector2(0.70710678, -0.70710678), "a": Vector2.ZERO}
-const DIFFICULTIES := ["easy", "normal", "hard"]
-const DIFF_STEP := {"easy": 2.0, "normal": 1.0, "hard": 0.5}     # beats between notes
-const DIFF_DOUBLES := {"easy": 0.0, "normal": 0.08, "hard": 0.15}
-const DIFF_BOMBS := {"easy": 0.0, "normal": 0.04, "hard": 0.1}
+const DIFFICULTIES := ["easy", "normal", "hard", "expert", "expert_plus"]
+const DIFF_LABELS := {"easy": "Easy", "normal": "Normal", "hard": "Hard", "expert": "Expert", "expert_plus": "Expert+"}
+const DIFF_STEP := {"easy": 2.0, "normal": 1.0, "hard": 0.5, "expert": 0.5, "expert_plus": 0.5}  # beats between made notes
+const DIFF_DOUBLES := {"easy": 0.0, "normal": 0.08, "hard": 0.15, "expert": 0.25, "expert_plus": 0.4}
+const DIFF_BOMBS := {"easy": 0.0, "normal": 0.04, "hard": 0.1, "expert": 0.12, "expert_plus": 0.15}
+const MODES := ["Standard", "OneSaber", "NoArrows"]
+const MODE_LABELS := {"Standard": "Standard", "OneSaber": "One saber", "NoArrows": "No arrows"}
+# Custom song folders (Info.dat): their difficulty names, cut directions and note types.
+const DAT_DIFFS := {"Easy": "easy", "Normal": "normal", "Hard": "hard", "Expert": "expert", "ExpertPlus": "expert_plus"}
+const DAT_DIRS := ["u", "d", "l", "r", "ul", "ur", "dl", "dr", "a"]
+const DAT_PACK := "Custom songs"
 const GAME_DEFAULTS := {"difficulty": "normal", "speed": 8.0, "bpm": 100.0, "hit_sounds": true, "trails": true, "auto_sabers": true}
 const SPEED_RANGE := [4.0, 14.0]
 const BPM_RANGE := [60.0, 200.0]
@@ -199,15 +212,17 @@ var _pack := "All songs"    # the pack shown in the middle window
 var _hands_before := ""     # the hands style to put back when you leave (auto sabers)
 var _placed := false        # the track was laid out with the windows
 var _selected := "free"     # the song chosen there ("free" for free play)
+var _mode := "Standard"     # its mode (a custom song's characteristic)
+var _song_cache = null      # _songs() as last read; null to read the folder again
 var scores := {}            # "song|difficulty" -> your top 10 [{score, rank, accuracy, combo, date}]
 
 
 func setup() -> String:
-	register("beatsaber_start", _start, "start a song: optional song (a folder in songs/, or \"free\" for free play), difficulty (easy, normal, hard), bpm (free play, 60 to 200), interval (old: seconds between free-play notes, 0.3 to 2)")
+	register("beatsaber_start", _start, "start a song: optional song (a folder in songs/, or \"free\" for free play), difficulty (easy, normal, hard, expert, expert_plus), mode (Standard, OneSaber, NoArrows), bpm (free play, 60 to 200), interval (old: seconds between free-play notes, 0.3 to 2)")
 	register("beatsaber_stop", _stop, "stop the song and clear the notes")
 	register("beatsaber_score", _score, "the score, combo, multiplier, cuts, misses, bad cuts, bombs hit, accuracy, and the last cut's points, direction and centre offset; after a song, its results")
 	register("beatsaber_songs", _songs_command, "the songs in the Slopitect folder's songs/ (folder, title, bpm, notes or made, best score)")
-	register("beatsaber_set", _set_command, "the game's settings (usable in the headset): any of difficulty (easy, normal, hard), speed (note speed m/s, 4 to 14), bpm (free play tempo, 60 to 200), hit_sounds, trails, auto_sabers (sabers in the Rhythm world, hands back after; true/false)")
+	register("beatsaber_set", _set_command, "the game's settings (usable in the headset): any of difficulty (easy, normal, hard, expert, expert_plus), speed (note speed m/s, 4 to 14), bpm (free play tempo, 60 to 200), hit_sounds, trails, auto_sabers (sabers in the Rhythm world, hands back after; true/false)")
 	register("beatsaber_do", _do, "the Rhythm window: act = toggle (goes to the Rhythm world first), show (optional page: a tab), refresh, page (page number for the song list), enter (go to the Rhythm world), leave (back to the world you came from)")
 	register("beatsaber_leave", _leave, "stop the song and go back from the Rhythm world to the world you came from")
 	register("beatsaber_config", _config, "from the PC only: how the saber sits in the hand: any of angle (degrees it tilts up from where the controller points, -30 to 90), grip ([x, y, z] cm from the controller's point to the handle's middle, right hand), hold (cm down the hilt the hand holds it, 0 to 15), or reset true")
@@ -306,7 +321,7 @@ func menu_info() -> Dictionary:
 func settings_info() -> Dictionary:
 	var diffs := []
 	for d in DIFFICULTIES:
-		diffs.append({"label": d.capitalize(), "value": d})
+		diffs.append({"label": DIFF_LABELS[d], "value": d})
 	return {"title": TITLE, "order": 45, "settings": [
 		{"id": "difficulty", "type": "choice", "label": "Difficulty", "value": game["difficulty"], "options": diffs, "columns": 3,
 			"set": {"cmd": "beatsaber_set", "difficulty": "{value}"}},
@@ -357,6 +372,7 @@ func _do(request: Dictionary) -> Dictionary:
 				return {"ok": false, "error": "\"page\" must be one of %s or %s" % [LEFT_TABS, SCORE_TABS]}
 			return _show_windows(page)
 		"refresh":
+			_rescan()
 			var problem := _build()
 			return {"ok": false, "error": problem} if not problem.is_empty() else {"ok": true}
 		"pack":
@@ -371,13 +387,27 @@ func _do(request: Dictionary) -> Dictionary:
 			return {"ok": true, "pack": _pack}
 		"select":
 			var song = request.get("song")
+			if typeof(song) == TYPE_STRING and song != "free" and not _songs().any(func(x): return x["id"] == song):
+				_rescan()  # a folder added since the windows opened
 			if typeof(song) != TYPE_STRING or not (song == "free" or _songs().any(func(x): return x["id"] == song)):
 				return {"ok": false, "error": "\"song\" must be \"free\" or a folder in songs/"}
 			_selected = song
+			_fit_choice()
 			var drawn := _build()
 			if not drawn.is_empty():
 				return {"ok": false, "error": drawn}
 			return {"ok": true, "selected": _selected}
+		"mode":
+			var mode = request.get("mode")
+			var info := {} if _selected == "free" else _song_info(_selected)
+			if not mode in _modes_of(info):
+				return {"ok": false, "error": "\"mode\" must be one of %s for this song" % [_modes_of(info)]}
+			_mode = mode
+			_fit_choice()
+			var drawn := _build()
+			if not drawn.is_empty():
+				return {"ok": false, "error": drawn}
+			return {"ok": true, "mode": _mode, "difficulty": game["difficulty"]}
 		"play":
 			return _start({"song": _selected})
 		"practice":
@@ -402,9 +432,12 @@ func _shown(id_panel: String) -> bool:
 # The three windows come up in front of you, and the track will run
 # between them the way you're facing now.
 func _show_windows(page := "") -> Dictionary:
+	if not is_inside_tree():  # a deferred show that lands after the module was unloaded
+		return {"ok": false, "error": "Rhythm Sabers is unloading"}
 	if not running:
 		_place_track()
 		_placed = true
+	_rescan()
 	var problem := _build(page, true)
 	if not problem.is_empty():
 		return {"ok": false, "error": problem}
@@ -562,11 +595,23 @@ func _main_elements() -> Array:
 	els.append({"type": "text", "id": "song_title", "text": info["title"], "at": [text_x, top], "width": text_w, "font_size": 40, "color": "text"})
 	els.append({"type": "text", "id": "song_info", "text": info["detail"], "at": [text_x, top - 0.07], "width": text_w, "color": "muted"})
 	els.append({"type": "text", "id": "diff_label", "text": "Difficulty", "at": [right_x, top - 0.14], "width": rw, "color": "muted"})
-	for i in DIFFICULTIES.size():
-		var d: String = DIFFICULTIES[i]
-		els.append({"type": "button", "id": "diff_" + d, "label": d.capitalize(), "at": [right_x - rw / 3.0 + i * rw / 3.0, top - 0.2],
-			"size": [rw / 3.0 - 0.02, 0.055], "color": "accent" if game["difficulty"] == d else "button", "action": {"cmd": "beatsaber_set", "difficulty": d}})
-	els.append({"type": "text", "id": "mode", "text": "Mode: Standard (two sabers)", "at": [right_x, top - 0.27], "width": rw, "color": "muted"})
+	# Only the difficulties and modes the song has (all of them for made notes).
+	var song := {} if _selected == "free" else _song_info(_selected)
+	var diffs := _diffs_of(song, _mode)
+	var dw := rw / float(maxi(diffs.size(), 3))
+	for i in diffs.size():
+		var d: String = diffs[i]
+		els.append({"type": "button", "id": "diff_" + d, "label": DIFF_LABELS[d], "at": [right_x - rw / 2.0 + dw * (i + 0.5), top - 0.2],
+			"size": [dw - 0.01, 0.055], "color": "accent" if game["difficulty"] == d else "button", "action": {"cmd": "beatsaber_set", "difficulty": d}})
+	var modes := _modes_of(song)
+	if modes.size() == 1:
+		els.append({"type": "text", "id": "mode", "text": "Mode: " + MODE_LABELS[modes[0]], "at": [right_x, top - 0.27], "width": rw, "color": "muted"})
+	else:
+		var mw := rw / float(modes.size())
+		for i in modes.size():
+			var m: String = modes[i]
+			els.append({"type": "button", "id": "mode_" + m, "label": MODE_LABELS[m], "at": [right_x - rw / 2.0 + mw * (i + 0.5), top - 0.27],
+				"size": [mw - 0.01, 0.055], "color": "accent" if _mode == m else "button", "action": {"cmd": "beatsaber_do", "act": "mode", "mode": m}})
 	els.append({"type": "button", "id": "play", "label": "Play", "at": [right_x - rw / 4.0, top - 0.35], "size": [rw / 2.0 - 0.02, 0.07],
 		"color": "ok", "action": {"cmd": "beatsaber_do", "act": "play"}})
 	els.append({"type": "button", "id": "practice", "label": "Practice", "at": [right_x + rw / 4.0, top - 0.35], "size": [rw / 2.0 - 0.02, 0.07],
@@ -590,6 +635,8 @@ func _selected_info() -> Dictionary:
 			var detail := "%d beats a minute" % int(s["bpm"])
 			if not s["artist"].is_empty():
 				detail = s["artist"] + ", " + detail
+			if not s["mapper"].is_empty():
+				detail += ", mapped by " + s["mapper"]
 			if s["made"]:
 				detail += ", notes made for it"
 			return {"title": s["title"], "detail": detail, "cover": s["cover"]}
@@ -601,8 +648,11 @@ func _scores_elements() -> Array:
 	var els := []
 	var top := SCORES_SIZE.y / 2.0 - 0.06
 	var w := SCORES_SIZE.x - 0.06
-	var list: Array = scores.get(_score_key(_selected, game["difficulty"]), [])
-	els.append({"type": "text", "id": "local_head", "page": "Local", "text": "%s, %s" % [_selected_info()["title"], game["difficulty"].capitalize()],
+	var list: Array = scores.get(_score_key(_selected, game["difficulty"], _mode), [])
+	var head := "%s, %s" % [_selected_info()["title"], DIFF_LABELS[game["difficulty"]]]
+	if _mode != "Standard":
+		head += ", " + MODE_LABELS[_mode]
+	els.append({"type": "text", "id": "local_head", "page": "Local", "text": head,
 		"at": [0.0, top], "width": w, "color": "muted"})
 	if list.is_empty():
 		els.append({"type": "text", "id": "local_none", "page": "Local", "text": "No scores yet. Play it!", "at": [0.0, top - 0.06], "width": w, "color": "muted"})
@@ -615,8 +665,10 @@ func _scores_elements() -> Array:
 	return els
 
 
-func _score_key(song: String, difficulty: String) -> String:
-	return "%s|%s" % ["free play" if song == "free" else song, difficulty]
+# "song|difficulty", with "|mode" added for modes other than Standard.
+func _score_key(song: String, difficulty: String, mode := "Standard") -> String:
+	var key := "%s|%s" % ["free play" if song == "free" else song, difficulty]
+	return key if mode == "Standard" else key + "|" + mode
 
 
 # After a song: the windows come back where they were, with the results.
@@ -647,8 +699,12 @@ func _status_text() -> String:
 func _start(request: Dictionary) -> Dictionary:
 	if request.has("difficulty"):
 		if not request["difficulty"] in DIFFICULTIES:
-			return {"ok": false, "error": "\"difficulty\" must be easy, normal or hard"}
+			return {"ok": false, "error": "\"difficulty\" must be one of %s" % [DIFFICULTIES]}
 		game["difficulty"] = request["difficulty"]
+	if request.has("mode"):
+		if not request["mode"] in MODES:
+			return {"ok": false, "error": "\"mode\" must be one of %s" % [MODES]}
+		_mode = request["mode"]
 	var bpm: float = game["bpm"]
 	if request.has("interval"):  # the old free-play command: seconds between notes
 		var iv = request["interval"]
@@ -666,11 +722,15 @@ func _start(request: Dictionary) -> Dictionary:
 	if not problem.is_empty():
 		return {"ok": false, "error": problem}
 	if which == "free" or which == "":
-		song = {"id": "free play", "title": "Free play", "bpm": bpm, "offset": 0.0, "audio": null,
+		_mode = "Standard"
+		song = {"id": "free play", "title": "Free play", "bpm": bpm, "offset": 0.0, "audio": null, "mode": "Standard",
 			"notes": _generate(bpm, FREE_BEATS, game["difficulty"], 1)}
 	else:
 		if typeof(which) != TYPE_STRING:
 			return {"ok": false, "error": "\"song\" must be a folder name in songs/ or \"free\""}
+		if _song_dir_ok(which):
+			_selected = which
+			_fit_choice()
 		var loaded := _load_song(which)
 		if loaded.has("error"):
 			return {"ok": false, "error": loaded["error"]}
@@ -679,7 +739,7 @@ func _start(request: Dictionary) -> Dictionary:
 	if running:
 		_clear()
 	_begin(song)
-	return {"ok": true, "song": song["title"], "notes": song["notes"].size(), "bpm": song["bpm"], "difficulty": game["difficulty"]}
+	return {"ok": true, "song": song["title"], "notes": song["notes"].size(), "bpm": song["bpm"], "difficulty": game["difficulty"], "mode": song["mode"]}
 
 
 func _stop(_request: Dictionary) -> Dictionary:
@@ -706,6 +766,7 @@ func _score(_request: Dictionary) -> Dictionary:
 
 
 func _songs_command(_request: Dictionary) -> Dictionary:
+	_rescan()
 	var out := []
 	for s in _songs():
 		out.append({"folder": s["id"], "title": s["title"], "bpm": s["bpm"], "made": s["made"], "best": best.get(s["id"], 0)})
@@ -721,7 +782,7 @@ func _set_command(request: Dictionary) -> Dictionary:
 		match key:
 			"difficulty":
 				if not v in DIFFICULTIES:
-					return {"ok": false, "error": "\"difficulty\" must be easy, normal or hard"}
+					return {"ok": false, "error": "\"difficulty\" must be one of %s" % [DIFFICULTIES]}
 				changed[key] = v
 			"speed", "bpm":
 				var r: Array = SPEED_RANGE if key == "speed" else BPM_RANGE
@@ -843,82 +904,263 @@ func _songs_folder() -> String:
 	return _lib.call("home") + "/songs" if _lib else ""
 
 
-# Every song folder with a readable map.json: {"id", "title", "bpm", "made"}.
+# Every song folder we can play, as _song_info() describes it, by folder
+# name. Kept between window redraws; the folder is read again when the
+# windows open, on Refresh, and for beatsaber_songs (_rescan).
 func _songs() -> Array:
+	if _song_cache != null:
+		return _song_cache
 	var out := []
 	var folder := _songs_folder()
-	if folder.is_empty() or not DirAccess.dir_exists_absolute(folder):
-		return out
-	var names := DirAccess.get_directories_at(folder)
-	names.sort()
-	for dir_name in names:
-		var map = _lib.call("read_json", folder + "/" + dir_name + "/map.json")
-		if typeof(map) != TYPE_DICTIONARY or not _number(map.get("bpm")):
-			continue
-		var notes = map.get("notes")
-		out.append({"id": dir_name, "title": str(map.get("title", dir_name)).left(60), "bpm": float(map["bpm"]),
-			"made": typeof(notes) != TYPE_ARRAY or notes.is_empty(),
-			"pack": str(map.get("pack", "")).left(24) if typeof(map.get("pack")) == TYPE_STRING else "",
-			"artist": str(map.get("artist", "")).left(40) if typeof(map.get("artist")) == TYPE_STRING else "",
-			"cover": _cover(folder + "/" + dir_name)})
+	if not folder.is_empty() and DirAccess.dir_exists_absolute(folder):
+		var names := DirAccess.get_directories_at(folder)
+		names.sort()
+		for dir_name in names:
+			var info := _song_info(dir_name)
+			if not info.is_empty():
+				out.append(info)
+	_song_cache = out
 	return out
 
 
-# The song's album cover: cover.png, .jpg or .webp in its folder, or "".
-func _cover(folder: String) -> String:
+func _rescan() -> void:
+	_song_cache = null
+
+
+func _song_dir_ok(dir_name) -> bool:
+	return typeof(dir_name) == TYPE_STRING and not dir_name.is_empty() and not "/" in dir_name and not "\\" in dir_name \
+		and not dir_name.begins_with(".")
+
+
+# What a song folder holds, or {} when it isn't one:
+#   {"id", "title", "artist", "mapper", "pack", "bpm", "offset", "audio"
+#    (a path or ""), "cover", "made" (notes are made for it), "format"
+#    ("slopitect" or "dat"), "charts": {mode: {difficulty: file}}}
+# Our own map.json, or a custom song folder's Info.dat (versions 2 and 4).
+func _song_info(dir_name: String) -> Dictionary:
+	if _lib == null or not _song_dir_ok(dir_name):
+		return {}
+	var folder := _songs_folder() + "/" + dir_name
+	var map = _lib.call("read_json", folder + "/map.json")
+	if typeof(map) == TYPE_DICTIONARY and _number(map.get("bpm")):
+		var notes = map.get("notes")
+		var made: bool = typeof(notes) != TYPE_ARRAY or notes.is_empty()
+		var audio := ""
+		var named = map.get("audio")
+		if typeof(named) == TYPE_STRING and not named.is_empty() and _file_name_ok(named):
+			audio = folder + "/" + named
+		else:
+			for ext in ["ogg", "egg", "mp3", "wav"]:
+				if FileAccess.file_exists(folder + "/song." + ext):
+					audio = folder + "/song." + ext
+					break
+		return {"id": dir_name, "title": _text(map.get("title"), dir_name, 60), "artist": _text(map.get("artist"), "", 40), "mapper": "",
+			"pack": _text(map.get("pack"), "", 24), "bpm": float(map["bpm"]), "offset": float(map.get("offset", 0.0)) if _number(map.get("offset", 0.0)) else 0.0,
+			"audio": audio, "cover": _cover(folder, ""), "made": made, "format": "slopitect",
+			"charts": {} if made else {"Standard": {"normal": "map.json"}}}
+	var info = _lib.call("read_json", folder + "/Info.dat")
+	if info == null:
+		info = _lib.call("read_json", folder + "/info.dat")
+	if typeof(info) != TYPE_DICTIONARY:
+		return {}
+	var charts := {}
+	var out := {"id": dir_name, "pack": DAT_PACK, "made": false, "format": "dat", "offset": 0.0}
+	if info.has("_beatsPerMinute"):  # version 2
+		out["title"] = _text(info.get("_songName"), dir_name, 60)
+		out["artist"] = _text(info.get("_songAuthorName"), "", 40)
+		out["mapper"] = _text(info.get("_levelAuthorName"), "", 40)
+		out["bpm"] = float(info["_beatsPerMinute"]) if _number(info["_beatsPerMinute"]) else 0.0
+		out["offset"] = float(info.get("_songTimeOffset", 0.0)) if _number(info.get("_songTimeOffset", 0.0)) else 0.0
+		out["audio"] = _named_file(folder, info.get("_songFilename"))
+		out["cover"] = _cover(folder, info.get("_coverImageFilename"))
+		for set in info.get("_difficultyBeatmapSets", []) if typeof(info.get("_difficultyBeatmapSets")) == TYPE_ARRAY else []:
+			if typeof(set) != TYPE_DICTIONARY or not set.get("_beatmapCharacteristicName") in MODES:
+				continue
+			for d in set.get("_difficultyBeatmaps", []) if typeof(set.get("_difficultyBeatmaps")) == TYPE_ARRAY else []:
+				if typeof(d) == TYPE_DICTIONARY and d.get("_difficulty") in DAT_DIFFS and _file_name_ok(d.get("_beatmapFilename")):
+					charts.get_or_add(set["_beatmapCharacteristicName"], {})[DAT_DIFFS[d["_difficulty"]]] = d["_beatmapFilename"]
+	elif typeof(info.get("song")) == TYPE_DICTIONARY and typeof(info.get("audio")) == TYPE_DICTIONARY:  # version 4
+		var song: Dictionary = info["song"]
+		var audio: Dictionary = info["audio"]
+		out["title"] = _text(song.get("title"), dir_name, 60)
+		out["artist"] = _text(song.get("author"), "", 40)
+		out["mapper"] = ""
+		out["bpm"] = float(audio.get("bpm", 0.0)) if _number(audio.get("bpm")) else 0.0
+		out["audio"] = _named_file(folder, audio.get("songFilename"))
+		out["cover"] = _cover(folder, info.get("coverImageFilename"))
+		for d in info.get("difficultyBeatmaps", []) if typeof(info.get("difficultyBeatmaps")) == TYPE_ARRAY else []:
+			if typeof(d) == TYPE_DICTIONARY and d.get("characteristic") in MODES and d.get("difficulty") in DAT_DIFFS and _file_name_ok(d.get("beatmapDataFilename")):
+				charts.get_or_add(d["characteristic"], {})[DAT_DIFFS[d["difficulty"]]] = d["beatmapDataFilename"]
+				var mappers = d.get("beatmapAuthors", {}).get("mappers") if typeof(d.get("beatmapAuthors")) == TYPE_DICTIONARY else null
+				if out["mapper"].is_empty() and typeof(mappers) == TYPE_ARRAY and not mappers.is_empty():
+					out["mapper"] = _text(mappers[0], "", 40)
+	else:
+		return {}
+	if out["bpm"] < 20.0 or out["bpm"] > 1000.0 or charts.is_empty():
+		return {}
+	out["charts"] = charts
+	return out
+
+
+func _text(v, fallback: String, most: int) -> String:
+	return str(v).strip_edges().left(most) if typeof(v) == TYPE_STRING and not v.strip_edges().is_empty() else fallback
+
+
+# A plain file name (no folders in it).
+func _file_name_ok(v) -> bool:
+	return typeof(v) == TYPE_STRING and not v.is_empty() and not "/" in v and not "\\" in v and not ".." in v
+
+
+func _named_file(folder: String, v) -> String:
+	return folder + "/" + v if _file_name_ok(v) and FileAccess.file_exists(folder + "/" + v) else ""
+
+
+# The song's album cover: the file its Info.dat names, or cover.png / .jpg /
+# .webp in its folder; "" without one.
+func _cover(folder: String, named) -> String:
+	var path := _named_file(folder, named)
+	if not path.is_empty() and path.get_extension().to_lower() in ["png", "jpg", "jpeg", "webp"]:
+		return path
 	for ext in ["png", "jpg", "jpeg", "webp"]:
 		if FileAccess.file_exists(folder + "/cover." + ext):
 			return folder + "/cover." + ext
 	return ""
 
 
-# A song ready to play, or {"error"}.
+# The difficulties and modes a song can be played at.
+func _modes_of(info: Dictionary) -> Array:
+	if info.is_empty() or info["made"]:
+		return ["Standard"]
+	return MODES.filter(func(m): return info["charts"].has(m))
+
+
+func _diffs_of(info: Dictionary, mode: String) -> Array:
+	if info.is_empty() or info["made"]:
+		return DIFFICULTIES.duplicate()
+	var have: Dictionary = info["charts"].get(mode, {})
+	return DIFFICULTIES.filter(func(d): return have.has(d))
+
+
+# Keeps the mode and difficulty to ones the chosen song has: the nearest
+# difficulty to the one you had.
+func _fit_choice() -> void:
+	var info := {} if _selected == "free" else _song_info(_selected)
+	var modes := _modes_of(info)
+	if not _mode in modes:
+		_mode = modes[0]
+	var diffs := _diffs_of(info, _mode)
+	if diffs.is_empty() or game["difficulty"] in diffs:
+		return
+	var want := DIFFICULTIES.find(game["difficulty"])
+	var best_d: String = diffs[0]
+	for d in diffs:
+		if absi(DIFFICULTIES.find(d) - want) < absi(DIFFICULTIES.find(best_d) - want):
+			best_d = d
+	game["difficulty"] = best_d
+
+
+# A song ready to play at the chosen mode and difficulty, or {"error"}.
 func _load_song(dir_name: String) -> Dictionary:
 	if _lib == null:
 		return {"error": "songs need the lib module"}
-	if dir_name.is_empty() or "/" in dir_name or "\\" in dir_name or dir_name.begins_with("."):
+	if not _song_dir_ok(dir_name):
 		return {"error": "\"song\" must be a folder name in songs/"}
+	var info := _song_info(dir_name)
+	if info.is_empty():
+		return {"error": "%s isn't a song folder (it needs a map.json with bpm, or an Info.dat with a Standard, One saber or No arrows chart)" % dir_name}
 	var folder := _songs_folder() + "/" + dir_name
-	var map = _lib.call("read_json", folder + "/map.json")
-	if typeof(map) != TYPE_DICTIONARY:
-		return {"error": "no readable %s/map.json" % folder}
-	var bpm = map.get("bpm")
-	if not _number(bpm) or bpm < 20 or bpm > 400:
-		return {"error": "map.json needs \"bpm\" (20 to 400)"}
-	var offset = map.get("offset", 0.0)
-	if not _number(offset):
-		return {"error": "map.json's \"offset\" must be seconds"}
-	var audio_path := ""
-	var named = map.get("audio")
-	if typeof(named) == TYPE_STRING and not named.is_empty():
-		if "/" in named or "\\" in named or ".." in named:
-			return {"error": "map.json's \"audio\" must be a file in the song's folder"}
-		audio_path = folder + "/" + named
-	else:
-		for ext in ["ogg", "mp3", "wav"]:
-			if FileAccess.file_exists(folder + "/song." + ext):
-				audio_path = folder + "/song." + ext
-				break
 	var stream: AudioStream = null
-	if not audio_path.is_empty():
-		stream = _load_audio(audio_path)
+	if not info["audio"].is_empty():
+		stream = _load_audio(info["audio"])
 		if stream == null:
-			return {"error": "couldn't read the music %s (ogg, mp3 or wav)" % audio_path}
+			return {"error": "couldn't read the music %s (ogg/egg, mp3 or wav)" % info["audio"]}
+	elif info["format"] == "dat":
+		return {"error": "the music file named in %s/Info.dat isn't there" % folder}
+	var bpm: float = info["bpm"]
 	var notes := []
-	var raw = map.get("notes")
-	if typeof(raw) == TYPE_ARRAY and not raw.is_empty():
+	if info["made"]:
+		var length := stream.get_length() if stream else 60.0
+		var beats := int((length - float(info["offset"])) * bpm / 60.0) - 2
+		notes = _generate(bpm, maxi(beats, 8), game["difficulty"], dir_name.hash())
+	elif info["format"] == "slopitect":
+		var raw = _lib.call("read_json", folder + "/map.json").get("notes")
 		for i in raw.size():
 			var problem := _check_note(raw[i])
 			if not problem.is_empty():
 				return {"error": "map.json note %d %s" % [i, problem]}
 			notes.append([float(raw[i][0]), int(raw[i][1]), int(raw[i][2]), raw[i][3], raw[i][4]])
-		notes.sort_custom(func(a, b): return a[0] < b[0])
 	else:
-		var length := stream.get_length() if stream else 60.0
-		var beats := int((length - float(offset)) * float(bpm) / 60.0) - 2
-		notes = _generate(float(bpm), maxi(beats, 8), game["difficulty"], dir_name.hash())
-	return {"id": dir_name, "title": str(map.get("title", dir_name)).left(60), "bpm": float(bpm), "offset": float(offset),
-		"audio": stream, "notes": notes}
+		var file = info["charts"].get(_mode, {}).get(game["difficulty"])
+		if file == null:
+			return {"error": "%s has no %s %s chart" % [info["title"], MODE_LABELS.get(_mode, _mode), DIFF_LABELS[game["difficulty"]]]}
+		var read := _read_dat(folder + "/" + file)
+		if read.has("error"):
+			return read
+		notes = read["notes"]
+	if _mode == "NoArrows":
+		for n in notes:
+			n[4] = "a"
+	notes.sort_custom(func(a, b): return a[0] < b[0])
+	return {"id": dir_name, "title": info["title"], "bpm": bpm, "offset": info["offset"], "audio": stream, "notes": notes, "mode": _mode}
+
+
+# The notes of a custom song's difficulty file, in our [beat, lane, row,
+# hand, dir] form: version 2 (_notes), 3 (colorNotes, bombNotes) or 4
+# (colorNotes / bombNotes pointing into colorNotesData / bombNotesData).
+# Walls, arcs, chains and lights aren't played yet; notes outside the
+# 4 x 3 grid are left out. Returns {"notes", "skipped"} or {"error"}.
+func _read_dat(path: String) -> Dictionary:
+	var data = _lib.call("read_json", path)
+	if typeof(data) != TYPE_DICTIONARY:
+		return {"error": "couldn't read %s" % path}
+	var notes := []
+	var skipped := 0
+	if typeof(data.get("_notes")) == TYPE_ARRAY:
+		for n in data["_notes"]:
+			if typeof(n) != TYPE_DICTIONARY:
+				continue
+			var t = n.get("_type")
+			var hand := "l" if t == 0 else ("r" if t == 1 else ("b" if t == 3 else ""))
+			if hand.is_empty():
+				continue
+			if not _add_dat_note(notes, n.get("_time"), n.get("_lineIndex"), n.get("_lineLayer"), hand, n.get("_cutDirection", 8)):
+				skipped += 1
+	elif typeof(data.get("colorNotes")) == TYPE_ARRAY:
+		var note_data = data.get("colorNotesData")
+		var bomb_data = data.get("bombNotesData")
+		for n in data["colorNotes"]:
+			if typeof(n) != TYPE_DICTIONARY:
+				continue
+			var d = n
+			if typeof(note_data) == TYPE_ARRAY:  # version 4
+				var i = n.get("i", 0)
+				d = note_data[int(i)] if _number(i) and i >= 0 and i < note_data.size() and typeof(note_data[int(i)]) == TYPE_DICTIONARY else null
+			if d == null or not _add_dat_note(notes, n.get("b"), d.get("x", 0), d.get("y", 0), "r" if d.get("c", 0) == 1 else "l", d.get("d", 8)):
+				skipped += 1
+		for n in data.get("bombNotes", []) if typeof(data.get("bombNotes")) == TYPE_ARRAY else []:
+			if typeof(n) != TYPE_DICTIONARY:
+				continue
+			var d = n
+			if typeof(bomb_data) == TYPE_ARRAY:
+				var i = n.get("i", 0)
+				d = bomb_data[int(i)] if _number(i) and i >= 0 and i < bomb_data.size() and typeof(bomb_data[int(i)]) == TYPE_DICTIONARY else null
+			if d == null or not _add_dat_note(notes, n.get("b"), d.get("x", 0), d.get("y", 0), "b", 8):
+				skipped += 1
+	else:
+		return {"error": "%s isn't a difficulty file we know (versions 2, 3 and 4)" % path}
+	if notes.is_empty():
+		return {"error": "%s has no notes we can play" % path}
+	return {"notes": notes, "skipped": skipped}
+
+
+func _add_dat_note(notes: Array, beat, lane, row, hand: String, cut) -> bool:
+	if not (_number(beat) and _number(lane) and _number(row) and _number(cut)) or beat < 0:
+		return false
+	if int(lane) != lane or int(row) != row or lane < 0 or lane > 3 or row < 0 or row > 2:
+		return false
+	var dir: String = DAT_DIRS[int(cut)] if int(cut) >= 0 and int(cut) < DAT_DIRS.size() else "a"
+	notes.append([float(beat), int(lane), int(row), hand, "a" if hand == "b" else dir])
+	return true
 
 
 func _check_note(n) -> String:
@@ -939,7 +1181,7 @@ func _check_note(n) -> String:
 
 func _load_audio(path: String) -> AudioStream:
 	match path.get_extension().to_lower():
-		"ogg":
+		"ogg", "egg":  # a custom song's .egg is Ogg Vorbis
 			return AudioStreamOggVorbis.load_from_file(path)
 		"mp3":
 			return AudioStreamMP3.load_from_file(path)
@@ -1158,7 +1400,8 @@ func _release(a: Dictionary) -> void:
 func _update_blades(delta: float) -> void:
 	for side in ["right", "left"]:
 		var sab: Node3D = _sabers.get(side)
-		if sab == null or not is_instance_valid(sab) or not sab.is_visible_in_tree():
+		if sab == null or not is_instance_valid(sab) or not sab.is_visible_in_tree() \
+				or (side == "left" and _song.get("mode") == "OneSaber"):  # one saber: the right one
 			_blade.erase(side)
 			continue
 		var st: Transform3D = _track.global_transform.affine_inverse() * sab.global_transform
@@ -1362,7 +1605,7 @@ func _finish() -> void:
 	var new_best := score > int(best.get(id, 0))
 	if new_best:
 		best[id] = score
-	var key := "%s|%s" % [id, game["difficulty"]]
+	var key := _score_key(id, game["difficulty"], _song.get("mode", "Standard"))
 	var list: Array = scores.get(key, [])
 	list.append({"score": score, "rank": rank, "accuracy": snappedf(acc, 0.1), "combo": max_combo,
 		"date": Time.get_date_string_from_system()})
