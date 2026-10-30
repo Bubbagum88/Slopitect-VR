@@ -16,7 +16,8 @@
 #   .\slopi-sync.ps1 -Status
 # A module changed on the headset (by the agent) is first copied to
 # live-modules\drafts, then the PC's version replaces it (the PC wins).
-# Modules only the headset has are copied there too.
+# Modules only the headset has are copied there too. -Hold NAME,... leaves
+# those modules as the headset has them.
 # After a headset restart the Wi-Fi adb port changes; give just the IP and
 # the port is found (or give the port yourself, like 192.168.1.95:41024):
 #   .\slopi-sync.ps1 -Device 192.168.1.95
@@ -24,6 +25,7 @@ param(
     [Parameter(Position = 0)][string[]]$Name,
     [switch]$Load,
     [switch]$Status,
+    [string[]]$Hold,
     [string]$Device,
     [string]$Tools = $env:SLOPI_TOOLS,
     [string]$From,
@@ -135,6 +137,7 @@ function Get-RemoteHashes {
 
 # With powershell -File, "a,b" arrives as one string.
 $Name = @($Name | ForEach-Object { $_ -split "," } | Where-Object { $_ })
+$Hold = @($Hold | ForEach-Object { $_ -split "," } | Where-Object { $_ })
 $local = @{}
 foreach ($file in Get-ChildItem (Join-Path $From "*.gd")) {
     $local[$file.BaseName] = $file
@@ -159,10 +162,10 @@ function Test-KnownVersion([string]$path, [string]$sha256) {
     if (-not (git -C $dir rev-parse --is-inside-work-tree 2>$null)) { return $true }
     $rel = git -C $dir ls-files --full-name (Split-Path $path -Leaf)
     if (-not $rel) { return $true }
-    $sha = [System.Security.Cryptography.SHA256]::Create()
-    foreach ($commit in (git -C $dir log --format=%H -- (Split-Path $path -Leaf))) {
+    $draft = ($rel -replace "/([^/]+)$", "/drafts/`$1")
+    foreach ($entry in @((git -C $dir log --format=%H -- (Split-Path $path -Leaf)) | ForEach-Object { "${_}:$rel" }) + @((git -C $dir log --format=%H -- "drafts/$(Split-Path $path -Leaf)") | ForEach-Object { "${_}:$draft" })) {
         $tmp = [System.IO.Path]::GetTempFileName()
-        cmd /c "git -C `"$dir`" show ${commit}:$rel > `"$tmp`" 2>nul"
+        cmd /c "git -C `"$dir`" show $entry > `"$tmp`" 2>nul"
         $h = (Get-FileHash $tmp -Algorithm SHA256).Hash.ToLower()
         Remove-Item $tmp
         if ($h -eq $sha256) { return $true }
@@ -175,7 +178,10 @@ $keepDir = Join-Path $From "drafts"
 function Save-HeadsetCopy([string]$n, [string]$sha256) {
     New-Item -ItemType Directory -Force $keepDir | Out-Null
     $same = Join-Path $keepDir "$n.gd"
-    if ((Test-Path $same) -and (Get-FileHash $same -Algorithm SHA256).Hash.ToLower() -eq $sha256) { return $same }
+    # Already kept (under its name or a dated one): nothing new to save.
+    foreach ($old in Get-ChildItem $keepDir -Filter "$n*.gd") {
+        if ((Get-FileHash $old.FullName -Algorithm SHA256).Hash.ToLower() -eq $sha256) { return $old.FullName }
+    }
     $target = if (Test-Path $same) { Join-Path $keepDir ("$n.headset-" + (Get-Date -Format "yyyyMMdd-HHmm") + ".gd") } else { $same }
     Adb pull "$remoteDir/$n.gd" $target 2>&1 | Out-Null
     return $target
@@ -192,9 +198,15 @@ foreach ($n in $wanted) {
         # The PC's version wins, but the headset's is kept first.
         $state = "edited on headset"
         $kept = Save-HeadsetCopy $n $remote[$n]
-        Write-Warning "$n.gd was changed on the headset; that copy is kept as $kept, and the PC's version replaces it."
+        Write-Warning $(if ($Hold -contains $n) { "$n.gd was changed on the headset; a copy is kept as $kept, and the headset keeps it (held)." } else { "$n.gd was changed on the headset; that copy is kept as $kept, and the PC's version replaces it." })
         $changed += $n
     } elseif ($state -ne "same") { $changed += $n }
+    if ($Hold -contains $n -and $changed -contains $n) {
+        # Held: the headset keeps its copy (saved to drafts if it differs).
+        $changed = @($changed | Where-Object { $_ -ne $n })
+        if ($remote.ContainsKey($n)) { Save-HeadsetCopy $n $remote[$n] | Out-Null }
+        $state = "held ($state)"
+    }
     # Windows line endings give a different SHA-256 than the repo's copy, so
     # a file you already said Yes to would ask again.
     $crlf = [System.IO.File]::ReadAllText($file.FullName).Contains("`r")
