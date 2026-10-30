@@ -7,7 +7,9 @@ extends SlopitectModule
 # (grab, move, undo) moves the rest with it; while a member is held, the
 # rest follow that one even if physics moves them too. Grouping, ungrouping,
 # and the Delete / Hide / Grab buttons are each one undo. Groups are kept
-# per project in saves/groups.json.
+# per project in saves/groups.json (lib.world_file), loaded again when
+# another project opens. The outline is drawn only while Multi is the
+# chosen tool; groups are kept together only while there are some.
 
 const REACH := 20.0
 const NO_COLOR := Color(0.2, 0.9, 1.0)
@@ -17,8 +19,9 @@ var _groups := {}  # group name -> Array of member names
 var _last := {}  # member name -> Transform3D last seen
 var _chosen := false
 var _outline: MeshInstance3D
-var _file := ""
-var _since_check := 0.0
+var _file := ""  # "" until lib is there
+var _lib: SlopitectModule
+var _grab: SlopitectModule
 
 
 func setup() -> String:
@@ -32,8 +35,8 @@ func setup() -> String:
 	_outline.top_level = true
 	_outline.visible = false
 	add_child(_outline)
-	_file = _groups_file()
-	_load()
+	set_process(false)
+	set_physics_process(false)
 	register("multi_select", _select_command, "select several things: names [..], optional mode (add, remove, set; default add)")
 	register("multi_clear", _clear_command, "select nothing")
 	register("multi_status", _status, "the selection and the groups")
@@ -45,23 +48,40 @@ func setup() -> String:
 	return ""
 
 
-func _process(delta: float) -> void:
-	_since_check += delta
-	if _since_check >= 2.0:
-		_since_check = 0.0
-		var now := _groups_file()
-		if now != _file:  # another project opened
-			_file = now
-			_selection.clear()
-			_load()
+func lib_ready(lib) -> void:
+	_lib = lib
+	if lib == null:
+		_file = ""
+		_grab = null
+		return
+	lib.watch(self, "grab", _grab_here, _grab_gone)
+	lib.watch(self, "save", _world_changed)
+	lib.follow(self, "projects", "project_changed", _world_changed)
+	_world_changed()
+
+
+func _grab_here(grab: SlopitectModule) -> void:
+	_grab = grab if grab.has_method("held") else null
+
+
+func _grab_gone(_grab_module) -> void:
+	_grab = null
+
+
+func _world_changed(_a = null, _b = null) -> void:
+	var now: String = _lib.world_file("groups.json")
+	if now != _file:  # another project opened
+		_file = now
+		_selection.clear()
+		_load()
+
+
+func _process(_delta: float) -> void:
 	_draw_outline()
 
 
 func _physics_process(_delta: float) -> void:
-	var held := []
-	var grab: SlopitectModule = ctx["modules"].module("grab")
-	if grab and grab.has_method("held"):
-		held = grab.call("held")
+	var held: Array = _grab.call("held") if is_instance_valid(_grab) else []
 	for g in _groups:
 		var nodes := []
 		var moved: Node3D = null
@@ -181,6 +201,9 @@ func tool_info() -> Dictionary:
 
 func tool_selected(on: bool) -> void:
 	_chosen = on
+	set_process(on)
+	if not on:
+		_draw_outline()  # takes the outline away
 
 
 func tool_trigger(down: bool) -> void:
@@ -232,38 +255,17 @@ func _line() -> String:
 
 # --- Things --------------------------------------------------------------------------
 
+# Shapes and models: lib's (nothing without it).
 func _things() -> Array:
-	var found := []
-	var world: Node3D = ctx["world"]
-	for child in world.get_children():
-		if child is MeshInstance3D:
-			found.append(child)
-		elif child.name == "PolyHaven":
-			found.append_array(child.get_children())
-	return found
+	return _lib.things() if _lib else []
 
 
 func _find(node_name) -> Node3D:
-	if typeof(node_name) != TYPE_STRING or node_name.is_empty() or node_name.validate_node_name() != node_name:
-		return null
-	var world: Node3D = ctx["world"]
-	var node := world.get_node_or_null(NodePath(node_name)) as Node3D
-	if node is MeshInstance3D:
-		return node
-	if world.has_node("PolyHaven"):
-		return world.get_node("PolyHaven").get_node_or_null(NodePath(node_name)) as Node3D
-	return null
+	return _lib.thing(node_name) if _lib else null
 
 
 func _box(thing: Node3D) -> AABB:
-	var box := AABB()
-	var first := true
-	var meshes: Array = [thing] if thing is MeshInstance3D else thing.find_children("*", "MeshInstance3D", true, false)
-	for mesh: MeshInstance3D in meshes:
-		var world_box := mesh.global_transform * mesh.get_aabb()
-		box = world_box if first else box.merge(world_box)
-		first = false
-	return box
+	return _lib.world_box(thing)
 
 
 func _prune() -> void:
@@ -316,36 +318,27 @@ func _draw_outline() -> void:
 
 # --- Keeping groups ------------------------------------------------------------------
 
-func _groups_file() -> String:
-	var home := "/sdcard/Slopitect" if OS.get_name() == "Android" else OS.get_user_data_dir() + "/files_home"
-	var folder := home + "/saves"
-	if FileAccess.file_exists("user://projects.json"):
-		var p = JSON.parse_string(FileAccess.get_file_as_string("user://projects.json"))
-		if typeof(p) == TYPE_DICTIONARY and typeof(p.get("current")) == TYPE_STRING and p["current"].is_valid_filename():
-			folder = "%s/projects/%s/saves" % [home, p["current"]]
-	return folder + "/groups.json"
-
-
 func _load() -> void:
 	_groups.clear()
 	_last.clear()
-	if not FileAccess.file_exists(_file):
-		return
-	var data = JSON.parse_string(FileAccess.get_file_as_string(_file))
-	if typeof(data) != TYPE_DICTIONARY:
-		return
-	for g in data:
-		if typeof(g) == TYPE_STRING and typeof(data[g]) == TYPE_ARRAY:
-			_groups[g] = data[g].filter(func(n): return typeof(n) == TYPE_STRING)
+	var data = _lib.read_json(_file)
+	if typeof(data) == TYPE_DICTIONARY:
+		for g in data:
+			if typeof(g) == TYPE_STRING and typeof(data[g]) == TYPE_ARRAY:
+				_groups[g] = data[g].filter(func(n): return typeof(n) == TYPE_STRING)
+	set_physics_process(not _groups.is_empty())
 
 
+# Every change to the groups ends here, so it's where keeping them
+# together turns on and off.
 func _save() -> void:
+	set_physics_process(not _groups.is_empty())
+	if _file.is_empty():
+		return  # no lib yet
 	DirAccess.make_dir_recursive_absolute(_file.get_base_dir())
-	var f := FileAccess.open(_file, FileAccess.WRITE)
-	if f == null:
-		push_error("Slopitect multi: can't write %s" % _file)
-		return
-	f.store_string(JSON.stringify(_groups, "\t"))
+	var problem: String = _lib.write_json(_file, _groups, "\t")
+	if not problem.is_empty():
+		push_error("Slopitect multi: " + problem)
 
 
 # --- Commands ------------------------------------------------------------------------

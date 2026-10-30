@@ -134,6 +134,7 @@ func _go() -> void:
 	_check("read_json", _lib.read_json(path) == {"a": 1.0}, _lib.read_json(path))
 	_check("read_json missing is null", _lib.read_json(path + ".none") == null)
 	DirAccess.remove_absolute(path)
+	_check("world_file without save: saves/", _lib.world_file("x.json") == _lib.home() + "/saves/x.json", _lib.world_file("x.json"))
 
 	# touch() -> info_changed.
 	var touched := []
