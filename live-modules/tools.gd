@@ -10,6 +10,8 @@ extends SlopitectModule
 # is its own file: load it and its button appears, unload it and it goes.
 # tool_info() returns {"id", "label", "order" (optional, lower first),
 # "buttons": [{"label", "action": a command}], "status": one line}.
+# When a tool's buttons change other than by pressing them or the trigger
+# (an agent command, say), it calls lib.touch(self) so its menu is redrawn.
 # The chosen tool gets:
 #   tool_selected(on: bool)  when it's chosen or another one is
 #   tool_trigger(down: bool) the "point" action (the right trigger), unless
@@ -31,7 +33,6 @@ extends SlopitectModule
 # remove) with the commands that make it again and take it away.
 
 const PANEL := "tools"
-const SCAN_SECONDS := 0.5
 const MAX_UNDO := 50
 const TOOL_PANEL_PREFIX := "tools_t_"  # each tool's own menu: tools_t_ID
 const CELL := Vector2(0.2, 0.06)
@@ -48,16 +49,47 @@ var _batch_depth := 0
 var _stepping := false  # while an undo or redo runs, its own changes add nothing
 var _world_folder := ""  # the save module's folder: a new one (another project) empties the lists
 var _trigger_down := false
-var _since_scan := SCAN_SECONDS
+var _scan_soon_pending := false
+var _lib: SlopitectModule
 
 
 func setup() -> String:
+	set_process(false)
 	register("tools_list", _list, "the tools that are loaded, and which one is chosen")
 	register("tools_select", _select, "choose a tool: tool (its id, or \"\" for none)")
 	register("tools_undo", _undo_command, "undo the last change any tool made")
 	register("tools_redo", _redo_command, "redo the last undone change")
 	register("tools_status", _status, "the chosen tool, and what Undo and Redo would do")
+	_scan_soon()
 	return ""
+
+
+# The menus are built again when something they show may have changed: a
+# module comes or goes or calls lib.touch(self) (a tool whose buttons change
+# outside a press of them), a button is pressed, the trigger is used on a
+# tool, the undo list changes or another project opens. Without lib, only
+# on its own commands.
+func lib_ready(lib) -> void:
+	_lib = lib
+	if lib == null:
+		return
+	for event in ["module_loaded", "module_unloaded", "info_changed"]:
+		lib.follow(self, "lib", event, _scan_soon)
+	lib.follow(self, "vrui", "pressed", _scan_soon)
+	lib.follow(self, "projects", "project_changed", _scan_soon)
+	_scan_soon()
+
+
+func _scan_soon(_a = null, _b = null) -> void:
+	if not _scan_soon_pending:
+		_scan_soon_pending = true
+		_scan_now.call_deferred()
+
+
+func _scan_now() -> void:
+	_scan_soon_pending = false
+	if is_inside_tree():
+		_scan()
 
 
 func _exit_tree() -> void:
@@ -69,14 +101,6 @@ func _exit_tree() -> void:
 		var id_panel := str(panel.get("id_panel", ""))
 		if id_panel == PANEL or id_panel.begins_with(TOOL_PANEL_PREFIX):
 			ctx["server"].run({"cmd": "ui_remove", "id_panel": id_panel})
-
-
-func _process(delta: float) -> void:
-	_since_scan += delta
-	if _since_scan < SCAN_SECONDS:
-		return
-	_since_scan = 0.0
-	_scan()
 
 
 # --- Shared undo -------------------------------------------------------------------
@@ -215,6 +239,7 @@ func _add(entry: Dictionary) -> void:
 		_undo.pop_front()
 	_redo.clear()
 	_signature = ""  # the panel shows what Undo does
+	_scan_soon()
 
 
 func _undo_command(_request: Dictionary) -> Dictionary:
@@ -238,6 +263,7 @@ func _step(from: Array, to: Array, key: String, done: String) -> Dictionary:
 	_stepping = false
 	to.append(entry)
 	_signature = ""
+	_scan_soon()
 	print("Slopitect tools: %s \"%s\"" % [done, entry["label"]])
 	return {"ok": true, done: entry["label"]}
 
@@ -339,12 +365,14 @@ func on_action(action: String, down: bool) -> bool:
 		return false
 	_trigger_down = true
 	_tools[_active].call("tool_trigger", true)
+	_scan_soon()  # the tool's buttons may change with what it pointed at
 	return true
 
 
 func _end_trigger() -> void:
 	if _trigger_down and _tools.has(_active) and is_instance_valid(_tools[_active]):
 		_tools[_active].call("tool_trigger", false)
+		_scan_soon()
 	_trigger_down = false
 
 

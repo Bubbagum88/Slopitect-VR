@@ -25,6 +25,7 @@ The modules each test loads, in order (the order matters: some load lib last on 
 | `zz_holster.gd` | `controls vrui tools pause avatar holster lib zz_holster` |
 | `zz_inspect.gd` | `lib tools inspect zz_inspect` |
 | `zz_jelly.gd` | `avatar jelly lib zz_jelly` |
+| `zz_joints.gd` | `lib tools physics joints zz_joints` |
 | `zz_keyboard.gd` | `controls vrui chat terminal keyboard lib zz_keyboard` |
 | `zz_landscape.gd` | `landscape lib tools zz_landscape` |
 | `zz_lib.gd` | `lib zz_lib` |
@@ -40,10 +41,12 @@ The modules each test loads, in order (the order matters: some load lib last on 
 | `zz_prefabs.gd` | `lib tools prefabs zz_prefabs` |
 | `zz_projects.gd` | `save projects lib zz_projects` |
 | `zz_settings.gd` | `settings controls vrui hands lib zz_settings` |
+| `zz_shapes.gd` | `lib tools shapes zz_shapes` |
 | `zz_sweet_potato.gd` | `lib assets tools sweet_potato zz_sweet_potato` |
 | `zz_terminal.gd` | `controls vrui chat terminal lib zz_terminal` |
 | `zz_textures.gd` | `lib save projects tools textures zz_textures` |
 | `zz_tool_front.gd` | `controls vrui tools paths lib tool_front zz_tool_front` |
+| `zz_tools.gd` | `lib controls vrui save projects tools zz_tools` |
 | `zz_undo.gd` | `lib controls vrui tools inspect shapes physics grab multi doors textures prefabs zz_undo` |
 | `zz_voice.gd` | `controls vrui tts vtt lib pause zz_voice` |
 | `zz_vrui.gd` | `controls vrui lib zz_vrui` |

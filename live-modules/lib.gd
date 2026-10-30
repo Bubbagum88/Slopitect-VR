@@ -10,6 +10,8 @@ extends SlopitectModule
 #       changed (it calls lib.touch(self)), for the windows that show them
 #   thing_entered(node)  a shape or placed model joined the world (made,
 #       put back by save, an undo), once it's in place
+#   thing_exited(name)  a shape or placed model left the world and isn't
+#       back by the next frame (deleted, not just moved between parents)
 #   watch(who, name, on_load, on_unload)  on_load(module) now if that module
 #       is loaded and each time it loads; on_unload(module) as it goes
 #   follow(who, name, signal, callable)  connects to another module's signal
@@ -28,6 +30,7 @@ signal module_loaded(module_name: String)
 signal module_unloaded(module_name: String)
 signal info_changed(module_name: String)
 signal thing_entered(node: Node3D)
+signal thing_exited(node_name: String)
 
 var _by_name := {}  # module name -> the loaded module (lib itself left out)
 var _watches: Array[Dictionary] = []  # {who, name, on_load, on_unload}
@@ -43,8 +46,9 @@ func setup() -> String:
 			_by_name[String(child.name)] = child
 	var world: Node3D = ctx["world"]
 	world.child_entered_tree.connect(_world_entered)
+	world.child_exiting_tree.connect(_world_exiting)
 	if world.has_node("PolyHaven"):
-		world.get_node("PolyHaven").child_entered_tree.connect(_model_entered)
+		_join_holder(world.get_node("PolyHaven"))
 	register("lib_status", _status, "the shared helper library: the modules it knows, and who watches or follows which module")
 	_greet_all.call_deferred()
 	return ""
@@ -59,9 +63,13 @@ func _exit_tree() -> void:
 	var world: Node3D = ctx["world"]
 	if world.child_entered_tree.is_connected(_world_entered):
 		world.child_entered_tree.disconnect(_world_entered)
+	if world.child_exiting_tree.is_connected(_world_exiting):
+		world.child_exiting_tree.disconnect(_world_exiting)
 	var holder := world.get_node_or_null("PolyHaven")
 	if holder and holder.child_entered_tree.is_connected(_model_entered):
 		holder.child_entered_tree.disconnect(_model_entered)
+	if holder and holder.child_exiting_tree.is_connected(_model_exiting):
+		holder.child_exiting_tree.disconnect(_model_exiting)
 	for f in _follows:
 		_disconnect(f, module(f["name"]))
 	_follows.clear()
@@ -188,16 +196,36 @@ func world_node(node_name) -> Node3D:
 	return node
 
 
+func _join_holder(holder: Node) -> void:
+	if not holder.child_entered_tree.is_connected(_model_entered):
+		holder.child_entered_tree.connect(_model_entered)
+	if not holder.child_exiting_tree.is_connected(_model_exiting):
+		holder.child_exiting_tree.connect(_model_exiting)
+
+
 func _world_entered(node: Node) -> void:
 	if node.name == "PolyHaven":
-		if not node.child_entered_tree.is_connected(_model_entered):
-			node.child_entered_tree.connect(_model_entered)
+		_join_holder(node)
 	elif node is MeshInstance3D:
 		_tell_thing.call_deferred(node)  # once its maker has put it in place
 
 
 func _model_entered(node: Node) -> void:
 	_tell_thing.call_deferred(node)
+
+
+func _world_exiting(node: Node) -> void:
+	if node is MeshInstance3D:
+		_tell_gone.call_deferred(String(node.name))
+
+
+func _model_exiting(node: Node) -> void:
+	_tell_gone.call_deferred(String(node.name))
+
+
+func _tell_gone(node_name: String) -> void:
+	if is_inside_tree() and thing(node_name) == null:
+		thing_exited.emit(node_name)
 
 
 func _tell_thing(node) -> void:  # untyped: it may have gone by now

@@ -333,6 +333,7 @@ func _load() -> void:
 # together turns on and off.
 func _save() -> void:
 	set_physics_process(not _groups.is_empty())
+	_touch()
 	if _file.is_empty():
 		return  # no lib yet
 	DirAccess.make_dir_recursive_absolute(_file.get_base_dir())
@@ -370,12 +371,20 @@ func _select_command(request: Dictionary) -> Dictionary:
 			_selection.erase(n)
 		elif not n in _selection:
 			_selection.append(n)
+	_touch()
 	return _status({})
 
 
 func _clear_command(_request: Dictionary) -> Dictionary:
 	_selection.clear()
+	_touch()
 	return _status({})
+
+
+# The tool's buttons (Group, Delete...) follow the selection and groups.
+func _touch() -> void:
+	if _lib:
+		_lib.touch(self)
 
 
 func _group_command(request: Dictionary) -> Dictionary:

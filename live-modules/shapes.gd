@@ -79,7 +79,7 @@ const MAX_CUT_DEPTH := 8
 const LIMIT := 20.0  # metres, for any coordinate in a recipe
 const SHARP := 40.0  # degrees: a sharper turn in a revolve's outline gets its own edge
 const COLORS := ["#d8d8d8", "#c0392b", "#e67e22", "#f1c40f", "#27ae60", "#2980b9", "#8e44ad", "#5d4037", "#333333"]
-const SCAN_SECONDS := 0.5
+const MARKER_SECONDS := 0.5  # how often the attach-point markers follow the shapes, while shown
 const RAY_LENGTH := 15.0
 const RAY_STEP := 0.05
 const TIP := 0.1  # metres in front of the controller where Draw puts a wall point
@@ -94,7 +94,8 @@ var _draft_mesh: MeshInstance3D
 var _marker: MeshInstance3D
 var _markers: MultiMeshInstance3D
 var _selected := false
-var _since_scan := 0.0
+var _since_markers := 0.0
+var _lib: SlopitectModule
 var _busy := 0  # cuts being built
 
 
@@ -120,6 +121,8 @@ func setup() -> String:
 	_markers.material_override = _unshaded(Color(0.3, 0.9, 1))
 	_markers.visible = false
 	add_child(_markers)
+	set_process(false)
+	set_physics_process(false)
 
 	register("shapes_kinds", _kinds, "the kinds of shape and their fields, and the presets with their settings")
 	register("shapes_make", _make_command, "make a shape (one undo): preset (shapes_kinds) with size, depth and its settings, or kind (extrude, revolve, sweep, loft, surface) with its fields; optional name, position, rotation, scale, color (in front of you without a position)")
@@ -138,17 +141,25 @@ func _exit_tree() -> void:
 	_clear_draft()
 
 
+# A shape deleted another way (the delete command, inspect) is forgotten
+# as it goes (lib's thing_exited).
+func lib_ready(lib) -> void:
+	_lib = lib
+	if lib:
+		lib.follow(self, "lib", "thing_exited", _gone)
+
+
+func _gone(node_name: String) -> void:
+	if _made.has(node_name):
+		_made.erase(node_name)
+		shape_changed.emit(node_name, "removed")
+
+
+# Only while the attach points are shown: they follow the shapes near you.
 func _process(delta: float) -> void:
-	_since_scan += delta
-	if _since_scan < SCAN_SECONDS:
-		return
-	_since_scan = 0.0
-	# A shape deleted another way (the delete command, inspect) is forgotten.
-	for node_name in _made.keys():
-		if _node(node_name) == null:
-			_made.erase(node_name)
-			shape_changed.emit(node_name, "removed")
-	if _tool["show_points"]:
+	_since_markers += delta
+	if _since_markers >= MARKER_SECONDS:
+		_since_markers = 0.0
 		_show_markers()
 
 
@@ -285,6 +296,7 @@ func tool_info() -> Dictionary:
 func tool_selected(on: bool) -> void:
 	_selected = on
 	_marker.visible = false
+	set_physics_process(on)  # the aiming marker
 
 
 func tool_trigger(down: bool) -> void:
@@ -309,8 +321,6 @@ func tool_trigger(down: bool) -> void:
 
 
 func _physics_process(_delta: float) -> void:
-	if not _selected:
-		return
 	var hit = _aim_ground() if _tool["mode"] == "place" else _draw_point()
 	_marker.visible = hit != null
 	if hit != null:
@@ -497,8 +507,11 @@ func _tool_command(request: Dictionary) -> Dictionary:
 		_clear_draft()
 	_tool = next
 	_markers.visible = _tool["show_points"]
+	set_process(_tool["show_points"])
 	if _tool["show_points"]:
 		_show_markers()
+	if _lib:
+		_lib.touch(self)  # the tool's buttons show these
 	return {"ok": true, "tool": _tool.duplicate(), "status": tool_info()["status"]}
 
 

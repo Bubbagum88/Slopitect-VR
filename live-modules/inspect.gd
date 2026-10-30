@@ -195,6 +195,13 @@ func _store(node_name: String, flags: Dictionary) -> void:
 	else:
 		settings[node_name] = kept
 	_apply(node_name)
+	_touch()
+
+
+# The tool's buttons follow the selection and the switches.
+func _touch() -> void:
+	if _lib:
+		_lib.touch(self)
 
 
 func _draw_outline() -> void:
@@ -264,11 +271,13 @@ func _select_command(request: Dictionary) -> Dictionary:
 	var node_name = request.get("name", "")
 	if typeof(node_name) == TYPE_STRING and node_name.is_empty():
 		_selected = ""
+		_touch()
 		return _status({})
 	var named := _named(request)
 	if not named[1].is_empty():
 		return {"ok": false, "error": named[1]}
 	_selected = named[0]
+	_touch()
 	return _status({})
 
 
