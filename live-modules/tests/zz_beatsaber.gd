@@ -117,6 +117,8 @@ func _go() -> void:
 		and env_node.environment.background_mode == Environment.BG_COLOR and not main_floor.visible and sun.light_energy < sun_energy,
 		[_beat._stage, env_node.environment, main_floor.visible, sun.light_energy])
 	_check("its stage lies with the track", _beat._stage.global_transform.is_equal_approx(_beat.track_transform()))
+	_check("haze and the sign over the windows", env_node.environment.fog_enabled and _beat._sign != null and _beat._sign.visible == _beat._shown("beatsaber"),
+		[env_node.environment.fog_enabled, _beat._sign])
 	reply = _run({"cmd": "beatsaber_leave"})
 	_check("Leave goes back to where we were", reply.get("ok", false) and _world() == "start", [reply, _world()])
 	_check("out of the game: hands back", hands.settings["style"] == "hand" and not saber.visible)
@@ -159,7 +161,7 @@ func _go() -> void:
 	_run({"cmd": "beatsaber_config", "angle": 0.0, "grip": [0, 0, 0], "hold": 0.0})
 	reply = _run({"cmd": "beatsaber_do", "act": "play"})
 	_check("Play starts the chosen song", reply.get("ok", false) and reply.get("notes") == 5, reply)
-	_check("windows step aside while it plays", not _run({"cmd": "ui_get", "id_panel": "beatsaber"})["panel"]["visible"])
+	_check("windows step aside while it plays", not _run({"cmd": "ui_get", "id_panel": "beatsaber"})["panel"]["visible"] and not _beat._sign.visible)
 
 	await _cut_at(0, -0.4)  # down, through the middle: a good cut
 	_check("good cut scores", _beat.cuts == 1 and _beat.combo == 1 and _beat.score > 0, _beat._score({}))
@@ -182,7 +184,7 @@ func _go() -> void:
 	_check("song ends with results", not _beat.running and results.get("score") == _beat.score and results.get("rank") == "F" and results.get("new_best"), results)
 	_check("finished and stopped signals", _signals == ["started Test", "finished", "stopped"], _signals)
 	_check("songs play in the Rhythm world", _world() == "rhythm_sabers")
-	_check("windows back with the score", _run({"cmd": "ui_get", "id_panel": "beatsaber"})["panel"]["visible"]
+	_check("windows back with the score", _run({"cmd": "ui_get", "id_panel": "beatsaber"})["panel"]["visible"] and _beat._sign.visible
 		and _element("rhythm_scores", "local_0").get("text", "").contains(str(_beat.score)), _element("rhythm_scores", "local_0"))
 	_check("best score kept", lib.read_json("user://beatsaber.json").get("best", {}).get("zz_test") == _beat.score)
 	await _frames(60)

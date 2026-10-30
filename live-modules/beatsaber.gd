@@ -215,6 +215,7 @@ var _hands_before := ""     # the hands style to put back when you leave (auto s
 var _placed := false        # the track was laid out with the windows
 var _stage: Node3D          # the Rhythm world's surroundings, laid out with the track
 var _swapped := {}          # what the stage changed in the main scene, to put back
+var _sign: Node3D           # the glowing title over the windows (menus only)
 var _selected := "free"     # the song chosen there ("free" for free play)
 var _mode := "Standard"     # its mode (a custom song's characteristic)
 var _song_cache = null      # _songs() as last read; null to read the folder again
@@ -450,10 +451,12 @@ func _show_windows(page := "") -> Dictionary:
 		return {"ok": false, "error": problem}
 	for id_panel in PANELS:
 		_run({"cmd": "ui_show", "id_panel": id_panel, "visible": true})
+	_sign_shown(true)
 	return {"ok": true, "shown": true}
 
 
 func _hide_windows() -> void:
+	_sign_shown(false)
 	if not _has_ui():
 		return
 	for id_panel in PANELS:
@@ -685,6 +688,7 @@ func _bring_back() -> void:
 	_build("Local")
 	for id_panel in PANELS:
 		_run({"cmd": "ui_show", "id_panel": id_panel, "visible": true})
+	_sign_shown(true)
 
 
 func _rebuild_if_open() -> void:
@@ -885,15 +889,20 @@ func _on_world_changed(project: String, _folder: String) -> void:
 
 
 # --- The Rhythm world's surroundings -----------------------------------------------
-# In the Rhythm world the main scene's sky, sun and floor give way to a dark
-# stage of our own: a night sky, a dim sun, a dark ground and runway, the
-# lanes edged in the two note colours, and glowing frames down the track.
+# In the Rhythm world the main scene's sky, sun and floor give way to a
+# stage of our own: a deep blue night with a light haze and stars, a dim
+# sun, a dark ground and runway, the lanes edged in the two note colours,
+# glowing frames down the track, and the game's name in light over the
+# windows (shown with them, hidden while you play).
 # Everything it changed goes back when you leave or the module unloads.
 # Glowing (emissive) materials, no screen-wide glow, and one draw per
 # colour (MultiMesh), to stay light on the Quest 1.
 
-const STAGE_SKY := Color(0.01, 0.01, 0.035)
-const STAGE_AMBIENT := Color(0.3, 0.3, 0.42)
+const STAGE_SKY := Color(0.015, 0.03, 0.1)
+const STAGE_AMBIENT := Color(0.3, 0.34, 0.5)
+const STAGE_HAZE := Color(0.06, 0.12, 0.3)
+const STAGE_HAZE_DENSITY := 0.035  # light fog: the track fades into blue far off
+const STAGE_STARS := 260
 const STAGE_SUN := 0.35          # the sun's energy while the stage is up
 const STAGE_FRAMES := 6          # glowing frames down the track
 const STAGE_FRAME_GAP := 3.5     # metres between them
@@ -912,6 +921,10 @@ func _stage_on() -> void:
 			night.background_color = STAGE_SKY
 			night.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 			night.ambient_light_color = STAGE_AMBIENT
+			night.fog_enabled = true
+			night.fog_light_color = STAGE_HAZE
+			night.fog_density = STAGE_HAZE_DENSITY
+			night.fog_sky_affect = 0.0
 			env.environment = night
 		var sun := scene.get_node_or_null("Sun") as DirectionalLight3D
 		if sun:
@@ -925,10 +938,10 @@ func _stage_on() -> void:
 	_stage.name = "stage"
 	add_child(_stage)
 	_stage.global_transform = _track.global_transform
-	var dark := _flat(Color(0.03, 0.03, 0.05))
-	var runway := _flat(Color(0.06, 0.06, 0.09))
+	var dark := _flat(Color(0.04, 0.06, 0.13))
+	var runway := _flat(Color(0.07, 0.09, 0.16))
 	var length := -SPAWN_Z + 4.0
-	_stage_box(Vector3(60.0, 0.02, 60.0), Vector3(0.0, -0.03, 0.0), dark)  # the ground
+	_stage_box(Vector3(240.0, 0.02, 240.0), Vector3(0.0, -0.03, 0.0), dark)  # the ground, faded out by the haze
 	_stage_box(Vector3(LANE_W * 4.0 + 0.5, 0.02, length), Vector3(0.0, -0.015, 2.0 - length / 2.0), runway)
 	_stage_box(Vector3(2.4, 0.02, 2.4), Vector3(0.0, -0.01, 0.0), runway)  # where you stand
 	# The lanes' edges: blue on the left, red on the right.
@@ -942,15 +955,75 @@ func _stage_on() -> void:
 	frames.mesh = unit
 	frames.instance_count = STAGE_FRAMES * 3
 	for i in STAGE_FRAMES:
-		var z := HIT_Z - 3.0 - i * STAGE_FRAME_GAP
+		var z := HIT_Z - 5.0 - i * STAGE_FRAME_GAP
 		frames.set_instance_transform(i * 3, Transform3D(Basis.from_scale(Vector3(0.06, 3.2, 0.06)), Vector3(-2.2, 1.6, z)))
 		frames.set_instance_transform(i * 3 + 1, Transform3D(Basis.from_scale(Vector3(0.06, 3.2, 0.06)), Vector3(2.2, 1.6, z)))
 		frames.set_instance_transform(i * 3 + 2, Transform3D(Basis.from_scale(Vector3(4.46, 0.06, 0.06)), Vector3(0.0, 3.2, z)))
 	var frame_node := MultiMeshInstance3D.new()
 	frame_node.multimesh = frames
-	frame_node.material_override = _mat["spike"]
+	frame_node.material_override = _glow(Color(0.55, 0.7, 1.0))
 	frame_node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	_stage.add_child(frame_node)
+	_stage.add_child(_stars())
+	_sign = _make_sign()
+	_stage.add_child(_sign)
+	_sign.visible = _shown(PANEL)
+
+
+# Stars on a dome above the horizon, one draw: small quads that face you,
+# not in the fog. A fixed seed, so the sky is the same every visit.
+func _stars() -> MultiMeshInstance3D:
+	var quad := QuadMesh.new()
+	quad.size = Vector2(0.18, 0.18)
+	var stars := MultiMesh.new()
+	stars.transform_format = MultiMesh.TRANSFORM_3D
+	stars.mesh = quad
+	stars.instance_count = STAGE_STARS
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 7
+	for i in STAGE_STARS:
+		var up := rng.randf_range(0.08, 1.0)  # height on the dome, 0 = horizon
+		var around := rng.randf() * TAU
+		var flat := sqrt(1.0 - up * up)
+		var at := Vector3(cos(around) * flat, up, sin(around) * flat) * 70.0
+		stars.set_instance_transform(i, Transform3D(Basis.from_scale(Vector3.ONE * rng.randf_range(0.5, 1.6)), at))
+	var star := _flat(Color(0.85, 0.9, 1.0))
+	star.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	star.billboard_keep_scale = true
+	star.disable_fog = true
+	var node := MultiMeshInstance3D.new()
+	node.multimesh = stars
+	node.material_override = star
+	node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	return node
+
+
+# The game's name in light over the middle window: RHYTHM in red over
+# SABERS in blue, each with a soft outline of its own colour.
+func _make_sign() -> Node3D:
+	var sign := Node3D.new()
+	sign.name = "sign"
+	sign.position = Vector3(0.0, 2.25, -1.5)
+	for i in 2:
+		var word := Label3D.new()
+		word.text = ["RHYTHM", "SABERS"][i]
+		var c: Color = [Color(1.0, 0.25, 0.3), Color(0.35, 0.6, 1.0)][i]
+		word.modulate = c.lightened(0.35)
+		word.outline_modulate = Color(c, 0.55)
+		word.font_size = 160
+		word.outline_size = 28
+		word.pixel_size = 0.0022
+		word.position = Vector3(0.0, 0.2 - i * 0.36, 0.0)
+		word.shaded = false
+		word.fixed_size = false
+		word.no_depth_test = false
+		sign.add_child(word)
+	return sign
+
+
+func _sign_shown(on: bool) -> void:
+	if _sign != null and is_instance_valid(_sign):
+		_sign.visible = on
 
 
 func _stage_box(size: Vector3, at: Vector3, material: Material) -> void:
@@ -975,6 +1048,7 @@ func _stage_off() -> void:
 	if _stage != null and is_instance_valid(_stage):
 		_stage.queue_free()
 	_stage = null
+	_sign = null
 
 
 # Auto sabers: in the game you hold sabers; back out, the hands module's
