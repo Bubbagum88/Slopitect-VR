@@ -4,6 +4,8 @@ extends SlopitectModule
 # a saber (right = red, left = blue): a long glowing cylinder blade and a
 # cylinder handle with silver bands, with a fading trail behind the blade.
 # The APK's controller boxes are hidden while this runs and come back after.
+# The sabers show only when the hands module's Settings choice is Sabers (and
+# Hide hands is off); without the hands module they always show.
 # Every note is a block with rounded edges.
 # Arrow notes: a squashed white triangle, 75% of its old size, on the front and
 # pushed toward the edge, tip pointing at the edge the cut must go in. Dot
@@ -34,7 +36,7 @@ const FULL_ANGLE := 5.0     # degrees off the arrow that still score full angle 
 const ZERO_ANGLE := 25.0    # degrees off the arrow at which the angle points run out
 const CENTRE_RANGE := 0.2   # metres from the block's centre where centre points run out
 const FIT_PATH := "user://beatsaber.json"
-const FIT_DEFAULTS := {"angle": 45.0, "grip": [0.0, -1.8, 1.8], "hold": 5.0}  # Touch: Chromium's WebXR grip is the aim turned up 45 degrees, 2.5 cm down
+const FIT_DEFAULTS := {"angle": 45.0, "grip": [0.0, -1.8, 4.8], "hold": 10.0}  # Touch: Chromium's WebXR grip is the aim turned up 45 degrees, 2.5 cm down; isaac saw the sabers too far forward on the headset, so 3 cm further back
 const FIT_ANGLE_RANGE := [-30.0, 90.0]
 const FIT_CM_MAX := 15.0
 
@@ -567,7 +569,8 @@ func _process(delta: float) -> void:
 		return
 	for side in ["right", "left"]:
 		var hand = ctx.get(side)
-		if hand == null or not is_instance_valid(hand):
+		var hands: SlopitectModule = ctx["modules"].module("hands")
+		if hand == null or not is_instance_valid(hand) or (hands != null and not hands.call("sabers_shown")):
 			sabers[side].visible = false
 			blades.erase(side)
 			prev_tip.erase(side)
