@@ -10,8 +10,9 @@ extends SlopitectModule
 # project, projects.gd), made the first time and reused after that.
 # Getting in: the Rhythm tile on the Menu, or starting any song (the window,
 # the Settings window's Start, beatsaber_start) takes you to that world
-# first, saving the one you were in, and opens the Rhythm window (songs,
-# difficulty, Stop, Leave, the last results). Opening the world from the
+# first, saving the one you were in, and opens the Rhythm window (tabs:
+# Songs, Options, Modifiers, Colours, Practice; Stop, Leave and the last
+# results on each). Opening the world from the
 # Worlds window does the same.
 # Getting out: Leave (in the Rhythm window or the Settings window, or
 # beatsaber_leave) stops the song and takes you back to the world you came
@@ -123,6 +124,8 @@ const FIT_DEFAULTS := {"angle": 45.0, "grip": [0.0, -1.8, 4.8], "hold": 10.0}  #
 const FIT_ANGLE_RANGE := [-30.0, 90.0]
 const FIT_CM_MAX := 15.0
 const SONG_ROWS := 5
+const TABS := ["Songs", "Options", "Modifiers", "Colours", "Practice"]
+const WIN := Vector2(0.74, 0.64)  # the Rhythm window's size
 const WORLD := "rhythm_sabers"   # the game's own world (a project)
 
 var running := false
@@ -188,7 +191,7 @@ func setup() -> String:
 	register("beatsaber_score", _score, "the score, combo, multiplier, cuts, misses, bad cuts, bombs hit, accuracy, and the last cut's points, direction and centre offset; after a song, its results")
 	register("beatsaber_songs", _songs_command, "the songs in the Slopitect folder's songs/ (folder, title, bpm, notes or made, best score)")
 	register("beatsaber_set", _set_command, "the game's settings (usable in the headset): any of difficulty (easy, normal, hard), speed (note speed m/s, 4 to 14), bpm (free play tempo, 60 to 200), hit_sounds, trails (true/false)")
-	register("beatsaber_do", _do, "the Rhythm window: act = toggle (goes to the Rhythm world first), show, refresh, page (page number for the song list), enter (go to the Rhythm world), leave (back to the world you came from)")
+	register("beatsaber_do", _do, "the Rhythm window: act = toggle (goes to the Rhythm world first), show (optional page: a tab), refresh, page (page number for the song list), enter (go to the Rhythm world), leave (back to the world you came from)")
 	register("beatsaber_leave", _leave, "stop the song and go back from the Rhythm world to the world you came from")
 	register("beatsaber_config", _config, "from the PC only: how the saber sits in the hand: any of angle (degrees it tilts up from where the controller points, -30 to 90), grip ([x, y, z] cm from the controller's point to the handle's middle, right hand), hold (cm down the hilt the hand holds it, 0 to 15), or reset true")
 	_make_assets()
@@ -328,7 +331,10 @@ func _do(request: Dictionary) -> Dictionary:
 		"leave":
 			return _leave({})
 		"show":
-			return _show_window()
+			var page = request.get("page", "")
+			if not (page == "" or page in TABS):
+				return {"ok": false, "error": "\"page\" must be one of %s" % [TABS]}
+			return _show_window(page)
 		"refresh":
 			var problem := _build()
 			return {"ok": problem.is_empty(), "error": problem} if not problem.is_empty() else {"ok": true}
@@ -342,29 +348,52 @@ func _do(request: Dictionary) -> Dictionary:
 	return {"ok": false, "error": "\"act\" must be toggle, show, refresh, page, enter or leave"}
 
 
-func _show_window() -> Dictionary:
-	var problem := _build()
+func _show_window(page := "") -> Dictionary:
+	var problem := _build(page)
 	if not problem.is_empty():
 		return {"ok": false, "error": problem}
 	return _run({"cmd": "ui_show", "id_panel": PANEL, "visible": true})
 
 
-# The window: what's happening, the difficulty, the songs, Start / Stop.
-# Built when it opens and when a song starts, stops or ends; never per frame.
-func _build() -> String:
+# The Rhythm window: tabs for Songs (pick one to play), Options
+# (difficulty, note speed, tempo, hit sounds, trails), and Modifiers,
+# Colours and Practice (coming step by step). What's happening, Stop and
+# Leave show on every tab. Built when it opens, when a setting changes and
+# when a song starts, stops or ends; never per frame. The tab you're on
+# stays when it's built again.
+func _build(page := "") -> String:
 	if not _has_ui():
 		return "the Rhythm window needs the vrui module"
-	var w := 0.66
-	var h := 0.56
-	var top := h / 2.0 - 0.06
 	var els := []
-	els.append({"type": "text", "id": "status", "text": _status_text(), "at": [0.0, top], "width": w - 0.06, "color": "text"})
-	var y := top - 0.1
-	for i in DIFFICULTIES.size():
-		var d: String = DIFFICULTIES[i]
-		els.append({"type": "button", "id": "diff_" + d, "label": d.capitalize(), "at": [-0.2 + i * 0.2, y], "size": [0.18, 0.055],
-			"color": "accent" if game["difficulty"] == d else "button", "action": {"cmd": "beatsaber_set", "difficulty": d}})
-	y -= 0.075
+	var top := WIN.y / 2.0 - 0.05
+	els.append({"type": "text", "id": "status", "text": _status_text(), "at": [0.0, top], "width": WIN.x - 0.06, "color": "text"})
+	els.append_array(_songs_tab(top - 0.08))
+	els.append_array(_options_tab(top - 0.08))
+	for tab in ["Modifiers", "Colours", "Practice"]:
+		els.append({"type": "text", "id": "soon_" + tab.to_lower(), "page": tab, "text": "%s: coming in a later step." % tab,
+			"at": [0.0, top - 0.12], "width": WIN.x - 0.06, "color": "muted"})
+	var bottom := -WIN.y / 2.0 + 0.04
+	var leave := _projects() != null
+	els.append({"type": "button", "id": "stop", "label": "Stop", "at": [-0.12 if leave else 0.0, bottom], "size": [0.2, 0.05],
+		"color": "notice" if running else "button", "action": {"cmd": "beatsaber_stop"}})
+	if leave:
+		els.append({"type": "button", "id": "leave", "label": "Leave", "at": [0.12, bottom], "size": [0.2, 0.05],
+			"color": "button", "action": {"cmd": "beatsaber_leave"}})
+	var got := _run({"cmd": "ui_get", "id_panel": PANEL})
+	var reply: Dictionary
+	if got.get("ok", false):
+		var update := {"cmd": "ui_update", "id_panel": PANEL, "elements": els}
+		if page != "":
+			update["page"] = page
+		reply = _run(update)
+	else:
+		reply = _run({"cmd": "ui_add", "id_panel": PANEL, "title": TITLE, "place": "front", "distance": 0.6, "height": -0.15,
+			"size": [WIN.x, WIN.y], "chrome": true, "pages": TABS, "page": page if page != "" else TABS[0], "visible": false, "elements": els})
+	return "" if reply.get("ok", false) else str(reply.get("error", "the window couldn't be drawn"))
+
+
+func _songs_tab(y: float) -> Array:
+	var els := []
 	var songs := _songs()
 	var rows := [{"id": "free", "label": "Free play (%d beats a minute)" % int(game["bpm"])}]
 	for s in songs:
@@ -375,31 +404,43 @@ func _build() -> String:
 	var pages := maxi(1, ceili(rows.size() / float(SONG_ROWS)))
 	_song_page = clampi(_song_page, 0, pages - 1)
 	for i in range(_song_page * SONG_ROWS, mini(rows.size(), (_song_page + 1) * SONG_ROWS)):
-		els.append({"type": "button", "id": "song_%d" % i, "label": rows[i]["label"].left(40), "at": [0.0, y], "size": [w - 0.08, 0.05],
-			"color": "button", "action": {"cmd": "beatsaber_start", "song": rows[i]["id"]}})
+		els.append({"type": "button", "id": "song_%d" % i, "page": "Songs", "label": rows[i]["label"].left(40), "at": [0.0, y],
+			"size": [WIN.x - 0.08, 0.05], "color": "button", "action": {"cmd": "beatsaber_start", "song": rows[i]["id"]}})
 		y -= 0.058
-	if pages > 1:
-		els.append({"type": "button", "id": "prev", "label": "Back", "at": [-0.2, -h / 2.0 + 0.1], "size": [0.14, 0.05],
-			"action": {"cmd": "beatsaber_do", "act": "page", "page": _song_page - 1}})
-		els.append({"type": "text", "id": "pages", "text": "%d / %d" % [_song_page + 1, pages], "at": [0.0, -h / 2.0 + 0.1], "width": 0.12, "color": "muted"})
-		els.append({"type": "button", "id": "next", "label": "More", "at": [0.2, -h / 2.0 + 0.1], "size": [0.14, 0.05],
-			"action": {"cmd": "beatsaber_do", "act": "page", "page": _song_page + 1}})
 	if songs.is_empty():
-		els.append({"type": "text", "id": "hint", "text": "Add songs as folders in Slopitect/songs (see beatsaber.gd)", "at": [0.0, y], "width": w - 0.06, "color": "muted"})
-	var leave := _projects() != null
-	els.append({"type": "button", "id": "stop", "label": "Stop", "at": [-0.12 if leave else 0.0, -h / 2.0 + 0.04], "size": [0.2, 0.05],
-		"color": "notice" if running else "button", "action": {"cmd": "beatsaber_stop"}})
-	if leave:
-		els.append({"type": "button", "id": "leave", "label": "Leave", "at": [0.12, -h / 2.0 + 0.04], "size": [0.2, 0.05],
-			"color": "button", "action": {"cmd": "beatsaber_leave"}})
-	var got := _run({"cmd": "ui_get", "id_panel": PANEL})
-	var reply: Dictionary
-	if got.get("ok", false):
-		reply = _run({"cmd": "ui_update", "id_panel": PANEL, "elements": els})
-	else:
-		reply = _run({"cmd": "ui_add", "id_panel": PANEL, "title": TITLE, "place": "front", "distance": 0.6, "height": -0.15,
-			"size": [w, h], "chrome": true, "visible": false, "elements": els})
-	return "" if reply.get("ok", false) else str(reply.get("error", "the window couldn't be drawn"))
+		els.append({"type": "text", "id": "hint", "page": "Songs", "text": "Add songs as folders in Slopitect/songs (see beatsaber.gd)",
+			"at": [0.0, y], "width": WIN.x - 0.06, "color": "muted"})
+	if pages > 1:
+		var py := -WIN.y / 2.0 + 0.11
+		els.append({"type": "button", "id": "prev", "page": "Songs", "label": "Back", "at": [-0.2, py], "size": [0.14, 0.05],
+			"action": {"cmd": "beatsaber_do", "act": "page", "page": _song_page - 1}})
+		els.append({"type": "text", "id": "pages", "page": "Songs", "text": "%d / %d" % [_song_page + 1, pages], "at": [0.0, py],
+			"width": 0.12, "color": "muted"})
+		els.append({"type": "button", "id": "next", "page": "Songs", "label": "More", "at": [0.2, py], "size": [0.14, 0.05],
+			"action": {"cmd": "beatsaber_do", "act": "page", "page": _song_page + 1}})
+	return els
+
+
+func _options_tab(y: float) -> Array:
+	var els := []
+	els.append({"type": "text", "id": "diff_label", "page": "Options", "text": "Difficulty", "at": [0.0, y], "width": WIN.x - 0.06, "color": "muted"})
+	y -= 0.06
+	for i in DIFFICULTIES.size():
+		var d: String = DIFFICULTIES[i]
+		els.append({"type": "button", "id": "diff_" + d, "page": "Options", "label": d.capitalize(), "at": [-0.22 + i * 0.22, y],
+			"size": [0.2, 0.055], "color": "accent" if game["difficulty"] == d else "button", "action": {"cmd": "beatsaber_set", "difficulty": d}})
+	y -= 0.085
+	els.append({"type": "slider", "id": "speed", "page": "Options", "label": "Note speed (m/s)", "at": [0.0, y], "size": [WIN.x - 0.12, 0.06],
+		"min": SPEED_RANGE[0], "max": SPEED_RANGE[1], "step": 0.5, "value": game["speed"], "action": {"cmd": "beatsaber_set", "speed": "{value}"}})
+	y -= 0.085
+	els.append({"type": "slider", "id": "bpm", "page": "Options", "label": "Free play tempo (beats a minute)", "at": [0.0, y], "size": [WIN.x - 0.12, 0.06],
+		"min": BPM_RANGE[0], "max": BPM_RANGE[1], "step": 5.0, "value": game["bpm"], "action": {"cmd": "beatsaber_set", "bpm": "{value}"}})
+	y -= 0.085
+	els.append({"type": "toggle", "id": "hit_sounds", "page": "Options", "label": "Hit sounds", "at": [-0.15, y], "size": [0.26, 0.055],
+		"on": game["hit_sounds"], "action": {"cmd": "beatsaber_set", "hit_sounds": "{on}"}})
+	els.append({"type": "toggle", "id": "trails", "page": "Options", "label": "Saber trails", "at": [0.15, y], "size": [0.26, 0.055],
+		"on": game["trails"], "action": {"cmd": "beatsaber_set", "trails": "{on}"}})
+	return els
 
 
 func _rebuild_if_open() -> void:
