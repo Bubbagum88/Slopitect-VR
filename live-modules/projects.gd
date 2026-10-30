@@ -12,16 +12,18 @@ extends SlopitectModule
 const STATE_PATH := "user://projects.json"
 const FIRST := "start"  # the project the old saves/ folder becomes
 
+# You're in another project now (and at start, once the save module has put
+# its world back). Modules that keep files per project follow this
+# (lib.follow) instead of checking the save folder over and over.
+signal project_changed(project: String, folder: String)
+
+var _lib: SlopitectModule
 var _root := ""
 var _current := ""
 var _attached := false  # joined the save module
 
 
 func setup() -> String:
-	var home := "/sdcard/Slopitect" if OS.get_name() == "Android" else OS.get_user_data_dir() + "/files_home"
-	_root = home + "/projects"
-	if DirAccess.make_dir_recursive_absolute(_root) != OK:
-		return "projects can't make its folder %s" % _root
 	register("projects_list", _list, "every project: name, modules, private, last saved")
 	register("projects_current", _current_command, "the project you're in")
 	register("projects_new", _new, "make a new, empty project: name; optional modules (live modules it uses), open (true to go to it now)")
@@ -32,13 +34,24 @@ func setup() -> String:
 	return ""
 
 
-# Live modules load in no set order, so it joins the save module once that's
-# loaded (it checks each frame until then).
-func _process(_delta: float) -> void:
-	if _attached:
+# Joins the save module whenever it's loaded, in whichever order they load.
+func lib_ready(lib) -> void:
+	_lib = lib
+	if lib == null:
 		return
-	var save: SlopitectModule = ctx["modules"].module("save")
-	if save == null:
+	_root = lib.home() + "/projects"
+	if DirAccess.make_dir_recursive_absolute(_root) != OK:
+		push_error("Slopitect projects: can't make its folder %s" % _root)
+		return
+	lib.watch(self, "save", _attach, _detach)
+
+
+func _detach(_save: SlopitectModule) -> void:
+	_attached = false
+
+
+func _attach(save: SlopitectModule) -> void:
+	if _attached:
 		return
 	_attached = true
 	var home := _root.get_base_dir()
@@ -59,6 +72,7 @@ func _process(_delta: float) -> void:
 	if not problem.is_empty():
 		push_error("Slopitect projects: " + problem)
 	print("Slopitect projects: in project \"%s\"" % _current)
+	project_changed.emit(_current, _folder(_current))
 
 
 func _folder(project: String) -> String:
@@ -75,20 +89,16 @@ func _good_name(project) -> bool:
 
 
 func _info(project: String) -> Dictionary:
-	var path := _folder(project) + "/project.json"
-	var info = JSON.parse_string(FileAccess.get_file_as_string(path)) if FileAccess.file_exists(path) else null
+	var info = _lib.read_json(_folder(project) + "/project.json") if _lib else null
 	if typeof(info) != TYPE_DICTIONARY:
 		info = {"name": project, "modules": [], "private": false}
 	return info
 
 
 func _write_info(project: String, info: Dictionary) -> String:
-	var out := FileAccess.open(_folder(project) + "/project.json", FileAccess.WRITE)
-	if out == null:
-		return "couldn't write %s/project.json (error %d)" % [_folder(project), FileAccess.get_open_error()]
-	out.store_string(JSON.stringify(info, "\t"))
-	out.close()
-	return ""
+	if _lib == null:
+		return _not_ready()
+	return _lib.write_json(_folder(project) + "/project.json", info, "\t")
 
 
 func _make(project: String, modules: Array, private: bool) -> String:
@@ -109,7 +119,14 @@ func _module_list(value) -> Array:
 
 # --- Commands ------------------------------------------------------------------------
 
+# "" when the commands can work, or why not.
+func _not_ready() -> String:
+	return "" if not _root.is_empty() else "projects is waiting for the lib module (load lib.gd)"
+
+
 func _list(_request: Dictionary) -> Dictionary:
+	if not _not_ready().is_empty():
+		return {"ok": false, "error": _not_ready()}
 	var listed := []
 	for project in DirAccess.get_directories_at(_root):
 		if not _good_name(project):
@@ -128,6 +145,8 @@ func _current_command(_request: Dictionary) -> Dictionary:
 
 
 func _new(request: Dictionary) -> Dictionary:
+	if not _not_ready().is_empty():
+		return {"ok": false, "error": _not_ready()}
 	var project = request.get("name")
 	if not _good_name(project):
 		return {"ok": false, "error": "\"name\" must be 1 to 40 letters, digits, - or _"}
@@ -146,6 +165,8 @@ func _new(request: Dictionary) -> Dictionary:
 
 
 func _open_command(request: Dictionary) -> Dictionary:
+	if not _not_ready().is_empty():
+		return {"ok": false, "error": _not_ready()}
 	var project = request.get("name")
 	if not _good_name(project) or not DirAccess.dir_exists_absolute(_folder(project)):
 		return {"ok": false, "error": "no project named %s (projects_list shows them)" % JSON.stringify(project)}
@@ -153,7 +174,7 @@ func _open_command(request: Dictionary) -> Dictionary:
 
 
 func _open(project: String) -> Dictionary:
-	var save: SlopitectModule = ctx["modules"].module("save")
+	var save: SlopitectModule = _lib.module("save") if _lib else null
 	if save == null or not _attached:
 		return {"ok": false, "error": "the save module isn't loaded, so projects can't switch worlds"}
 	# Its modules first, so the world's parts that need them go straight back.
@@ -175,10 +196,13 @@ func _open(project: String) -> Dictionary:
 	_current = project
 	_store_current()
 	print("Slopitect projects: opened \"%s\"" % project)
+	project_changed.emit(_current, _folder(_current))
 	return {"ok": true, "opened": project, "modules_loaded": loaded, "modules_waiting_for_yes": waiting}
 
 
 func _modules(request: Dictionary) -> Dictionary:
+	if not _not_ready().is_empty():
+		return {"ok": false, "error": _not_ready()}
 	var project = request.get("name")
 	if not _good_name(project) or not DirAccess.dir_exists_absolute(_folder(project)):
 		return {"ok": false, "error": "no project named %s" % JSON.stringify(project)}
@@ -192,6 +216,8 @@ func _modules(request: Dictionary) -> Dictionary:
 
 
 func _config(request: Dictionary) -> Dictionary:
+	if not _not_ready().is_empty():
+		return {"ok": false, "error": _not_ready()}
 	var project = request.get("name")
 	if not _good_name(project) or not DirAccess.dir_exists_absolute(_folder(project)):
 		return {"ok": false, "error": "no project named %s" % JSON.stringify(project)}
