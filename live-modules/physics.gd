@@ -347,7 +347,7 @@ func set_physics(data) -> void:
 		if typeof(node_name) == TYPE_STRING and typeof(c) == TYPE_DICTIONARY and c.get("mode") in MODES:
 			_settings[node_name] = {"mode": c["mode"], "mass": float(c.get("mass", 1.0)), "bounce": float(c.get("bounce", 0.2)), "friction": float(c.get("friction", 0.6))}
 	_save()
-	_restore_all.call_deferred()  # bodies for the things already there; the rest as they join
+	_restore_all()
 
 
 func thing_state(node_name: String) -> Dictionary:
