@@ -681,6 +681,41 @@ func set_joints(data: Dictionary) -> void:
 	_next = maxi(int(data.get("next", 1)), _next)
 
 
+# For undoing a delete (tools.gd): a thing's joints and attach points.
+func thing_state(node_name: String) -> Dictionary:
+	var joints := _joints.filter(func(j): return node_name in [j["a"], j["b"]]).map(_out)
+	var points := {}
+	for id in _points.get(node_name, {}):
+		var p: Dictionary = _points[node_name][id]
+		points[id] = {"position": p["position"], "normal": p["normal"]}
+	if joints.is_empty() and points.is_empty():
+		return {}
+	return {"joints": joints, "points": points}
+
+
+func thing_forget(node_name: String) -> void:
+	for joint in _joints.duplicate():
+		if node_name in [joint["a"], joint["b"]]:
+			_take(joint["id"])
+	_points.erase(node_name)
+	if _first.get("name", "") == node_name:
+		_first = {}
+
+
+func thing_restore(node_name: String, state: Dictionary) -> void:
+	var have := _joints.map(func(j): return j["id"])
+	for saved in state.get("joints", []):
+		if not saved["id"] in have:
+			var joint = _in(saved)
+			if joint != null:
+				_insert(joint)
+	if not (state.get("points", {}) as Dictionary).is_empty():
+		if not _points.has(node_name):
+			_points[node_name] = {}
+		for id in state["points"]:
+			_points[node_name][id] = state["points"][id].duplicate()
+
+
 func _out(joint: Dictionary) -> Dictionary:
 	var t: Quaternion = joint["turn"]
 	return {"id": joint["id"], "type": joint["type"], "a": joint["a"], "b": joint["b"],
@@ -924,6 +959,24 @@ func _set_command(request: Dictionary) -> Dictionary:
 	var upper = changes.get("upper", joint["upper"])
 	if lower != null and upper != null and lower > upper:
 		return {"ok": false, "error": "\"lower\" must be below \"upper\""}
+	var before := {}
+	for key in changes:
+		before[key] = joint[key]
+	_change(joint["id"], changes)
+	var tools: SlopitectModule = ctx["modules"].module("tools")
+	if tools and before != changes:
+		tools.call("push_undo", "set joint " + joint["id"], _change.bind(joint["id"], before), _change.bind(joint["id"], changes.duplicate()))
+	return {"ok": true, "joint": _describe(joint)}
+
+
+# A joint's lower, upper, motor and value; a new value moves b there.
+func _change(id: String, changes: Dictionary) -> void:
+	var joint := {}
+	for j in _joints:
+		if j["id"] == id:
+			joint = j
+	if joint.is_empty():
+		return
 	for key in ["lower", "upper", "motor"]:
 		if changes.has(key):
 			joint[key] = changes[key]
@@ -940,7 +993,6 @@ func _set_command(request: Dictionary) -> Dictionary:
 				body.global_transform = pose
 				body.linear_velocity = Vector3.ZERO
 				body.angular_velocity = Vector3.ZERO
-	return {"ok": true, "joint": _describe(joint)}
 
 
 func _describe(joint: Dictionary) -> Dictionary:

@@ -197,16 +197,12 @@ func _place_command(request: Dictionary) -> Dictionary:
 func _take_away(names: Array, door_names: Array) -> void:
 	for d in door_names:
 		_run({"cmd": "doors_remove", "name": d})
-	var multi: SlopitectModule = ctx["modules"].module("multi")
+	var tools: SlopitectModule = ctx["modules"].module("tools")
 	for n in names:
-		if multi:
-			multi.call("take_out", n)
 		var world: Node3D = ctx["world"]
-		if world.has_node(NodePath(n)):
-			_run({"cmd": "textures_clear", "names": [n]})
-			_run({"cmd": "delete", "name": n})
-		else:
-			_run({"cmd": "assets_remove", "name": n})
+		_run({"cmd": "delete" if world.has_node(NodePath(n)) else "assets_remove", "name": n})
+		if tools:
+			tools.call("thing_forget", n)  # its group, texture and the rest
 
 
 func _place(request: Dictionary) -> Dictionary:

@@ -244,6 +244,23 @@ func set_settings(data: Dictionary) -> void:
 			_store(node_name, data[node_name])
 
 
+# --- A thing's switches, for undoing its delete (tools.gd) ------------------------------
+
+func thing_state(node_name: String) -> Dictionary:
+	return {"switches": settings[node_name].duplicate()} if settings.has(node_name) else {}
+
+
+func thing_forget(node_name: String) -> void:
+	settings.erase(node_name)
+	if _selected == node_name:
+		_selected = ""
+
+
+func thing_restore(node_name: String, state: Dictionary) -> void:
+	if typeof(state.get("switches")) == TYPE_DICTIONARY:
+		_store(node_name, state["switches"])
+
+
 # --- Commands ------------------------------------------------------------------------
 
 func _named(request: Dictionary) -> Array:
@@ -276,10 +293,14 @@ func _set_command(request: Dictionary) -> Dictionary:
 		return {"ok": false, "error": "inspect_set needs grabbable and/or hidden"}
 	var node_name: String = named[0]
 	var flags := {"grabbable": _flag(node_name, "grabbable"), "hidden": _flag(node_name, "hidden")}
+	var before := flags.duplicate()
 	for key in ["grabbable", "hidden"]:
 		if request.has(key):
 			flags[key] = request[key]
 	_store(node_name, flags)
+	if flags != before:
+		var what := ("hide " if flags["hidden"] else "show ") if flags["hidden"] != before["hidden"] else ("grab on " if flags["grabbable"] else "grab off ")
+		_undo_switches(what + node_name, {node_name: before}, {node_name: flags.duplicate()})
 	print("Slopitect inspect: %s is %s" % [node_name, JSON.stringify(flags)])
 	return {"ok": true, "name": node_name, "grabbable": flags["grabbable"], "hidden": flags["hidden"]}
 
@@ -305,57 +326,45 @@ func _delete_command(request: Dictionary) -> Dictionary:
 		if again.get("color") != null:
 			make["color"] = again["color"]
 	var remove := {"cmd": "assets_remove" if is_model else "delete", "name": node_name}
-	var flags: Dictionary = settings.get(node_name, {}).duplicate()
-	# A shape made with shapes.gd comes back from its recipe, not as a primitive.
-	var shapes: SlopitectModule = ctx["modules"].module("shapes")
-	var made: Dictionary = shapes.call("made_entry", node_name) if shapes and not is_model else {}
-
-	var reply: Dictionary = ctx["server"].run(remove)
+	# The undo brings it back whole (its recipe, switches, group, joints,
+	# texture and the rest): tools.gd asks each module what it keeps.
+	var tools: SlopitectModule = ctx["modules"].module("tools")
+	var snapshot: Dictionary = tools.call("thing_snapshot", node_name) if tools else {}
+	var reply: Dictionary = tools.call("quiet", ctx["server"].run.bind(remove)) if tools else ctx["server"].run(remove)
 	if not reply.get("ok", false):
 		return {"ok": false, "error": "%s wasn't deleted: %s" % [node_name, reply.get("error")]}
-	settings.erase(node_name)
-	if _selected == node_name:
-		_selected = ""
-	# Out of its group (multi.gd), and back in on undo.
-	var multi: SlopitectModule = ctx["modules"].module("multi")
-	var group: Dictionary = multi.call("take_out", node_name) if multi else {}
-	var tools: SlopitectModule = ctx["modules"].module("tools")
 	if tools:
-		var put_back := func():
-			if not made.is_empty():
-				var again_shapes: SlopitectModule = ctx["modules"].module("shapes")
-				if again_shapes == null:
-					push_error("Slopitect inspect: %s couldn't be put back: the shapes module isn't loaded" % node_name)
-					return
-				again_shapes.call("remake", made)
-			else:
-				var reply_back: Dictionary = ctx["server"].run(make)
-				if not reply_back.get("ok", false):
-					push_error("Slopitect inspect: %s couldn't be put back: %s" % [node_name, reply_back.get("error")])
-					return
-			if not flags.is_empty():
-				_store(node_name, flags)
-			var again_multi: SlopitectModule = ctx["modules"].module("multi")
-			if again_multi and not group.is_empty():
-				again_multi.call("put_in", node_name, group)
-		var take_away := func():
-			ctx["server"].run(remove)
-			settings.erase(node_name)
-			var again_multi: SlopitectModule = ctx["modules"].module("multi")
-			if again_multi:
-				again_multi.call("take_out", node_name)
-		tools.call("push_undo", "delete %s" % node_name, put_back, take_away)
+		tools.call("thing_removed", node_name, snapshot, make, remove)
+	else:
+		thing_forget(node_name)
 	print("Slopitect inspect: deleted %s" % node_name)
 	return {"ok": true, "deleted": node_name, "undo": tools != null}
 
 
 func _show_all(_request: Dictionary) -> Dictionary:
 	var shown := []
+	var before := {}
+	var after := {}
 	for node_name in settings.keys():
 		if _flag(node_name, "hidden"):
-			_store(node_name, {"grabbable": _flag(node_name, "grabbable"), "hidden": false})
+			before[node_name] = {"grabbable": _flag(node_name, "grabbable"), "hidden": true}
+			after[node_name] = {"grabbable": _flag(node_name, "grabbable"), "hidden": false}
+			_store(node_name, after[node_name])
 			shown.append(node_name)
+	if not shown.is_empty():
+		_undo_switches("show %d hidden" % shown.size(), before, after)
 	return {"ok": true, "shown": shown}
+
+
+# name -> {grabbable, hidden} before and after, as one undo.
+func _undo_switches(label: String, before: Dictionary, after: Dictionary) -> void:
+	var tools: SlopitectModule = ctx["modules"].module("tools")
+	if tools == null:
+		return
+	var put := func(where: Dictionary):
+		for node_name in where:
+			_store(node_name, where[node_name])
+	tools.call("push_undo", label, put.bind(before), put.bind(after))
 
 
 func _status(_request: Dictionary) -> Dictionary:

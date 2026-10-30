@@ -271,10 +271,59 @@ func _set_command(request: Dictionary) -> Dictionary:
 		if not got[0].is_empty():
 			return {"ok": false, "error": got[0]}
 		config[spec[0]] = got[1]
-	_settings[node_name] = config
-	_save()
-	_make_body(node, config)
+	var before: Dictionary = _settings.get(node_name, {}).duplicate()
+	_put_config(node_name, config)
+	var tools: SlopitectModule = ctx["modules"].module("tools")
+	if tools and before != config:
+		tools.call("push_undo", "physics %s %s" % [mode, node_name], _put_config.bind(node_name, before), _put_config.bind(node_name, config.duplicate()))
 	return {"ok": true, "name": node_name, "physics": config}
+
+
+# A thing's physics, or none ({}).
+func _put_config(node_name: String, config: Dictionary) -> void:
+	if config.is_empty():
+		_settings.erase(node_name)
+		_drop_body(node_name)
+	else:
+		_settings[node_name] = config.duplicate()
+		var node := _find(node_name)
+		if node:
+			_make_body(node, config)
+	_save()
+
+
+# --- For the save module, and for undoing a delete (tools.gd) ----------------------------
+
+func get_physics() -> Dictionary:
+	return _settings.duplicate(true)
+
+
+func set_physics(data) -> void:
+	if typeof(data) != TYPE_DICTIONARY:
+		return
+	for node_name in _settings.keys():
+		_drop_body(node_name)
+	_settings.clear()
+	for node_name in data:
+		var c = data[node_name]
+		if typeof(node_name) == TYPE_STRING and typeof(c) == TYPE_DICTIONARY and c.get("mode") in MODES:
+			_settings[node_name] = {"mode": c["mode"], "mass": float(c.get("mass", 1.0)), "bounce": float(c.get("bounce", 0.2)), "friction": float(c.get("friction", 0.6))}
+	_save()
+	_since_scan = SCAN_SECONDS  # bodies made again at the next scan
+
+
+func thing_state(node_name: String) -> Dictionary:
+	return {"physics": _settings[node_name].duplicate()} if _settings.has(node_name) else {}
+
+
+func thing_forget(node_name: String) -> void:
+	if _settings.has(node_name):
+		_put_config(node_name, {})
+
+
+func thing_restore(node_name: String, state: Dictionary) -> void:
+	if typeof(state.get("physics")) == TYPE_DICTIONARY:
+		_put_config(node_name, state["physics"])
 
 
 func _push(request: Dictionary) -> Dictionary:

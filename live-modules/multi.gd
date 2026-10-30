@@ -97,6 +97,36 @@ func members(node_name: String) -> Array:
 	return _groups[g].duplicate() if not g.is_empty() else [node_name]
 
 
+# For save.gd's checkpoints.
+func get_grouping() -> Dictionary:
+	return _groups.duplicate(true)
+
+
+func set_grouping(data) -> void:
+	if typeof(data) != TYPE_DICTIONARY:
+		return
+	var groups := {}
+	for g in data:
+		if typeof(g) == TYPE_STRING and typeof(data[g]) == TYPE_ARRAY:
+			groups[g] = data[g].filter(func(n): return typeof(n) == TYPE_STRING)
+	_selection.clear()
+	_put_groups(groups)
+
+
+# For undoing a delete (tools.gd): its group, leaving it, and going back in.
+func thing_state(node_name: String) -> Dictionary:
+	var g := _group_of(node_name)
+	return {"group": g, "members": _groups[g].duplicate()} if not g.is_empty() else {}
+
+
+func thing_forget(node_name: String) -> void:
+	take_out(node_name)
+
+
+func thing_restore(node_name: String, state: Dictionary) -> void:
+	put_in(node_name, state)
+
+
 # Takes a deleted thing out of its group (a group left with one member
 # goes); what put_in needs to put it back, or {} if it was in none.
 func take_out(node_name: String) -> Dictionary:
@@ -478,27 +508,18 @@ func _set_command(request: Dictionary) -> Dictionary:
 	if request_out.size() == 1:
 		return {"ok": false, "error": "multi_set needs grabbable and/or hidden"}
 	var failed := []
-	var before := {}  # name -> its switches before, for the undo
-	var after := {}
-	var inspect: SlopitectModule = ctx["modules"].module("inspect")
-	var switches: Dictionary = inspect.call("get_settings") if inspect else {}
-	for n in _selection:
-		var was: Dictionary = switches.get(n, {})
-		var r: Dictionary = ctx["server"].run(request_out.merged({"name": n}))
-		if not r.get("ok", false):
-			failed.append("%s: %s" % [n, r.get("error")])
-			continue
-		before[n] = {"grabbable": was.get("grabbable", true), "hidden": was.get("hidden", false)}
-		after[n] = {"grabbable": r["grabbable"], "hidden": r["hidden"]}
 	var tools: SlopitectModule = ctx["modules"].module("tools")
-	if tools and not before.is_empty():
-		var put := func(where: Dictionary):
-			for n in where:
-				ctx["server"].run({"cmd": "inspect_set", "name": n, "grabbable": where[n]["grabbable"], "hidden": where[n]["hidden"]})
+	if tools:
 		var what := "grab on" if request_out.get("grabbable", false) else "grab off"
 		if request_out.has("hidden"):
 			what = "hide" if request_out["hidden"] else "show"
-		tools.call("push_undo", "%s %d things" % [what, before.size()], put.bind(before), put.bind(after))
+		tools.call("undo_batch_begin", "%s %d things" % [what, _selection.size()])  # inspect_set's undos, as one
+	for n in _selection:
+		var r: Dictionary = ctx["server"].run(request_out.merged({"name": n}))
+		if not r.get("ok", false):
+			failed.append("%s: %s" % [n, r.get("error")])
+	if tools:
+		tools.call("undo_batch_end")
 	if request_out.get("hidden", false):
 		_selection.clear()
 	return {"ok": failed.is_empty(), "error": "; ".join(PackedStringArray(failed))} if not failed.is_empty() else {"ok": true}

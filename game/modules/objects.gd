@@ -1,7 +1,9 @@
 extends SlopitectModule
 
 # Objects: simple shapes you (or Claude) can spawn, move, colour and delete.
-# They live under the World node.
+# They live under the World node. With the tools live module loaded, each
+# change is one undo there, and undoing a delete brings back what other
+# modules kept about the shape (tools.gd's thing_snapshot).
 
 const SHAPES := ["box", "sphere", "cylinder", "capsule"]
 
@@ -81,7 +83,15 @@ func _spawn(request: Dictionary) -> Dictionary:
 		node.free()
 		return {"ok": false, "error": transform_error}
 	_world.add_child(node)
-	return {"ok": true, "object": _describe(node)}
+	var made := _describe(node)
+	var again := _spawn_request(made)
+	var take_away := func():
+		_delete({"name": node_name})
+		var tools := _tools()
+		if tools and tools.has_method("thing_forget"):
+			tools.call("thing_forget", node_name)
+	_undo("spawn " + node_name, take_away, _spawn.bind(again))
+	return {"ok": true, "object": made}
 
 
 func _move(request: Dictionary) -> Dictionary:
@@ -91,9 +101,13 @@ func _move(request: Dictionary) -> Dictionary:
 	if not (request.has("position") or request.has("rotation") or request.has("scale")):
 		return {"ok": false, "error": "move needs at least one of \"position\", \"rotation\", \"scale\""}
 	var node: MeshInstance3D = found["node"]
+	var before := node.transform
 	var transform_error := _apply_transform(node, request)
 	if not transform_error.is_empty():
 		return {"ok": false, "error": transform_error}
+	var after := node.transform
+	if not before.is_equal_approx(after):
+		_undo("move " + String(node.name), _put.bind(String(node.name), before), _put.bind(String(node.name), after))
 	return {"ok": true, "object": _describe(node)}
 
 
@@ -107,7 +121,13 @@ func _color(request: Dictionary) -> Dictionary:
 	if parsed.has("error"):
 		return {"ok": false, "error": parsed["error"]}
 	var node: MeshInstance3D = found["node"]
-	(node.get_surface_override_material(0) as StandardMaterial3D).albedo_color = parsed["color"]
+	var material := node.get_surface_override_material(0) as StandardMaterial3D
+	if material == null:
+		return {"ok": false, "error": "\"%s\" has no colour of its own to change" % node.name}
+	var before := material.albedo_color
+	material.albedo_color = parsed["color"]
+	if before != material.albedo_color:
+		_undo("colour " + String(node.name), _recolour.bind(String(node.name), before), _recolour.bind(String(node.name), material.albedo_color))
 	return {"ok": true, "object": _describe(node)}
 
 
@@ -117,9 +137,46 @@ func _delete(request: Dictionary) -> Dictionary:
 		return found
 	var node: MeshInstance3D = found["node"]
 	var described := _describe(node)
+	var node_name := String(node.name)
+	var tools := _tools()
+	var snapshot: Dictionary = tools.call("thing_snapshot", node_name) if tools and tools.has_method("thing_snapshot") else {}
 	_world.remove_child(node)
 	node.queue_free()
+	if tools and tools.has_method("thing_removed"):
+		tools.call("thing_removed", node_name, snapshot, _spawn_request(described).merged({"cmd": "spawn"}), {"cmd": "delete", "name": node_name})
 	return {"ok": true, "deleted": described}
+
+
+# --- Undo (the tools live module, when it's loaded) -----------------------------------
+
+func _tools() -> Node:
+	return ctx["modules"].module("tools")
+
+
+func _undo(label: String, undo: Callable, redo: Callable) -> void:
+	var tools := _tools()
+	if tools and tools.has_method("push_undo"):
+		tools.call("push_undo", label, undo, redo)
+
+
+func _spawn_request(described: Dictionary) -> Dictionary:
+	var out := {"name": described["name"], "shape": described["shape"], "position": described["position"],
+		"rotation": described["rotation"], "scale": described["scale"]}
+	if described.get("color") != null:
+		out["color"] = "#" + str(described["color"])
+	return out
+
+
+func _put(node_name: String, transform: Transform3D) -> void:
+	var node := _world.get_node_or_null(NodePath(node_name)) as Node3D
+	if node:
+		node.transform = transform
+
+
+func _recolour(node_name: String, color: Color) -> void:
+	var node := _world.get_node_or_null(NodePath(node_name)) as MeshInstance3D
+	if node and node.get_surface_override_material(0) is StandardMaterial3D:
+		(node.get_surface_override_material(0) as StandardMaterial3D).albedo_color = color
 
 
 # Checks every transform field before changing anything, so a bad field
