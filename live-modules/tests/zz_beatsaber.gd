@@ -8,6 +8,31 @@ var _fails := 0
 var _passes := 0
 var _beat
 var _signals := []
+# A stand-in net module: fetch() keeps to "allowed" and hands back the
+# list or the zip the test set, so nothing goes online.
+const FAKE_NET := """extends SlopitectModule
+var allow := false
+var urls := []
+var list := {}
+var zip_from := ""
+func setup() -> String:
+	return ""
+func fetch(url: String, path: String, max_bytes: int = 0) -> String:
+	await get_tree().process_frame
+	urls.append(url)
+	if not allow:
+		return "refused " + url + ": only https from the allowed hosts"
+	if "/search/text/" in url:
+		var f := FileAccess.open(path, FileAccess.WRITE)
+		f.store_string(JSON.stringify(list))
+		f.close()
+		return ""
+	if url.ends_with(".zip"):
+		DirAccess.copy_absolute(zip_from, path)
+		return ""
+	return "no such file"
+"""
+
 const FAKE_HANDS := """extends SlopitectModule
 var settings := {"style": "hand"}
 func setup() -> String:
@@ -283,6 +308,79 @@ func _go() -> void:
 	_check("missing music is an error", not reply.get("ok", true) and "isn't there" in str(reply.get("error")), reply)
 
 	_check("Leave after the songs", _run({"cmd": "beatsaber_leave"}).get("back_in") == "start" and _world() == "start")
+
+	# Online songs, through a stand-in net module
+	_check("no Online pack without net", not "Online" in _beat._packs())
+	var ns := GDScript.new()
+	ns.source_code = FAKE_NET
+	ns.reload()
+	ctx["modules"].load_live("net", ns)
+	await _frames(3)
+	var net = ctx["modules"].module("net")
+	_check("Online pack with net", "Online" in _beat._packs(), _beat._packs())
+	_run({"cmd": "beatsaber_do", "act": "show"})
+	_check("Latest asks BeatSaver", _run({"cmd": "beatsaber_do", "act": "online", "list": "latest"}).get("ok", false) and _beat._pack == "Online")
+	await _frames(4)
+	_check("not allowed yet: says which hosts to add", "net_config" in _beat._online_note and "api.beatsaver.com" in _beat._online_note
+		and str(net.urls[-1]).begins_with("https://api.beatsaver.com/search/text/0?sortOrder=Latest"), [_beat._online_note, net.urls])
+	net.allow = true
+	var docs := []
+	for i in 6:
+		docs.append({"id": "%x" % (0xa10 + i), "name": "Map %d" % i, "metadata": {"songName": "Song %d" % i, "songAuthorName": "Band", "levelAuthorName": "Mapper",
+			"bpm": 128, "duration": 95}, "versions": [{"hash": "abc%d" % i, "downloadURL": "https://r2cdn.beatsaver.com/abc%d.zip" % i,
+			"diffs": [{"characteristic": "Standard", "difficulty": "Easy"}, {"characteristic": "Standard", "difficulty": "ExpertPlus"}]}]})
+	docs.append({"id": "not hex!", "metadata": {}, "versions": [{"downloadURL": "https://r2cdn.beatsaver.com/x.zip"}]})
+	docs.append({"id": "b00", "metadata": {}, "versions": []})
+	net.list = {"docs": docs}
+	_check("search needs words", not _run({"cmd": "beatsaber_do", "act": "online", "list": "search", "query": "  "}).get("ok", true))
+	_run({"cmd": "beatsaber_do", "act": "online", "list": "search", "query": "a b"})
+	await _frames(4)
+	_check("search results (bad entries left out)", _beat._online.size() == 6 and str(net.urls[-1]).ends_with("sortOrder=Relevance&q=a%20b")
+		and not _element("beatsaber", "online_0").is_empty() and _element("beatsaber", "online_4").is_empty(), [_beat._online.size(), net.urls[-1]])
+	_run({"cmd": "beatsaber_do", "act": "online_page", "page": 1})
+	_check("results page 2", not _element("beatsaber", "online_4").is_empty() and _element("beatsaber", "online_0").is_empty())
+	_check("choose a result", _run({"cmd": "beatsaber_do", "act": "online_pick", "key": "a14"}).get("ok", false)
+		and _element("beatsaber", "online_get").get("label") == "Download" and "mapped by Mapper" in str(_element("beatsaber", "song_info").get("text"))
+		and _element("beatsaber", "online_levels").get("text") == "Levels: Easy, Expert+", _element("beatsaber", "online_levels"))
+	# The zip: in a folder of its own (flattened), with a file that isn't a song's (left out)
+	var scratch: String = lib.home() + "/zz_zips"
+	DirAccess.make_dir_recursive_absolute(scratch)
+	wav.save_to_wav(scratch + "/song.wav")
+	var packer := ZIPPacker.new()
+	packer.open(scratch + "/good.zip")
+	var zip_files := {"My Song/Info.dat": JSON.stringify({"_songName": "Zipped", "_beatsPerMinute": 120, "_songFilename": "song.wav",
+		"_difficultyBeatmapSets": [{"_beatmapCharacteristicName": "Standard", "_difficultyBeatmaps": [{"_difficulty": "Easy", "_beatmapFilename": "Easy.dat"}]}]}).to_utf8_buffer(),
+		"My Song/Easy.dat": JSON.stringify({"_notes": [{"_time": 2, "_lineIndex": 1, "_lineLayer": 0, "_type": 1, "_cutDirection": 1}]}).to_utf8_buffer(),
+		"My Song/song.wav": FileAccess.get_file_as_bytes(scratch + "/song.wav"), "My Song/run.exe": "nope".to_utf8_buffer()}
+	for zip_name in zip_files:
+		packer.start_file(zip_name)
+		packer.write_file(zip_files[zip_name])
+		packer.close_file()
+	packer.close()
+	net.zip_from = scratch + "/good.zip"
+	_check("Download starts", _run({"cmd": "beatsaber_do", "act": "online_get", "key": "a14"}).get("downloading") == "a14")
+	await _frames(4)
+	var got: String = lib.home() + "/songs/bsv_a14"
+	_check("unpacked flat, song files only", FileAccess.file_exists(got + "/Info.dat") and FileAccess.file_exists(got + "/Easy.dat") and FileAccess.file_exists(got + "/song.wav")
+		and not FileAccess.file_exists(got + "/run.exe") and not DirAccess.dir_exists_absolute(got + ".part"), [DirAccess.get_files_at(got), _beat._online_note])
+	_check("then chosen in Custom songs", _beat._pack == "Custom songs" and _beat._selected == "bsv_a14" and "Downloaded" in _beat._online_note
+		and str(net.urls[-1]) == "https://r2cdn.beatsaver.com/abc4.zip")
+	_run({"cmd": "beatsaber_do", "act": "pack", "pack": "Online"})
+	_check("a downloaded one says Play", _element("beatsaber", "online_get").get("label") == "Play")
+	reply = _run({"cmd": "beatsaber_do", "act": "online_get", "key": "a14"})
+	_check("and plays", reply.get("ok", false) and reply.get("song") == "Zipped" and _beat.running, reply)
+	_run({"cmd": "beatsaber_stop"})
+	packer = ZIPPacker.new()
+	packer.open(scratch + "/bad.zip")
+	packer.start_file("cover.jpg")
+	packer.write_file("x".to_utf8_buffer())
+	packer.close_file()
+	packer.close()
+	net.zip_from = scratch + "/bad.zip"
+	_run({"cmd": "beatsaber_do", "act": "online_get", "key": "a15"})
+	await _frames(4)
+	_check("a zip that isn't a song is refused, nothing left", not DirAccess.dir_exists_absolute(lib.home() + "/songs/bsv_a15")
+		and not DirAccess.dir_exists_absolute(lib.home() + "/songs/bsv_a15.part") and "isn't a song" in _beat._online_note, _beat._online_note)
 
 	# The Settings tab's Hands / Sabers buttons
 	_run({"cmd": "beatsaber_do", "act": "enter"})

@@ -45,6 +45,8 @@ extends SlopitectModule
 # songs" pack. The middle window shows only the difficulties (Easy to
 # Expert+) and modes (Standard, One saber, No arrows) a song has; each mode
 # keeps its own scores. Walls, arcs, chains and lights aren't played yet.
+# With net.gd loaded, an Online pack finds and downloads such folders from
+# BeatSaver (see _online_elements), once its hosts are allowed on the PC.
 #
 # Scoring, per cut, up to 100 points: 50 for the swing's direction against
 # the arrow (full within about 15 degrees, none past about 50, where it
@@ -152,6 +154,17 @@ const SCORES_SIZE := Vector2(0.62, 0.56)
 const ROWS := 6                  # packs and songs shown at once
 const ALL_SONGS := "All songs"
 const FREE_PACK := "Free play"
+# Online: community song folders from BeatSaver's public site, through the
+# net module (so only once its hosts are allowed on the PC).
+const ONLINE_PACK := "Online"
+const ONLINE_API := "https://api.beatsaver.com"
+const ONLINE_HOSTS := ["api.beatsaver.com", "r2cdn.beatsaver.com", "cdn.beatsaver.com", "eu.cdn.beatsaver.com", "na.cdn.beatsaver.com"]
+const ONLINE_SORTS := {"search": "Relevance", "latest": "Latest", "top": "Rating"}
+const ONLINE_ROWS := 4                # results shown at once (under the search rows)
+const ONLINE_LIST_BYTES := 2 * 1024 * 1024
+const ONLINE_ZIP_BYTES := 40 * 1024 * 1024
+const ONLINE_UNPACKED_BYTES := 80 * 1024 * 1024
+const ONLINE_FILES := ["dat", "egg", "ogg", "wav", "mp3", "jpg", "jpeg", "png", "webp", "json"]  # what a song folder keeps
 const TOP_SCORES := 10
 const WORLD := "rhythm_sabers"   # the game's own world (a project)
 
@@ -219,6 +232,12 @@ var _sign: Node3D           # the glowing title over the windows (menus only)
 var _selected := "free"     # the song chosen there ("free" for free play)
 var _mode := "Standard"     # its mode (a custom song's characteristic)
 var _song_cache = null      # _songs() as last read; null to read the folder again
+var _online := []           # the last list from BeatSaver: {key, title, artist, mapper, bpm, seconds, levels, url}
+var _online_pick := ""      # the chosen result's key
+var _online_query := ""
+var _online_page := 0
+var _online_note := "Search, or look at the latest or top rated songs."
+var _online_busy := false   # a list or a download on its way
 var scores := {}            # "song|difficulty" -> your top 10 [{score, rank, accuracy, combo, date}]
 
 
@@ -228,7 +247,7 @@ func setup() -> String:
 	register("beatsaber_score", _score, "the score, combo, multiplier, cuts, misses, bad cuts, bombs hit, accuracy, and the last cut's points, direction and centre offset; after a song, its results")
 	register("beatsaber_songs", _songs_command, "the songs in the Slopitect folder's songs/ (folder, title, bpm, notes or made, best score)")
 	register("beatsaber_set", _set_command, "the game's settings (usable in the headset): any of difficulty (easy, normal, hard, expert, expert_plus), speed (note speed m/s, 4 to 14), bpm (free play tempo, 60 to 200), hit_sounds, trails, auto_sabers (sabers in the Rhythm world, hands back after; true/false)")
-	register("beatsaber_do", _do, "the Rhythm window: act = toggle (goes to the Rhythm world first), show (optional page: a tab), refresh, page (page number for the song list), enter (go to the Rhythm world), leave (back to the world you came from)")
+	register("beatsaber_do", _do, "the Rhythm window: act = toggle (goes to the Rhythm world first), show (optional page: a tab), refresh, page (page number for the song list), pack (pack), select (song), mode (mode), play, enter (go to the Rhythm world), leave (back to the world you came from); online songs (needs net.gd and BeatSaver's hosts allowed): online (list = search with query, latest or top), online_pick (key), online_page (page), online_get (key: downloads it, or plays it once it's here)")
 	register("beatsaber_leave", _leave, "stop the song and go back from the Rhythm world to the world you came from")
 	register("beatsaber_config", _config, "from the PC only: how the saber sits in the hand: any of angle (degrees it tilts up from where the controller points, -30 to 90), grip ([x, y, z] cm from the controller's point to the handle's middle, right hand), hold (cm down the hilt the hand holds it, 0 to 15), or reset true")
 	_make_assets()
@@ -405,6 +424,48 @@ func _do(request: Dictionary) -> Dictionary:
 			if not drawn.is_empty():
 				return {"ok": false, "error": drawn}
 			return {"ok": true, "selected": _selected}
+		"online":
+			var which = request.get("list", "search")
+			if _net() == null:
+				return {"ok": false, "error": "online songs need the net module (load net.gd)"}
+			if not which in ONLINE_SORTS:
+				return {"ok": false, "error": "\"list\" must be search, latest or top"}
+			var query = request.get("query", "")
+			if typeof(query) != TYPE_STRING or query.length() > 40:
+				return {"ok": false, "error": "\"query\" must be text of up to 40 characters"}
+			if _online_busy:
+				return {"ok": false, "error": "still waiting for BeatSaver"}
+			_online_query = query.strip_edges()
+			if which == "search" and _online_query.is_empty():
+				return {"ok": false, "error": "type something to search for first (Keys opens the keyboard)"}
+			_pack = ONLINE_PACK
+			_online_list(which, _online_query)
+			return {"ok": true, "looking": true}
+		"online_pick":
+			if _online_item(str(request.get("key", ""))).is_empty():
+				return {"ok": false, "error": "\"key\" must be one of the listed songs"}
+			_online_pick = request["key"]
+			var drawn := _build()
+			return {"ok": drawn.is_empty(), "error": drawn} if not drawn.is_empty() else {"ok": true, "picked": _online_pick}
+		"online_page":
+			var page = request.get("page")
+			if typeof(page) not in [TYPE_INT, TYPE_FLOAT]:
+				return {"ok": false, "error": "\"page\" must be a number"}
+			_online_page = maxi(0, int(page))
+			var drawn := _build()
+			return {"ok": false, "error": drawn} if not drawn.is_empty() else {"ok": true}
+		"online_get":
+			var key = request.get("key", "")
+			if _online_item(str(key)).is_empty():
+				return {"ok": false, "error": "\"key\" must be one of the listed songs"}
+			if DirAccess.dir_exists_absolute(_songs_folder() + "/" + _online_folder(key)):
+				_selected = _online_folder(key)
+				_fit_choice()
+				return _start({"song": _selected})
+			if _online_busy:
+				return {"ok": false, "error": "still waiting for BeatSaver"}
+			_online_download(key)
+			return {"ok": true, "downloading": key}
 		"mode":
 			var mode = request.get("mode")
 			var info := {} if _selected == "free" else _song_info(_selected)
@@ -549,7 +610,14 @@ func _packs() -> Array:
 		if not s["pack"].is_empty() and not s["pack"] in named:
 			named.append(s["pack"])
 	named.sort()
-	return named + [ALL_SONGS, FREE_PACK]
+	var out: Array = named + [ALL_SONGS, FREE_PACK]
+	if _net() != null:
+		out.append(ONLINE_PACK)
+	return out
+
+
+func _net() -> SlopitectModule:
+	return _lib.module("net") if _lib else null
 
 
 func _main_elements() -> Array:
@@ -567,6 +635,10 @@ func _main_elements() -> Array:
 	for i in mini(packs.size(), ROWS):
 		els.append({"type": "button", "id": "pack_%d" % i, "label": str(packs[i]).left(24), "at": [pack_x, top - 0.065 * (i + 1)], "size": [0.24, 0.055],
 			"color": "accent" if packs[i] == _pack else "button", "action": {"cmd": "beatsaber_do", "act": "pack", "pack": packs[i]}})
+	if _pack == ONLINE_PACK:
+		els.append_array(_online_elements(top))
+		_stop_leave(els, w / 4.0, bottom)
+		return els
 	var rows := []
 	if _pack == FREE_PACK:
 		rows.append({"id": "free", "label": "Free play (%d a minute)" % int(game["bpm"])})
@@ -627,13 +699,238 @@ func _main_elements() -> Array:
 	els.append({"type": "button", "id": "practice", "label": "Practice", "at": [right_x + rw / 4.0, top - 0.35], "size": [rw / 2.0 - 0.02, 0.07],
 		"color": "button", "action": {"cmd": "beatsaber_do", "act": "practice"}})
 	els.append({"type": "text", "id": "status", "text": _status_text(), "at": [right_x, top - 0.43], "width": rw, "color": "text"})
+	_stop_leave(els, right_x, bottom)
+	return els
+
+
+func _stop_leave(els: Array, right_x: float, bottom: float) -> void:
 	var leave := _projects() != null
 	els.append({"type": "button", "id": "stop", "label": "Stop", "at": [right_x - (0.11 if leave else 0.0), bottom], "size": [0.2, 0.05],
 		"color": "notice" if running else "button", "action": {"cmd": "beatsaber_stop"}})
 	if leave:
 		els.append({"type": "button", "id": "leave", "label": "Leave", "at": [right_x + 0.11, bottom], "size": [0.2, 0.05],
 			"color": "button", "action": {"cmd": "beatsaber_leave"}})
+
+
+# --- Online songs (BeatSaver) ---------------------------------------------------------
+# The Online pack: a search box (typed with the chat window's keyboard),
+# Latest and Top rated, a page of results, and on the right the chosen
+# one's details and Download. A download is the song's zip, unpacked into
+# songs/bsv_KEY (only the song files: maps, music, cover), which then shows
+# in Custom songs, chosen and ready to play. All through net.gd, so only
+# from the hosts allowed on the PC (net_config); without net.gd there's no
+# Online pack.
+
+func _online_elements(top: float) -> Array:
+	var els := []
+	var w := MAIN_SIZE.x
+	var song_x := -w / 2.0 + 0.45
+	els.append({"type": "input", "id": "online_input", "at": [song_x, top], "width": 0.34, "prompt": "search: ", "max_length": 40})
+	var acts := [["online_search", "Search", {"cmd": "beatsaber_do", "act": "online", "list": "search", "query": "{input:online_input}"}],
+		["online_latest", "Latest", {"cmd": "beatsaber_do", "act": "online", "list": "latest"}],
+		["online_top", "Top", {"cmd": "beatsaber_do", "act": "online", "list": "top"}],
+		["online_keys", "Keys", {"cmd": "ui_show", "id_panel": "chat", "visible": true}]]
+	for i in acts.size():
+		els.append({"type": "button", "id": acts[i][0], "label": acts[i][1], "at": [song_x - 0.1275 + i * 0.085, top - 0.065], "size": [0.08, 0.05],
+			"color": "ok" if i == 0 else "button", "action": acts[i][2]})
+	var pages := maxi(1, ceili(_online.size() / float(ONLINE_ROWS)))
+	_online_page = clampi(_online_page, 0, pages - 1)
+	var y := top - 0.135
+	for i in range(_online_page * ONLINE_ROWS, mini(_online.size(), (_online_page + 1) * ONLINE_ROWS)):
+		var o: Dictionary = _online[i]
+		els.append({"type": "button", "id": "online_%d" % i, "label": str(o["title"]).left(40), "at": [song_x, y], "size": [0.34, 0.055],
+			"color": "accent" if o["key"] == _online_pick else "button", "action": {"cmd": "beatsaber_do", "act": "online_pick", "key": o["key"]}})
+		y -= 0.065
+	if pages > 1:
+		var bottom := -MAIN_SIZE.y / 2.0 + 0.04
+		els.append({"type": "button", "id": "online_prev", "label": "Back", "at": [song_x - 0.11, bottom + 0.07], "size": [0.12, 0.05],
+			"action": {"cmd": "beatsaber_do", "act": "online_page", "page": _online_page - 1}})
+		els.append({"type": "text", "id": "online_pages", "text": "%d / %d" % [_online_page + 1, pages], "at": [song_x, bottom + 0.07], "width": 0.1, "color": "muted"})
+		els.append({"type": "button", "id": "online_next", "label": "More", "at": [song_x + 0.11, bottom + 0.07], "size": [0.12, 0.05],
+			"action": {"cmd": "beatsaber_do", "act": "online_page", "page": _online_page + 1}})
+	# Right half: the chosen result, and Download (or Play once it's here).
+	var right_x := w / 4.0
+	var rw := w / 2.0 - 0.08
+	var o := _online_item(_online_pick)
+	if o.is_empty():
+		els.append({"type": "text", "id": "song_title", "text": "Online songs", "at": [right_x, top], "width": rw, "font_size": 40, "color": "text"})
+		els.append({"type": "text", "id": "song_info", "text": "Community song folders from BeatSaver. Choose one on the left to see it here.",
+			"at": [right_x, top - 0.07], "width": rw, "color": "muted"})
+	else:
+		els.append({"type": "text", "id": "song_title", "text": o["title"], "at": [right_x, top], "width": rw, "font_size": 40, "color": "text"})
+		var detail := "%s, %d beats a minute, %d:%02d" % [o["artist"] if not o["artist"].is_empty() else "?", int(o["bpm"]), int(o["seconds"]) / 60, int(o["seconds"]) % 60]
+		if not o["mapper"].is_empty():
+			detail += ", mapped by " + o["mapper"]
+		els.append({"type": "text", "id": "song_info", "text": detail, "at": [right_x, top - 0.07], "width": rw, "color": "muted"})
+		els.append({"type": "text", "id": "online_levels", "text": o["levels"], "at": [right_x, top - 0.16], "width": rw, "color": "muted"})
+		var here := DirAccess.dir_exists_absolute(_songs_folder() + "/" + _online_folder(o["key"]))
+		els.append({"type": "button", "id": "online_get", "label": "Play" if here else "Download", "at": [right_x, top - 0.27], "size": [rw / 2.0, 0.07],
+			"color": "ok", "action": {"cmd": "beatsaber_do", "act": "online_get", "key": o["key"]}})
+	els.append({"type": "text", "id": "status", "text": _online_note, "at": [right_x, top - 0.37], "width": rw, "color": "text"})
 	return els
+
+
+func _online_item(key: String) -> Dictionary:
+	for o in _online:
+		if o["key"] == key:
+			return o
+	return {}
+
+
+# A BeatSaver key is hex; its folder is bsv_KEY.
+func _online_key_ok(key) -> bool:
+	return typeof(key) == TYPE_STRING and not key.is_empty() and key.length() <= 12 and key.is_valid_hex_number()
+
+
+func _online_folder(key: String) -> String:
+	return "bsv_" + key.to_lower()
+
+
+func _online_scratch() -> String:
+	return _lib.call("home") + "/downloads/beatsaver" if _lib else ""
+
+
+func _online_refused(problem: String) -> String:
+	if problem.begins_with("refused"):
+		return "BeatSaver isn't an allowed site yet. On the PC, add its hosts with net_config: %s." % ", ".join(ONLINE_HOSTS)
+	return problem
+
+
+# Gets a list from BeatSaver (search, latest or top rated) into _online.
+func _online_list(which: String, query: String) -> void:
+	var net := _net()
+	if net == null:
+		return
+	_online_busy = true
+	_online_note = "Looking on BeatSaver..."
+	_build()
+	var url := "%s/search/text/0?sortOrder=%s" % [ONLINE_API, ONLINE_SORTS[which]]
+	if not query.is_empty():
+		url += "&q=" + query.uri_encode()
+	DirAccess.make_dir_recursive_absolute(_online_scratch())
+	var path := _online_scratch() + "/list.json"
+	var problem: String = await net.call("fetch", url, path, ONLINE_LIST_BYTES)
+	if not is_inside_tree():
+		return
+	_online_busy = false
+	if not problem.is_empty():
+		_online_note = _online_refused(problem)
+		_build()
+		return
+	var got = _lib.call("read_json", path) if _lib else null
+	DirAccess.remove_absolute(path)
+	_online = _online_parse(got)
+	_online_page = 0
+	_online_pick = ""
+	_online_note = "%d songs. Choose one to see it." % _online.size() if not _online.is_empty() else "Nothing found."
+	_build()
+
+
+# BeatSaver's answer ({"docs": [...]}) as our short entries; ones without a
+# download are left out.
+func _online_parse(got) -> Array:
+	var out := []
+	if typeof(got) != TYPE_DICTIONARY or typeof(got.get("docs")) != TYPE_ARRAY:
+		return out
+	for d in got["docs"]:
+		if typeof(d) != TYPE_DICTIONARY or not _online_key_ok(d.get("id")) or typeof(d.get("versions")) != TYPE_ARRAY or d["versions"].is_empty():
+			continue
+		var v = d["versions"][0]
+		var meta = d.get("metadata", {})
+		if typeof(v) != TYPE_DICTIONARY or typeof(v.get("downloadURL")) != TYPE_STRING or typeof(meta) != TYPE_DICTIONARY:
+			continue
+		var levels := []
+		for diff in v.get("diffs", []) if typeof(v.get("diffs")) == TYPE_ARRAY else []:
+			if typeof(diff) == TYPE_DICTIONARY and diff.get("characteristic") == "Standard" and diff.get("difficulty") in DAT_DIFFS:
+				levels.append(DIFF_LABELS[DAT_DIFFS[diff["difficulty"]]])
+		out.append({"key": str(d["id"]).to_lower(), "title": _text(meta.get("songName"), _text(d.get("name"), d["id"], 60), 60),
+			"artist": _text(meta.get("songAuthorName"), "", 40), "mapper": _text(meta.get("levelAuthorName"), "", 40),
+			"bpm": float(meta.get("bpm", 0.0)) if _number(meta.get("bpm")) else 0.0,
+			"seconds": float(meta.get("duration", 0.0)) if _number(meta.get("duration")) else 0.0,
+			"levels": ("Levels: " + ", ".join(levels)) if not levels.is_empty() else "", "url": v["downloadURL"]})
+	return out
+
+
+# Downloads a result's zip and unpacks it into songs/bsv_KEY, then chooses it.
+func _online_download(key: String) -> void:
+	var net := _net()
+	var o := _online_item(key)
+	if net == null or o.is_empty():
+		return
+	_online_busy = true
+	_online_note = "Downloading %s..." % o["title"]
+	_build()
+	DirAccess.make_dir_recursive_absolute(_online_scratch())
+	var zip := "%s/%s.zip" % [_online_scratch(), key]
+	var problem: String = await net.call("fetch", o["url"], zip, ONLINE_ZIP_BYTES)
+	if not is_inside_tree():
+		return
+	_online_busy = false
+	if problem.is_empty():
+		problem = _unpack_song(zip, _songs_folder() + "/" + _online_folder(key))
+	DirAccess.remove_absolute(zip)
+	if not problem.is_empty():
+		_online_note = _online_refused(problem)
+		_build()
+		return
+	_rescan()
+	_online_note = "Downloaded. It's in Custom songs."
+	_pack = DAT_PACK
+	_selected = _online_folder(key)
+	_fit_choice()
+	_build()
+
+
+# Unpacks a song zip into folder: only plain song files (maps, music,
+# cover), any folder inside the zip flattened, within a size limit. It goes
+# into FOLDER.part and is renamed only once whole and readable as a song.
+func _unpack_song(zip_path: String, folder: String) -> String:
+	var zip := ZIPReader.new()
+	if zip.open(zip_path) != OK:
+		return "the download isn't a zip"
+	var part := folder + ".part"
+	_remove_dir(part)
+	DirAccess.make_dir_recursive_absolute(part)
+	var total := 0
+	var kept := 0
+	var problem := ""
+	for inside in zip.get_files():
+		var file_name: String = inside.get_file()
+		if inside.ends_with("/") or not _file_name_ok(file_name) or not file_name.get_extension().to_lower() in ONLINE_FILES \
+				or FileAccess.file_exists(part + "/" + file_name):
+			continue
+		var bytes := zip.read_file(inside)
+		total += bytes.size()
+		if total > ONLINE_UNPACKED_BYTES:
+			problem = "the song is bigger than %d MB unpacked" % (ONLINE_UNPACKED_BYTES / 1048576)
+			break
+		var out := FileAccess.open(part + "/" + file_name, FileAccess.WRITE)
+		if out == null:
+			problem = "couldn't write %s" % file_name
+			break
+		out.store_buffer(bytes)
+		out.close()
+		kept += 1
+	zip.close()
+	if problem.is_empty() and kept == 0:
+		problem = "the zip had no song files"
+	if problem.is_empty():
+		_remove_dir(folder)
+		if DirAccess.rename_absolute(part, folder) != OK:
+			problem = "couldn't move the song into %s" % folder
+		elif _song_info(folder.get_file()).is_empty():
+			problem = "the download isn't a song we can play (it needs an Info.dat with a Standard, One saber or No arrows chart)"
+			_remove_dir(folder)
+	_remove_dir(part)
+	return problem
+
+
+func _remove_dir(path: String) -> void:
+	if not DirAccess.dir_exists_absolute(path):
+		return
+	for file in DirAccess.get_files_at(path):
+		DirAccess.remove_absolute(path + "/" + file)
+	DirAccess.remove_absolute(path)
 
 
 # The chosen song's title and a line about it, for the middle window.
