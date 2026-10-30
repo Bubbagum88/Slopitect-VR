@@ -6,9 +6,17 @@ extends SlopitectModule
 # direction its arrow points (a dot note: any direction). Dark spiky bombs
 # must not be touched. A cut splits the note in two along the blade's path.
 #
-# Playing: the Rhythm tile on the Menu opens its window (songs, difficulty,
-# Start / Stop, the last results); the Settings window has the same Start /
-# Stop and the game's settings; or beatsaber_start / beatsaber_stop.
+# Its own world: the game has one world of its own, "rhythm_sabers" (a
+# project, projects.gd), made the first time and reused after that.
+# Getting in: the Rhythm tile on the Menu, or starting any song (the window,
+# the Settings window's Start, beatsaber_start) takes you to that world
+# first, saving the one you were in, and opens the Rhythm window (songs,
+# difficulty, Stop, Leave, the last results). Opening the world from the
+# Worlds window does the same.
+# Getting out: Leave (in the Rhythm window or the Settings window, or
+# beatsaber_leave) stops the song and takes you back to the world you came
+# from (remembered even across a restart). Going to any other world stops
+# the song too. Without projects.gd and save.gd it plays where you are.
 # The track is laid out where you stand, facing the way you look, when a
 # song starts. A score board stands to its left.
 #
@@ -115,6 +123,7 @@ const FIT_DEFAULTS := {"angle": 45.0, "grip": [0.0, -1.8, 4.8], "hold": 10.0}  #
 const FIT_ANGLE_RANGE := [-30.0, 90.0]
 const FIT_CM_MAX := 15.0
 const SONG_ROWS := 5
+const WORLD := "rhythm_sabers"   # the game's own world (a project)
 
 var running := false
 var fit := FIT_DEFAULTS.duplicate(true)
@@ -170,6 +179,7 @@ var _acc := 0.0             # sum of points / 100 over judged notes
 var _last := {}             # the last cut's details
 var _results := {}
 var _song_page := 0
+var _return_to := ""        # the world to go back to on Leave
 
 
 func setup() -> String:
@@ -178,7 +188,8 @@ func setup() -> String:
 	register("beatsaber_score", _score, "the score, combo, multiplier, cuts, misses, bad cuts, bombs hit, accuracy, and the last cut's points, direction and centre offset; after a song, its results")
 	register("beatsaber_songs", _songs_command, "the songs in the Slopitect folder's songs/ (folder, title, bpm, notes or made, best score)")
 	register("beatsaber_set", _set_command, "the game's settings (usable in the headset): any of difficulty (easy, normal, hard), speed (note speed m/s, 4 to 14), bpm (free play tempo, 60 to 200), hit_sounds, trails (true/false)")
-	register("beatsaber_do", _do, "the Rhythm window: act = toggle, show, refresh, page (page number for the song list)")
+	register("beatsaber_do", _do, "the Rhythm window: act = toggle (goes to the Rhythm world first), show, refresh, page (page number for the song list), enter (go to the Rhythm world), leave (back to the world you came from)")
+	register("beatsaber_leave", _leave, "stop the song and go back from the Rhythm world to the world you came from")
 	register("beatsaber_config", _config, "from the PC only: how the saber sits in the hand: any of angle (degrees it tilts up from where the controller points, -30 to 90), grip ([x, y, z] cm from the controller's point to the handle's middle, right hand), hold (cm down the hilt the hand holds it, 0 to 15), or reset true")
 	_make_assets()
 	_track = Node3D.new()
@@ -222,6 +233,7 @@ func lib_ready(lib) -> void:
 	lib.info_changed.connect(_on_info_changed)
 	lib.watch(self, "controls", _controls_here, _controls_gone)
 	lib.watch(self, "hands", _hands_here, _hands_gone)
+	lib.follow(self, "projects", "project_changed", _on_world_changed)
 	lib.touch(self)
 
 
@@ -286,6 +298,7 @@ func settings_info() -> Dictionary:
 			"set": {"cmd": "beatsaber_set", "trails": "{value}"}},
 		{"id": "start", "type": "button", "label": "Start free play", "set": {"cmd": "beatsaber_start", "song": "free"}},
 		{"id": "stop", "type": "button", "label": "Stop", "set": {"cmd": "beatsaber_stop"}},
+		{"id": "leave", "type": "button", "label": "Leave the Rhythm world", "set": {"cmd": "beatsaber_leave"}},
 	]}
 
 
@@ -301,9 +314,19 @@ func _do(request: Dictionary) -> Dictionary:
 	match request.get("act"):
 		"toggle":
 			var got := _run({"cmd": "ui_get", "id_panel": PANEL})
-			if got.get("ok", false) and got.get("panel", {}).get("visible", false):
+			if in_world() and got.get("ok", false) and got.get("panel", {}).get("visible", false):
 				return _run({"cmd": "ui_show", "id_panel": PANEL, "visible": false})
+			var problem := _enter()
+			if not problem.is_empty():
+				return {"ok": false, "error": problem}
 			return _show_window()
+		"enter":
+			var problem := _enter()
+			if not problem.is_empty():
+				return {"ok": false, "error": problem}
+			return _show_window()
+		"leave":
+			return _leave({})
 		"show":
 			return _show_window()
 		"refresh":
@@ -316,7 +339,7 @@ func _do(request: Dictionary) -> Dictionary:
 			_song_page = maxi(0, int(page))
 			_build()
 			return {"ok": true, "page": _song_page}
-	return {"ok": false, "error": "\"act\" must be toggle, show, refresh or page"}
+	return {"ok": false, "error": "\"act\" must be toggle, show, refresh, page, enter or leave"}
 
 
 func _show_window() -> Dictionary:
@@ -363,8 +386,12 @@ func _build() -> String:
 			"action": {"cmd": "beatsaber_do", "act": "page", "page": _song_page + 1}})
 	if songs.is_empty():
 		els.append({"type": "text", "id": "hint", "text": "Add songs as folders in Slopitect/songs (see beatsaber.gd)", "at": [0.0, y], "width": w - 0.06, "color": "muted"})
-	els.append({"type": "button", "id": "stop", "label": "Stop", "at": [0.0, -h / 2.0 + 0.04], "size": [0.2, 0.05],
+	var leave := _projects() != null
+	els.append({"type": "button", "id": "stop", "label": "Stop", "at": [-0.12 if leave else 0.0, -h / 2.0 + 0.04], "size": [0.2, 0.05],
 		"color": "notice" if running else "button", "action": {"cmd": "beatsaber_stop"}})
+	if leave:
+		els.append({"type": "button", "id": "leave", "label": "Leave", "at": [0.12, -h / 2.0 + 0.04], "size": [0.2, 0.05],
+			"color": "button", "action": {"cmd": "beatsaber_leave"}})
 	var got := _run({"cmd": "ui_get", "id_panel": PANEL})
 	var reply: Dictionary
 	if got.get("ok", false):
@@ -409,6 +436,9 @@ func _start(request: Dictionary) -> Dictionary:
 		bpm = float(b)
 	var which = request.get("song", "free")
 	var song := {}
+	var problem := _enter()
+	if not problem.is_empty():
+		return {"ok": false, "error": problem}
 	if which == "free" or which == "":
 		song = {"id": "free play", "title": "Free play", "bpm": bpm, "offset": 0.0, "audio": null,
 			"notes": _generate(bpm, FREE_BEATS, game["difficulty"], 1)}
@@ -489,6 +519,69 @@ func _set_command(request: Dictionary) -> Dictionary:
 		_lib.touch(self)
 	_rebuild_if_open()
 	return {"ok": true, "settings": game}
+
+
+# --- The Rhythm world -----------------------------------------------------------------
+
+func _projects() -> SlopitectModule:
+	return _lib.module("projects") if _lib else null
+
+
+# Whether you're in the game's world (always, without projects.gd).
+func in_world() -> bool:
+	return _projects() == null or _run({"cmd": "projects_current"}).get("name") == WORLD
+
+
+# Takes you to the game's world, making it the first time. "" or what went wrong.
+func _enter() -> String:
+	if _projects() == null:
+		return ""
+	var here = _run({"cmd": "projects_current"}).get("name", "")
+	if here == WORLD:
+		return ""
+	var exists: bool = _run({"cmd": "projects_list"}).get("projects", []).any(func(p): return p.get("name") == WORLD)
+	var before := _return_to
+	_return_to = here
+	var reply: Dictionary
+	if exists:
+		reply = _run({"cmd": "projects_open", "name": WORLD})
+	else:
+		reply = _run({"cmd": "projects_new", "name": WORLD, "modules": ["beatsaber", "beatsaber_path"], "open": true})
+	if not reply.get("ok", false):
+		_return_to = before
+		return "couldn't open the Rhythm world: %s" % reply.get("error", "?")
+	_save_settings()
+	return ""
+
+
+func _leave(_request: Dictionary) -> Dictionary:
+	_stop({})
+	if _has_ui():
+		_run({"cmd": "ui_show", "id_panel": PANEL, "visible": false})
+	if _projects() == null or not in_world():
+		return {"ok": true}
+	var back := _return_to if not _return_to.is_empty() and _return_to != WORLD else "start"
+	var reply := _run({"cmd": "projects_open", "name": back})
+	if not reply.get("ok", false) and back != "start":
+		back = "start"
+		reply = _run({"cmd": "projects_open", "name": back})
+	if not reply.get("ok", false):
+		return {"ok": false, "error": "couldn't go back to %s: %s" % [back, reply.get("error", "?")]}
+	_return_to = ""
+	_save_settings()
+	return {"ok": true, "back_in": back}
+
+
+# Another world opened (from here or the Worlds window): the song stops
+# outside the Rhythm world, and its window opens in it.
+func _on_world_changed(project: String, _folder: String) -> void:
+	if project == WORLD:
+		_show_window.call_deferred()
+	else:
+		if running:
+			_stop({})
+		if _has_ui():
+			_run({"cmd": "ui_show", "id_panel": PANEL, "visible": false})
 
 
 # --- Songs and maps ------------------------------------------------------------------
@@ -1451,6 +1544,7 @@ func _save_settings() -> void:
 	var out := fit.duplicate(true)
 	out["game"] = game
 	out["best"] = best
+	out["return_to"] = _return_to
 	var problem: String = _lib.call("write_json", SETTINGS_PATH, out, "\t")
 	if not problem.is_empty():
 		push_error("Slopitect beatsaber: " + problem)
@@ -1483,6 +1577,8 @@ func _load_settings() -> void:
 		for key in ["hit_sounds", "trails"]:
 			if typeof(g.get(key)) == TYPE_BOOL:
 				game[key] = g[key]
+	if typeof(saved.get("return_to")) == TYPE_STRING:
+		_return_to = saved["return_to"]
 	var b = saved.get("best")
 	if typeof(b) == TYPE_DICTIONARY:
 		for key in b:

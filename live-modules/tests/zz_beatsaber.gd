@@ -1,5 +1,5 @@
 extends SlopitectModule
-# Headless checks for beatsaber.gd (Rhythm Sabers). Run: tests/run.sh lib vrui beatsaber zz_beatsaber
+# Headless checks for beatsaber.gd (Rhythm Sabers). Run: tests/run.sh lib vrui save projects beatsaber zz_beatsaber
 # Real swings: the test moves the right controller through the notes of a
 # small song it writes to songs/zz_test (no music), at a steady 60 frames a
 # second, and checks a good cut, a miss, a wrong-colour cut, a bomb and a
@@ -81,6 +81,20 @@ func _go() -> void:
 	await _frames(3)
 	_check("stop: idle, signals", not _beat.running and not _beat.is_processing() and _signals == ["started Free play", "stopped"], _signals)
 
+	# Its own world: made on the first start, left with Leave, reused after
+	_check("starting took us to the Rhythm world", _world() == "rhythm_sabers", _world())
+	reply = _run({"cmd": "beatsaber_leave"})
+	_check("Leave goes back to where we were", reply.get("ok", false) and _world() == "start", [reply, _world()])
+	_check("the tile takes us back in", _run({"cmd": "beatsaber_do", "act": "toggle"}).get("ok", false) and _world() == "rhythm_sabers")
+	_check("one Rhythm world, not one per visit", _run({"cmd": "projects_list"})["projects"].filter(func(p): return p["name"] == "rhythm_sabers").size() == 1)
+	_run({"cmd": "beatsaber_start", "song": "free"})
+	await _frames(3)
+	_run({"cmd": "projects_open", "name": "start"})
+	await _frames(3)
+	_check("going to another world stops the song", not _beat.running and not _beat.is_processing())
+	_run({"cmd": "beatsaber_do", "act": "enter"})
+	_signals.clear()
+
 	# A song of our own
 	var folder: String = lib.home() + "/songs/zz_test"
 	DirAccess.make_dir_recursive_absolute(folder)
@@ -116,6 +130,7 @@ func _go() -> void:
 	var results: Dictionary = _beat._results
 	_check("song ends with results", not _beat.running and results.get("score") == _beat.score and results.get("rank") == "F" and results.get("new_best"), results)
 	_check("finished and stopped signals", _signals == ["started Test", "finished", "stopped"], _signals)
+	_check("songs play in the Rhythm world", _world() == "rhythm_sabers")
 	_check("best score kept", lib.read_json("user://beatsaber.json").get("best", {}).get("zz_test") == _beat.score)
 	await _frames(60)
 	_check("idle again after the effects", not _beat.is_processing())
@@ -138,6 +153,8 @@ func _go() -> void:
 	_run({"cmd": "beatsaber_stop"})
 	_check("made songs are marked", _run({"cmd": "beatsaber_songs"})["songs"].filter(func(x): return x["folder"] == "zz_music")[0]["made"])
 
+	_check("Leave after the songs", _run({"cmd": "beatsaber_leave"}).get("back_in") == "start" and _world() == "start")
+
 	# Hands' Sabers choice hides them
 	var s := GDScript.new()
 	s.source_code = "extends SlopitectModule\nvar shown := false\nfunc sabers_shown() -> bool:\n\treturn shown\n"
@@ -155,6 +172,10 @@ func _go() -> void:
 	_check("unload takes the sabers and window", not is_instance_valid(saber) and not _run({"cmd": "ui_get", "id_panel": "beatsaber"}).get("ok", true))
 	print("RESULT %d passed, %d failed" % [_passes, _fails])
 	get_tree().quit()
+
+
+func _world() -> String:
+	return _run({"cmd": "projects_current"}).get("name", "")
 
 
 func _double(notes: Array, n: Array) -> bool:
