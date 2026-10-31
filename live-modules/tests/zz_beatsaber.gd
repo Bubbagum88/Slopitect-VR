@@ -124,6 +124,34 @@ func _go() -> void:
 		last_z = z
 	var join_speed: float = (_beat._track_z(_beat._ahead()) - _beat._track_z(_beat._ahead() + 0.01)) / 0.01
 	_check("notes fly in fast and join the track at note speed", fly_ok and absf(join_speed - float(_beat.game["speed"])) < 0.5, join_speed)
+	# Entrances: each one puts a just-spawned note off its spot (or small),
+	# and every one has it exactly on its spot once it's on the track.
+	var entry_ok := true
+	var spot := Vector3(0.3, 1.1, 0.0)
+	var probe := MeshInstance3D.new()
+	add_child(probe)
+	for e in ["fall", "rise", "sides", "grow", "far"]:
+		var a := {"node": probe, "kind": "note", "hand": "r", "pos": spot, "entry": e}
+		_beat._place_note(a, _beat._lead())
+		var away: bool = probe.position.distance_to(Vector3(spot.x, spot.y, probe.position.z)) > 0.5 or probe.scale.x < 0.1
+		if e == "far":
+			away = probe.position.z < _beat.SPAWN_Z - 10.0
+		_beat._place_note(a, _beat._ahead() - 0.01)
+		var home: bool = probe.position.distance_to(Vector3(spot.x, spot.y, a["pos"].z)) < 0.001 and is_equal_approx(probe.scale.x, 1.0)
+		entry_ok = entry_ok and away and home
+		if not (away and home):
+			print("entrance %s: away %s home %s" % [e, away, home])
+	probe.free()
+	var picked := {}
+	_beat.game["entrance"] = "mixed"
+	for i in 40:
+		picked[_beat._entrance_for([float(i), i % 4, i % 3, "r", "d"])] = true
+	_beat.game["entrance"] = "far"
+	var set_ok: bool = _run({"cmd": "beatsaber_set", "entrance": "grow"}).get("ok", false) and _beat.game["entrance"] == "grow" \
+		and not _run({"cmd": "beatsaber_set", "entrance": "spin"}).get("ok", true)
+	_run({"cmd": "beatsaber_set", "entrance": "far"})
+	_check("note entrances: off their spot at first, exactly on it on the track", entry_ok)
+	_check("mixed entrance uses several kinds; entrance setting checked", picked.size() >= 4 and not picked.has("mixed") and set_ok, picked.keys())
 	var labels_ok := true
 	for s in _beat.settings_info()["settings"]:
 		if s.has("label") and s["label"].length() > 40:
