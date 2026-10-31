@@ -132,6 +132,14 @@ const SLICE_SECONDS := 0.42      # the cut sound's length
 const SLICE_LOW_PASS := 2200.0   # Hz: the cut sound's final low-pass
 const FLY_FROM := -40.0          # metres beyond the track's far end a note appears
 const FLY_TIME := 0.45           # seconds it takes to fly in to the track
+# How notes come in (isaac): from far away, falling onto the track, popping
+# up from the ground, from the sides (each colour from its own side),
+# growing into being, or a mix of them. All take FLY_TIME and settle as the
+# note joins the track, well before it can be cut.
+const ENTRANCES := ["far", "fall", "rise", "sides", "grow", "mixed"]
+const ENTRANCE_LABELS := {"far": "From far away", "fall": "Fall in", "rise": "Pop up", "sides": "From the sides", "grow": "Grow", "mixed": "Mixed"}
+const ENTRY_DROP := 2.5          # metres above its spot a falling note starts
+const ENTRY_SIDE := 2.5          # metres to the side a sliding note starts
 const ARC_STEPS := 20            # pieces along an arc
 const ARC_WIDTH := 0.035
 const ARC_PULL := 0.6            # metres an arc's ends pull out along their notes' cut directions
@@ -174,7 +182,7 @@ const MODE_LABELS := {"Standard": "Standard", "OneSaber": "One saber", "NoArrows
 const DAT_DIFFS := {"Easy": "easy", "Normal": "normal", "Hard": "hard", "Expert": "expert", "ExpertPlus": "expert_plus"}
 const DAT_DIRS := ["u", "d", "l", "r", "ul", "ur", "dl", "dr", "a"]
 const DAT_PACK := "Custom songs"
-const GAME_DEFAULTS := {"difficulty": "normal", "speed": 8.0, "bpm": 100.0, "hit_sounds": true, "trails": true, "auto_sabers": true, "menu_music": true}
+const GAME_DEFAULTS := {"difficulty": "normal", "speed": 8.0, "bpm": 100.0, "hit_sounds": true, "trails": true, "auto_sabers": true, "menu_music": true, "entrance": "far"}
 const SPEED_RANGE := [4.0, 14.0]
 const BPM_RANGE := [60.0, 200.0]
 const RANKS := [[97.0, "S"], [90.0, "A"], [80.0, "B"], [70.0, "C"], [60.0, "D"], [0.0, "F"]]
@@ -298,7 +306,7 @@ func setup() -> String:
 	register("beatsaber_stop", _stop, "stop the song and clear the notes")
 	register("beatsaber_score", _score, "the score, combo, multiplier, cuts, misses, bad cuts, bombs hit, accuracy, and the last cut's points, direction and centre offset; after a song, its results")
 	register("beatsaber_songs", _songs_command, "the songs in the Slopitect folder's songs/ (folder, title, bpm, notes or made, best score)")
-	register("beatsaber_set", _set_command, "the game's settings (usable in the headset): any of difficulty (easy, normal, hard, expert, expert_plus), speed (note speed m/s, 4 to 14), bpm (free play tempo, 60 to 200), hit_sounds, trails, auto_sabers (sabers in the Rhythm world, hands back after; true/false), menu_music (true/false)")
+	register("beatsaber_set", _set_command, "the game's settings (usable in the headset): any of difficulty (easy, normal, hard, expert, expert_plus), speed (note speed m/s, 4 to 14), bpm (free play tempo, 60 to 200), hit_sounds, trails, auto_sabers (sabers in the Rhythm world, hands back after; true/false), menu_music (true/false), entrance (how notes come in: far, fall, rise, sides, grow, mixed)")
 	register("beatsaber_do", _do, "the Rhythm window: act = toggle (goes to the Rhythm world first), show (optional page: a tab), refresh, page (page number for the song list), pack (pack), select (song), mode (mode), play, enter (go to the Rhythm world), leave (back to the world you came from); online songs (needs net.gd and BeatSaver's hosts allowed): online (list = search with query, latest or top), online_pick (key), online_page (page), online_get (key: downloads it, or plays it once it's here)")
 	register("beatsaber_leave", _leave, "stop the song and go back from the Rhythm world to the world you came from")
 	register("beatsaber_config", _config, "from the PC only: how the saber sits in the hand: any of angle (degrees it tilts up from where the controller points, -30 to 90), grip ([x, y, z] cm from the controller's point to the handle's middle, right hand), hold (cm down the hilt the hand holds it, 0 to 15), or reset true")
@@ -427,6 +435,8 @@ func settings_info() -> Dictionary:
 			"set": {"cmd": "beatsaber_set", "auto_sabers": "{value}"}},
 		{"id": "menu_music", "type": "toggle", "label": "Music in the Rhythm menus", "value": game["menu_music"],
 			"set": {"cmd": "beatsaber_set", "menu_music": "{value}"}},
+		{"id": "entrance", "type": "choice", "label": "How notes come in", "value": game["entrance"], "options": _entrance_options(), "columns": 3,
+			"set": {"cmd": "beatsaber_set", "entrance": "{value}"}},
 		{"id": "start", "type": "button", "label": "Start free play", "set": {"cmd": "beatsaber_start", "song": "free"}},
 		{"id": "stop", "type": "button", "label": "Stop", "set": {"cmd": "beatsaber_stop"}},
 		{"id": "leave", "type": "button", "label": "Leave the Rhythm world", "set": {"cmd": "beatsaber_leave"}},
@@ -657,6 +667,10 @@ func _left_elements() -> Array:
 		var key: String = toggles[i][0]
 		els.append({"type": "toggle", "id": key, "page": "Settings", "label": toggles[i][1], "at": [(i - 1) * w / 3.0, y], "size": [w / 3.0 - 0.015, 0.055],
 			"on": game[key], "action": {"cmd": "beatsaber_set", key: "{on}"}})
+	y -= 0.075
+	var next: String = ENTRANCES[(ENTRANCES.find(game["entrance"]) + 1) % ENTRANCES.size()]
+	els.append({"type": "button", "id": "entrance", "page": "Settings", "label": "Notes come in: %s" % ENTRANCE_LABELS[game["entrance"]],
+		"at": [0.0, y], "size": [w, 0.055], "action": {"cmd": "beatsaber_set", "entrance": next}})
 	if _hands and is_instance_valid(_hands):
 		y -= 0.085
 		var style = _hands.get("settings").get("style") if typeof(_hands.get("settings")) == TYPE_DICTIONARY else ""
@@ -1175,8 +1189,12 @@ func _set_command(request: Dictionary) -> Dictionary:
 				if typeof(v) != TYPE_BOOL:
 					return {"ok": false, "error": "\"%s\" must be true or false" % key}
 				changed[key] = v
+			"entrance":
+				if not v in ENTRANCES:
+					return {"ok": false, "error": "\"entrance\" must be one of %s" % [ENTRANCES]}
+				changed[key] = v
 			_:
-				return {"ok": false, "error": "unknown setting \"%s\" (one of: difficulty, speed, bpm, hit_sounds, trails, auto_sabers, menu_music)" % key}
+				return {"ok": false, "error": "unknown setting \"%s\" (one of: difficulty, speed, bpm, hit_sounds, trails, auto_sabers, menu_music, entrance)" % key}
 	game = changed
 	_menu_music()
 	if not game["trails"]:
@@ -2055,10 +2073,11 @@ func _beat_time(beat: float) -> float:
 # moves at the note speed; before that it flies in: it appears far down
 # (FLY_FROM), rushes up and slows to the note speed just as it reaches the
 # track's far end, like coming in from a long way off (isaac).
-func _track_z(left: float) -> float:
+# Without `fly` it comes straight down the track the whole way.
+func _track_z(left: float, fly := true) -> float:
 	var speed: float = game["speed"]
 	var on_track := _ahead()
-	if left <= on_track:
+	if left <= on_track or not fly:
 		return HIT_Z - left * speed
 	# A cubic from FLY_FROM to SPAWN_Z over FLY_TIME seconds: fast at first,
 	# ending at the note speed, so there's no jolt where it joins the track.
@@ -2071,6 +2090,62 @@ func _track_z(left: float) -> float:
 	var s2 := s * s
 	var s3 := s2 * s
 	return (2.0 * s3 - 3.0 * s2 + 1.0) * p0 + (s3 - 2.0 * s2 + s) * m0 + (-2.0 * s3 + 3.0 * s2) * p1 + (s3 - s2) * m1
+
+
+# How far through its entrance something due in `left` seconds is: 0 as it
+# appears, 1 once it's on the track.
+func _entered(left: float) -> float:
+	return clampf(1.0 - (left - _ahead()) / FLY_TIME, 0.0, 1.0)
+
+
+# Walls and arcs fly in only with the far-away entrance; with the others
+# they come straight down the track as the notes do.
+func _extras_fly() -> bool:
+	return game["entrance"] == "far" or game["entrance"] == "mixed"
+
+
+func _entrance_options() -> Array:
+	var out := []
+	for e in ENTRANCES:
+		out.append({"label": ENTRANCE_LABELS[e], "value": e})
+	return out
+
+
+# A note's entrance: the chosen one, or for Mixed one per note, picked from
+# its beat and lane so a song looks the same each time it's played.
+func _entrance_for(n: Array) -> String:
+	var e: String = game["entrance"]
+	if e != "mixed":
+		return e
+	return ENTRANCES[absi(hash([n[0], n[1], n[2]])) % (ENTRANCES.size() - 1)]
+
+
+# Put a note where it is on the way in: on the track at `pos` (whose z is
+# set here), plus the entrance's offset or size while it's still coming.
+func _place_note(a: Dictionary, left: float) -> void:
+	var node: MeshInstance3D = a["node"]
+	var pos: Vector3 = a["pos"]
+	var entry: String = a["entry"]
+	pos.z = _track_z(left, entry == "far")
+	a["pos"] = pos
+	var s := _entered(left)
+	var k := (1.0 - s) * (1.0 - s)  # quick at first, settling as it lands
+	var shown := pos
+	var size := 1.0
+	match entry:
+		"fall":
+			shown.y += ENTRY_DROP * k
+		"rise":
+			shown.y -= (pos.y + NOTE_SIZE) * k  # from under the floor
+		"sides":
+			var side := -1.0 if a["hand"] == "l" else 1.0
+			if a["kind"] == "bomb":
+				side = -1.0 if pos.x < 0.0 else 1.0
+			shown.x += side * ENTRY_SIDE * k
+		"grow":
+			size = maxf(1.0 - k * (1.0 - s), 0.01)
+	node.position = shown
+	node.scale = Vector3.ONE * size
 
 
 # Seconds before its beat that something comes into view (it flies in first).
@@ -2171,12 +2246,11 @@ func _spawn(n: Array) -> void:
 	# the edge to cut through.
 	var rot := atan2(-dir.x, dir.y) if dir != Vector2.ZERO else 0.0
 	node.rotation = Vector3(0, 0, rot)
-	var pos := _note_pos(n)
 	var t := _beat_time(n[0])
-	pos.z = _track_z(t - _clock)
-	node.position = pos
+	var a := {"node": node, "kind": "bomb" if bomb else "note", "hand": n[3], "dir": dir, "time": t, "pos": _note_pos(n), "rot": rot, "entry": _entrance_for(n)}
+	_place_note(a, t - _clock)
 	node.visible = true
-	_active.append({"node": node, "kind": "bomb" if bomb else "note", "hand": n[3], "dir": dir, "time": t, "pos": pos, "rot": rot})
+	_active.append(a)
 
 
 func _release(a: Dictionary) -> void:
@@ -2257,7 +2331,7 @@ func _spawn_wall(w: Array) -> void:
 
 
 func _place_wall(e: Dictionary) -> void:
-	var front := _track_z(float(e["time"]) - _clock)
+	var front := _track_z(float(e["time"]) - _clock, _extras_fly())
 	var box: AABB = e["box"]
 	(e["node"] as Node3D).position = Vector3(box.position.x + box.size.x / 2.0, box.position.y + box.size.y / 2.0, front - box.size.z / 2.0)
 	e["front"] = front
@@ -2354,11 +2428,9 @@ func _move_and_cut(delta: float) -> void:
 	for i in range(_active.size() - 1, -1, -1):
 		var a: Dictionary = _active[i]
 		var node: MeshInstance3D = a["node"]
+		var was_z: float = a["pos"].z
+		_place_note(a, float(a["time"]) - _clock)
 		var pos: Vector3 = a["pos"]
-		var was_z := pos.z
-		pos.z = _track_z(float(a["time"]) - _clock)
-		a["pos"] = pos
-		node.position = pos
 		if pos.z >= CUT_FROM and pos.z <= MISS_Z:
 			var hit := _which_blade(a, pos.z - was_z)
 			if not hit.is_empty():
