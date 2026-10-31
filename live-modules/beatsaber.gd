@@ -126,6 +126,9 @@ void fragment() {
 }
 """
 const SLICE_SECONDS := 0.42      # the cut sound's length
+const SLICE_LOW_PASS := 2200.0   # Hz: the cut sound's final low-pass
+const FLY_FROM := -40.0          # metres beyond the track's far end a note appears
+const FLY_TIME := 0.45           # seconds it takes to fly in to the track
 const ARC_STEPS := 20            # pieces along an arc
 const ARC_WIDTH := 0.035
 const ARC_PULL := 0.6            # metres an arc's ends pull out along their notes' cut directions
@@ -1847,7 +1850,7 @@ func _begin(song: Dictionary) -> void:
 	_music_done = false
 	var notes: Array = song["notes"]
 	var first: float = _beat_time(notes[0][0]) if not notes.is_empty() else 0.0
-	_clock = -maxf(LEAD_MIN, _ahead() - first)
+	_clock = -maxf(LEAD_MIN, _lead() - first)
 	_song_player.stream = song["audio"]
 	if _projects() == null:
 		_sabers_on()
@@ -1910,6 +1913,33 @@ func _beat_time(beat: float) -> float:
 
 
 # Seconds a note takes from appearing to its beat.
+# Where on the track something due in `left` seconds is. On the track it
+# moves at the note speed; before that it flies in: it appears far down
+# (FLY_FROM), rushes up and slows to the note speed just as it reaches the
+# track's far end, like coming in from a long way off (isaac).
+func _track_z(left: float) -> float:
+	var speed: float = game["speed"]
+	var on_track := _ahead()
+	if left <= on_track:
+		return HIT_Z - left * speed
+	# A cubic from FLY_FROM to SPAWN_Z over FLY_TIME seconds: fast at first,
+	# ending at the note speed, so there's no jolt where it joins the track.
+	var s := clampf(1.0 - (left - on_track) / FLY_TIME, 0.0, 1.0)
+	var p0 := SPAWN_Z + FLY_FROM
+	var p1 := SPAWN_Z
+	var m1 := speed * FLY_TIME
+	var m0 := 3.0 * (p1 - p0) - 2.0 * m1  # with this start slope the ease never overshoots
+	m0 = maxf(m0, 0.0)
+	var s2 := s * s
+	var s3 := s2 * s
+	return (2.0 * s3 - 3.0 * s2 + 1.0) * p0 + (s3 - 2.0 * s2 + s) * m0 + (-2.0 * s3 + 3.0 * s2) * p1 + (s3 - s2) * m1
+
+
+# Seconds before its beat that something comes into view (it flies in first).
+func _lead() -> float:
+	return _ahead() + FLY_TIME
+
+
 func _ahead() -> float:
 	return (HIT_Z - SPAWN_Z) / float(game["speed"])
 
@@ -1956,7 +1986,7 @@ func _tick_clock(delta: float) -> void:
 
 func _spawn_due() -> void:
 	var notes: Array = _song["notes"]
-	var ahead := _ahead()
+	var ahead := _lead()
 	while _next < notes.size() and _beat_time(notes[_next][0]) - _clock <= ahead:
 		_spawn(notes[_next])
 		_next += 1
@@ -2005,7 +2035,7 @@ func _spawn(n: Array) -> void:
 	node.rotation = Vector3(0, 0, rot)
 	var pos := _note_pos(n)
 	var t := _beat_time(n[0])
-	pos.z = HIT_Z - (t - _clock) * float(game["speed"])
+	pos.z = _track_z(t - _clock)
 	node.position = pos
 	node.visible = true
 	_active.append({"node": node, "kind": "bomb" if bomb else "note", "hand": n[3], "dir": dir, "time": t, "pos": pos, "rot": rot})
@@ -2058,7 +2088,7 @@ func _update_blades(delta: float) -> void:
 # later one, the way to swing between them; they're only shown, not scored.
 
 func _spawn_extras() -> void:
-	var ahead := _ahead()
+	var ahead := _lead()
 	var walls: Array = _song.get("walls", [])
 	while _next_wall < walls.size() and _beat_time(walls[_next_wall][0]) - _clock <= ahead:
 		_spawn_wall(walls[_next_wall])
@@ -2089,7 +2119,7 @@ func _spawn_wall(w: Array) -> void:
 
 
 func _place_wall(e: Dictionary) -> void:
-	var front := HIT_Z - (float(e["time"]) - _clock) * float(game["speed"])
+	var front := _track_z(float(e["time"]) - _clock)
 	var box: AABB = e["box"]
 	(e["node"] as Node3D).position = Vector3(box.position.x + box.size.x / 2.0, box.position.y + box.size.y / 2.0, front - box.size.z / 2.0)
 	e["front"] = front
@@ -2188,7 +2218,7 @@ func _move_and_cut(delta: float) -> void:
 		var node: MeshInstance3D = a["node"]
 		var pos: Vector3 = a["pos"]
 		var was_z := pos.z
-		pos.z = HIT_Z - (float(a["time"]) - _clock) * speed
+		pos.z = _track_z(float(a["time"]) - _clock)
 		a["pos"] = pos
 		node.position = pos
 		if pos.z >= CUT_FROM and pos.z <= MISS_Z:
@@ -2509,7 +2539,7 @@ func _hit_sound() -> AudioStream:
 #   - the hit: a short low thump that falls in pitch, so the cut lands;
 #   - the swoosh: softer, wider noise that rises and falls, the air the
 #     swing moves.
-# isaac 2026-10-31: lower, with a little swoosh.
+# isaac 2026-10-31: lower, with a little swoosh, then a low-pass over all.
 func _slice_take(take: int) -> AudioStreamWAV:
 	var rate := 32000
 	var length := SLICE_SECONDS
@@ -2529,6 +2559,9 @@ func _slice_take(take: int) -> AudioStreamWAV:
 	var lp2 := 0.0
 	var wb := 0.0  # the swoosh's own band-pass
 	var wl := 0.0
+	var low_a := 0.0  # the final low-pass: two one-pole stages
+	var low_b := 0.0
+	var low_k := 1.0 - exp(-TAU * SLICE_LOW_PASS / rate)
 	for i in count:
 		var t := float(i) / rate
 		# The blade's buzz.
@@ -2561,8 +2594,10 @@ func _slice_take(take: int) -> AudioStreamWAV:
 		wl += wf * wb
 		var swoosh_env := sin(PI * minf(t / 0.36, 1.0)) * exp(-t * 3.0)
 		var v := 0.16 * buzz * buzz_env + 0.5 * bp2 * sizzle_env + 0.55 * thump + 0.35 * wb * swoosh_env
-		v = tanh(v * 1.6) * 0.9  # soft clip: full but never harsh
-		data.encode_s16(i * 2, int(v * 32000.0))
+		v = tanh(v * 1.6)  # soft clip: full but never harsh
+		low_a += low_k * (v - low_a)  # then a low-pass takes the hiss's edge off (isaac)
+		low_b += low_k * (low_a - low_b)
+		data.encode_s16(i * 2, int(clampf(low_b * 1.15, -1.0, 1.0) * 30000.0))
 	var s := AudioStreamWAV.new()
 	s.format = AudioStreamWAV.FORMAT_16_BITS
 	s.mix_rate = rate

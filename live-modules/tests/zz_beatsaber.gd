@@ -92,6 +92,14 @@ func _go() -> void:
 			loudest = maxi(loudest, absi(w.data.decode_s16(i)))
 		sound_ok = sound_ok and absf(w.get_length() - _beat.SLICE_SECONDS) < 0.01 and loudest > 12000 and loudest <= 32000
 	_check("cut sound: three takes, full but not clipping", sound_ok)
+	var fly_ok: bool = is_equal_approx(_beat._track_z(_beat._ahead()), _beat.SPAWN_Z) and is_equal_approx(_beat._track_z(_beat._lead()), _beat.SPAWN_Z + _beat.FLY_FROM)
+	var last_z: float = _beat._track_z(_beat._lead())
+	for i in range(1, 41):
+		var z: float = _beat._track_z(_beat._lead() - _beat.FLY_TIME * i / 40.0)
+		fly_ok = fly_ok and z > last_z
+		last_z = z
+	var join_speed: float = (_beat._track_z(_beat._ahead()) - _beat._track_z(_beat._ahead() + 0.01)) / 0.01
+	_check("notes fly in fast and join the track at note speed", fly_ok and absf(join_speed - float(_beat.game["speed"])) < 0.5, join_speed)
 	var labels_ok := true
 	for s in _beat.settings_info()["settings"]:
 		if s.has("label") and s["label"].length() > 40:
