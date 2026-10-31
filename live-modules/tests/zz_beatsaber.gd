@@ -354,6 +354,24 @@ func _go() -> void:
 
 	_check("Leave after the songs", _run({"cmd": "beatsaber_leave"}).get("back_in") == "start" and _world() == "start")
 
+	# Menu music: a calm loop for Free play, the song's preview when it has music
+	_run({"cmd": "beatsaber_do", "act": "enter"})
+	await _frames(3)
+	_run({"cmd": "beatsaber_do", "act": "select", "song": "free"})
+	_run({"cmd": "beatsaber_do", "act": "show"})
+	_check("menu music: the calm loop for Free play", _beat._menu_player.playing and _beat._menu_for == "calm"
+		and _beat._menu_player.stream.loop_mode == AudioStreamWAV.LOOP_FORWARD, [_beat._menu_player.playing, _beat._menu_for])
+	_run({"cmd": "beatsaber_do", "act": "select", "song": "zz_music"})
+	_check("a song's preview, a little way in", _beat._menu_for == "zz_music" and _beat._menu_player.playing and absf(_beat._menu_from - 6.0) < 0.01
+		and not _beat._menu_loop.is_stopped(), [_beat._menu_for, _beat._menu_from])
+	_run({"cmd": "beatsaber_set", "menu_music": false})
+	_check("Menu music off stops it", not _beat._menu_player.playing)
+	_run({"cmd": "beatsaber_set", "menu_music": true})
+	_check("and on again", _beat._menu_player.playing)
+	_run({"cmd": "beatsaber_start", "song": "free"})
+	_check("quiet while a song plays", not _beat._menu_player.playing and _beat._menu_loop.is_stopped())
+	_run({"cmd": "beatsaber_stop"})
+
 	# Online songs, through a stand-in net module
 	_check("no Online pack without net", not "Online" in _beat._packs())
 	var ns := GDScript.new()

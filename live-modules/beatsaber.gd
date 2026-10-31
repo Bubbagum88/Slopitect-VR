@@ -125,6 +125,9 @@ void fragment() {
 	ALPHA = clamp(0.14 + 0.12 * shimmer + edge * 0.8, 0.0, 1.0);
 }
 """
+const MENU_DB := -10.0           # the menu music's level
+const MENU_PREVIEW := 12.0       # seconds of a song's preview before it starts again
+const MENU_FADE := 1.2           # seconds the menu music fades in
 const SLICE_SECONDS := 0.42      # the cut sound's length
 const SLICE_LOW_PASS := 2200.0   # Hz: the cut sound's final low-pass
 const FLY_FROM := -40.0          # metres beyond the track's far end a note appears
@@ -171,7 +174,7 @@ const MODE_LABELS := {"Standard": "Standard", "OneSaber": "One saber", "NoArrows
 const DAT_DIFFS := {"Easy": "easy", "Normal": "normal", "Hard": "hard", "Expert": "expert", "ExpertPlus": "expert_plus"}
 const DAT_DIRS := ["u", "d", "l", "r", "ul", "ur", "dl", "dr", "a"]
 const DAT_PACK := "Custom songs"
-const GAME_DEFAULTS := {"difficulty": "normal", "speed": 8.0, "bpm": 100.0, "hit_sounds": true, "trails": true, "auto_sabers": true}
+const GAME_DEFAULTS := {"difficulty": "normal", "speed": 8.0, "bpm": 100.0, "hit_sounds": true, "trails": true, "auto_sabers": true, "menu_music": true}
 const SPEED_RANGE := [4.0, 14.0]
 const BPM_RANGE := [60.0, 200.0]
 const RANKS := [[97.0, "S"], [90.0, "A"], [80.0, "B"], [70.0, "C"], [60.0, "D"], [0.0, "F"]]
@@ -216,6 +219,12 @@ var _track: Node3D          # notes, halves, labels; placed where you stand at t
 var _board: Label3D
 var _song_player: AudioStreamPlayer
 var _hit_player: AudioStreamPlayer
+var _menu_player: AudioStreamPlayer  # music while the menus are open
+var _menu_loop: Timer                # brings a preview back to its start
+var _menu_for := ""                  # what the menu music is playing ("calm" or a song folder)
+var _menu_from := 0.0
+var _calm: AudioStreamWAV            # the calm loop, made on a worker thread at load
+var _calm_task := -1
 var _hidden_boxes: Array = []
 var _sabers := {}           # side -> Node3D on that controller
 var _trails := {}           # side -> {"node", "mesh", "pts", "color"}
@@ -289,7 +298,7 @@ func setup() -> String:
 	register("beatsaber_stop", _stop, "stop the song and clear the notes")
 	register("beatsaber_score", _score, "the score, combo, multiplier, cuts, misses, bad cuts, bombs hit, accuracy, and the last cut's points, direction and centre offset; after a song, its results")
 	register("beatsaber_songs", _songs_command, "the songs in the Slopitect folder's songs/ (folder, title, bpm, notes or made, best score)")
-	register("beatsaber_set", _set_command, "the game's settings (usable in the headset): any of difficulty (easy, normal, hard, expert, expert_plus), speed (note speed m/s, 4 to 14), bpm (free play tempo, 60 to 200), hit_sounds, trails, auto_sabers (sabers in the Rhythm world, hands back after; true/false)")
+	register("beatsaber_set", _set_command, "the game's settings (usable in the headset): any of difficulty (easy, normal, hard, expert, expert_plus), speed (note speed m/s, 4 to 14), bpm (free play tempo, 60 to 200), hit_sounds, trails, auto_sabers (sabers in the Rhythm world, hands back after; true/false), menu_music (true/false)")
 	register("beatsaber_do", _do, "the Rhythm window: act = toggle (goes to the Rhythm world first), show (optional page: a tab), refresh, page (page number for the song list), pack (pack), select (song), mode (mode), play, enter (go to the Rhythm world), leave (back to the world you came from); online songs (needs net.gd and BeatSaver's hosts allowed): online (list = search with query, latest or top), online_pick (key), online_page (page), online_get (key: downloads it, or plays it once it's here)")
 	register("beatsaber_leave", _leave, "stop the song and go back from the Rhythm world to the world you came from")
 	register("beatsaber_config", _config, "from the PC only: how the saber sits in the hand: any of angle (degrees it tilts up from where the controller points, -30 to 90), grip ([x, y, z] cm from the controller's point to the handle's middle, right hand), hold (cm down the hilt the hand holds it, 0 to 15), or reset true")
@@ -310,6 +319,14 @@ func setup() -> String:
 	_song_player = AudioStreamPlayer.new()
 	_song_player.finished.connect(_on_music_done)
 	add_child(_song_player)
+	_menu_player = AudioStreamPlayer.new()
+	_menu_player.volume_db = MENU_DB
+	add_child(_menu_player)
+	_menu_loop = Timer.new()
+	_menu_loop.one_shot = true
+	_menu_loop.timeout.connect(_menu_again)
+	add_child(_menu_loop)
+	_calm_task = WorkerThreadPool.add_task(_make_calm, false, "Rhythm Sabers menu music")  # off the main thread: no hitch
 	_hit_player = AudioStreamPlayer.new()
 	_hit_player.stream = _hit_sound()
 	_hit_player.max_polyphony = 4
@@ -367,6 +384,9 @@ func _on_info_changed(module_name: String) -> void:
 
 
 func _exit_tree() -> void:
+	if _calm_task >= 0:
+		WorkerThreadPool.wait_for_task_completion(_calm_task)
+		_calm_task = -1
 	if _lib and _lib.info_changed.is_connected(_on_info_changed):
 		_lib.info_changed.disconnect(_on_info_changed)
 	_stage_off()
@@ -405,6 +425,8 @@ func settings_info() -> Dictionary:
 			"set": {"cmd": "beatsaber_set", "trails": "{value}"}},
 		{"id": "auto_sabers", "type": "toggle", "label": "Sabers in the Rhythm world", "value": game["auto_sabers"],
 			"set": {"cmd": "beatsaber_set", "auto_sabers": "{value}"}},
+		{"id": "menu_music", "type": "toggle", "label": "Music in the Rhythm menus", "value": game["menu_music"],
+			"set": {"cmd": "beatsaber_set", "menu_music": "{value}"}},
 		{"id": "start", "type": "button", "label": "Start free play", "set": {"cmd": "beatsaber_start", "song": "free"}},
 		{"id": "stop", "type": "button", "label": "Stop", "set": {"cmd": "beatsaber_stop"}},
 		{"id": "leave", "type": "button", "label": "Leave the Rhythm world", "set": {"cmd": "beatsaber_leave"}},
@@ -463,6 +485,7 @@ func _do(request: Dictionary) -> Dictionary:
 				return {"ok": false, "error": "\"song\" must be \"free\" or a folder in songs/"}
 			_selected = song
 			_fit_choice()
+			_menu_music()
 			var drawn := _build()
 			if not drawn.is_empty():
 				return {"ok": false, "error": drawn}
@@ -556,11 +579,13 @@ func _show_windows(page := "") -> Dictionary:
 	for id_panel in PANELS:
 		_run({"cmd": "ui_show", "id_panel": id_panel, "visible": true})
 	_sign_shown(true)
+	_menu_music()
 	return {"ok": true, "shown": true}
 
 
 func _hide_windows() -> void:
 	_sign_shown(false)
+	_menu_stop()
 	if not _has_ui():
 		return
 	for id_panel in PANELS:
@@ -627,10 +652,11 @@ func _left_elements() -> Array:
 	els.append({"type": "slider", "id": "bpm", "page": "Settings", "label": "Free play tempo (beats a minute)", "at": [0.0, y], "size": [w, 0.06],
 		"min": BPM_RANGE[0], "max": BPM_RANGE[1], "step": 5.0, "value": game["bpm"], "action": {"cmd": "beatsaber_set", "bpm": "{value}"}})
 	y -= 0.085
-	els.append({"type": "toggle", "id": "hit_sounds", "page": "Settings", "label": "Hit sounds", "at": [-w / 4.0 - 0.01, y], "size": [w / 2.0 - 0.02, 0.055],
-		"on": game["hit_sounds"], "action": {"cmd": "beatsaber_set", "hit_sounds": "{on}"}})
-	els.append({"type": "toggle", "id": "trails", "page": "Settings", "label": "Saber trails", "at": [w / 4.0 + 0.01, y], "size": [w / 2.0 - 0.02, 0.055],
-		"on": game["trails"], "action": {"cmd": "beatsaber_set", "trails": "{on}"}})
+	var toggles := [["hit_sounds", "Hit sounds"], ["trails", "Trails"], ["menu_music", "Menu music"]]
+	for i in toggles.size():
+		var key: String = toggles[i][0]
+		els.append({"type": "toggle", "id": key, "page": "Settings", "label": toggles[i][1], "at": [(i - 1) * w / 3.0, y], "size": [w / 3.0 - 0.015, 0.055],
+			"on": game[key], "action": {"cmd": "beatsaber_set", key: "{on}"}})
 	if _hands and is_instance_valid(_hands):
 		y -= 0.085
 		var style = _hands.get("settings").get("style") if typeof(_hands.get("settings")) == TYPE_DICTIONARY else ""
@@ -1029,6 +1055,7 @@ func _bring_back() -> void:
 	for id_panel in PANELS:
 		_run({"cmd": "ui_show", "id_panel": id_panel, "visible": true})
 	_sign_shown(true)
+	_menu_music()
 
 
 func _rebuild_if_open() -> void:
@@ -1142,15 +1169,16 @@ func _set_command(request: Dictionary) -> Dictionary:
 				if not _number(v) or v < r[0] or v > r[1]:
 					return {"ok": false, "error": "\"%s\" must be %d to %d" % [key, r[0], r[1]]}
 				changed[key] = float(v)
-			"hit_sounds", "trails", "auto_sabers":
+			"hit_sounds", "trails", "auto_sabers", "menu_music":
 				if typeof(v) == TYPE_STRING:
 					v = v == "true"
 				if typeof(v) != TYPE_BOOL:
 					return {"ok": false, "error": "\"%s\" must be true or false" % key}
 				changed[key] = v
 			_:
-				return {"ok": false, "error": "unknown setting \"%s\" (one of: difficulty, speed, bpm, hit_sounds, trails, auto_sabers)" % key}
+				return {"ok": false, "error": "unknown setting \"%s\" (one of: difficulty, speed, bpm, hit_sounds, trails, auto_sabers, menu_music)" % key}
 	game = changed
+	_menu_music()
 	if not game["trails"]:
 		for side in _trails:
 			_trails[side]["pts"].clear()
@@ -1361,6 +1389,106 @@ func _make_sign() -> Node3D:
 	return sign
 
 
+# --- Menu music --------------------------------------------------------------------------
+# While the windows are open in the Rhythm world (and no song plays): the
+# chosen song's preview, over and over, or for Free play and songs without
+# music a calm loop made here. Off with the Settings tab's Menu music.
+
+func _menu_music() -> void:
+	if not game["menu_music"] or running or not in_world() or not _shown(PANEL):
+		_menu_stop()
+		return
+	var want := "calm"
+	var info := {} if _selected == "free" else _song_info(_selected)
+	if not info.is_empty() and not str(info.get("audio", "")).is_empty():
+		want = _selected
+	if want == _menu_for and _menu_player.playing:
+		return
+	var stream: AudioStream = null
+	var from := 0.0
+	var length := 0.0
+	if want != "calm":
+		stream = _load_audio(info["audio"])
+		if stream != null:
+			var preview: Array = info.get("preview", [-1.0, MENU_PREVIEW])
+			var whole := stream.get_length()
+			from = preview[0] if preview[0] >= 0.0 else whole * 0.3
+			from = clampf(from, 0.0, maxf(whole - 2.0, 0.0))
+			length = minf(preview[1], maxf(whole - from, 1.0))
+	if stream == null:
+		want = "calm"
+		if _calm == null:
+			_menu_stop()  # still being made; it starts when ready (_calm_made)
+			return
+		stream = _calm
+	_menu_for = want
+	_menu_from = from
+	_menu_player.stream = stream
+	_menu_player.volume_db = -40.0
+	_menu_player.play(from)
+	create_tween().tween_property(_menu_player, "volume_db", MENU_DB, MENU_FADE)
+	_menu_loop.stop()
+	if length > 0.0:
+		_menu_loop.start(length)
+
+
+func _menu_again() -> void:
+	if _menu_player.playing and _menu_for != "calm":
+		_menu_player.volume_db = -40.0
+		_menu_player.play(_menu_from)
+		create_tween().tween_property(_menu_player, "volume_db", MENU_DB, MENU_FADE)
+		_menu_loop.start(_menu_loop.wait_time)
+
+
+func _menu_stop() -> void:
+	if _menu_player:
+		_menu_player.stop()
+	if _menu_loop:
+		_menu_loop.stop()
+	_menu_for = ""
+
+
+func _make_calm() -> void:
+	var made := _calm_loop()
+	_calm_made.call_deferred(made)
+
+
+func _calm_made(made: AudioStreamWAV) -> void:
+	_calm = made
+	_menu_music()
+
+
+# The calm loop: eight seconds, two soft chords (pads of detuned sines with
+# a slow swell) over a low note, looping cleanly; made once.
+func _calm_loop() -> AudioStreamWAV:
+	var rate := 16000
+	var seconds := 8.0
+	var count := int(rate * seconds)
+	var data := PackedByteArray()
+	data.resize(count * 2)
+	var chords := [[220.0, 261.63, 329.63, 392.0], [196.0, 246.94, 293.66, 369.99]]  # A minor 7, G major 7
+	var bass := [110.0, 98.0]
+	for i in count:
+		var t := float(i) / rate
+		var half := int(t / (seconds / 2.0))
+		var local := fmod(t, seconds / 2.0) / (seconds / 2.0)
+		var swell := sin(PI * local)  # each chord swells in and out, so the joins are silent
+		var v := 0.0
+		for f in chords[half]:
+			v += sin(TAU * f * t) + 0.5 * sin(TAU * f * 1.004 * t)
+		v = v / 6.0 * swell * swell
+		v += 0.35 * sin(TAU * bass[half] * t) * swell
+		data.encode_s16(i * 2, int(clampf(v * 0.5, -1.0, 1.0) * 30000.0))
+	var s := AudioStreamWAV.new()
+	s.format = AudioStreamWAV.FORMAT_16_BITS
+	s.mix_rate = rate
+	s.data = data
+	s.loop_mode = AudioStreamWAV.LOOP_FORWARD
+	s.loop_begin = 0
+	s.loop_end = count
+	return s
+
+
 func _sign_shown(on: bool) -> void:
 	if _sign != null and is_instance_valid(_sign):
 		_sign.visible = on
@@ -1472,7 +1600,7 @@ func _song_info(dir_name: String) -> Dictionary:
 					break
 		return {"id": dir_name, "title": _text(map.get("title"), dir_name, 60), "artist": _text(map.get("artist"), "", 40), "mapper": "",
 			"pack": _text(map.get("pack"), "", 24), "bpm": float(map["bpm"]), "offset": float(map.get("offset", 0.0)) if _number(map.get("offset", 0.0)) else 0.0,
-			"audio": audio, "cover": _cover(folder, ""), "made": made, "format": "slopitect",
+			"audio": audio, "cover": _cover(folder, ""), "made": made, "format": "slopitect", "preview": _preview(map.get("preview_start"), map.get("preview_seconds")),
 			"charts": {} if made else {"Standard": {"normal": "map.json"}}}
 	var info = _lib.call("read_json", folder + "/Info.dat")
 	if info == null:
@@ -1489,6 +1617,7 @@ func _song_info(dir_name: String) -> Dictionary:
 		out["offset"] = float(info.get("_songTimeOffset", 0.0)) if _number(info.get("_songTimeOffset", 0.0)) else 0.0
 		out["audio"] = _named_file(folder, info.get("_songFilename"))
 		out["cover"] = _cover(folder, info.get("_coverImageFilename"))
+		out["preview"] = _preview(info.get("_previewStartTime"), info.get("_previewDuration"))
 		for set in info.get("_difficultyBeatmapSets", []) if typeof(info.get("_difficultyBeatmapSets")) == TYPE_ARRAY else []:
 			if typeof(set) != TYPE_DICTIONARY or not set.get("_beatmapCharacteristicName") in MODES:
 				continue
@@ -1504,6 +1633,7 @@ func _song_info(dir_name: String) -> Dictionary:
 		out["bpm"] = float(audio.get("bpm", 0.0)) if _number(audio.get("bpm")) else 0.0
 		out["audio"] = _named_file(folder, audio.get("songFilename"))
 		out["cover"] = _cover(folder, info.get("coverImageFilename"))
+		out["preview"] = _preview(audio.get("previewStartTime"), audio.get("previewDuration"))
 		for d in info.get("difficultyBeatmaps", []) if typeof(info.get("difficultyBeatmaps")) == TYPE_ARRAY else []:
 			if typeof(d) == TYPE_DICTIONARY and d.get("characteristic") in MODES and d.get("difficulty") in DAT_DIFFS and _file_name_ok(d.get("beatmapDataFilename")):
 				charts.get_or_add(d["characteristic"], {})[DAT_DIFFS[d["difficulty"]]] = d["beatmapDataFilename"]
@@ -1516,6 +1646,14 @@ func _song_info(dir_name: String) -> Dictionary:
 		return {}
 	out["charts"] = charts
 	return out
+
+
+# [start, seconds] of a song's preview for the menu music; without one, a
+# stretch a little way in.
+func _preview(start, seconds) -> Array:
+	var from: float = float(start) if _number(start) and start >= 0.0 else -1.0
+	var length: float = clampf(float(seconds), 4.0, 30.0) if _number(seconds) and seconds > 0.0 else MENU_PREVIEW
+	return [from, length]
 
 
 func _text(v, fallback: String, most: int) -> String:
