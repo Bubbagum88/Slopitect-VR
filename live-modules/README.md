@@ -34,6 +34,7 @@ unless its file has changed since.
 | `net.gd` | Downloads from the internet, only https and only from hosts allowed on the PC (`net_config`; Poly Haven's to start). Files go in `downloads/HOST/` with a `.source.json` saying where they came from. Other modules download through its `fetch()` |
 | `worlds.gd` | The Worlds window, from its tile on the Menu. Tabs: Worlds (open a project's world or make a new one), Checkpoints (keep the world now, go back, delete), Files (look through the Slopitect folder), Modules (load, reload or unload live modules). It keeps nothing itself; it shows and runs projects, save, files and code. Needs vrui.gd; a tab whose module is missing says so |
 | `perf.gd` | How well the app runs, from inside it: `perf_status` (frame rate, frame times and hitches over 10 s, script and physics CPU time, draw calls, objects, memory), `perf_watch` then `perf_modules` (each module's `_process`/`_physics_process` cost per frame, costliest first), `perf_load` (compile time of each live module's file). Timing is off until `perf_watch` |
+| `audio.gd` | The one owner of sound playback. Other modules call `play()` / `play_2d()` / `play_at()` / `play_on()` (or `audio_play`) instead of making players: stereo, mono (left and right mixed), surround (on surround outputs; stereo on the Quest), spatial at a point or following a node, and proximity zones that play only while you're near (`audio_zone`). Buses Music, Effects, Voice, Ambient, UI under Master with volumes, Mono output and Mute in the Settings window (`audio_set`); players pooled, a voice limit (`audio_config`, PC only); files from the Slopitect folder's `sounds/`. `audio_test` beeps left, right, front, behind, above or below to check direction |
 | `jelly.gd` | The avatar squashes and stretches like jelly as it moves, keeping its volume; `jelly_poke` wobbles it. Needs the live avatar module (its `body()`); spring from the PC (`jelly_config`) |
 | `assets.gd` | 3D models from [Poly Haven](https://polyhaven.com) (all CC0): search, download to the headset, place in the world (placing, moving and removing are each one undo). Powered by Poly Haven. Other modules hear its `placed(name, id)` signal and ask `model_id(name)` |
 | `tool_front.gd` | Each tool's own menu opens in front of you, not where the Tools window was; a menu with its Pin on stays put. From the headset agent. Needs vrui.gd and tools.gd |
@@ -266,6 +267,14 @@ The first time projects.gd loads, the existing saves become project `start`.
 | `perf_watch` | `on` (true/false, default true) |
 | `perf_modules` | optional `reset` true |
 | `perf_load` | optional `name` (one module) |
+| `audio_status` | |
+| `audio_play` | `sound` (name in `sounds/`, a path in the Slopitect folder, or res:// / user://), optional `bus`, `volume` (0–1), `pitch` (0.25–4), `loop`, `mode` (stereo, mono, surround, spatial), `at` [x,y,z] or `follow` (a thing's name), `max_distance`, `unit_size`, `attenuation` (inverse, square, log, none), `muffle`, `priority`; returns an `id` |
+| `audio_stop` | `id` or `all` true, optional `fade` (seconds) |
+| `audio_zone` | `name`, `sound`, `at` or `follow`, `radius`, optional `inner`, `loop` (default true), `bus`, `volume`; or `name` and `remove` true |
+| `audio_sounds` | |
+| `audio_test` | `where`: center, left, right, front, behind, above, below; optional `bus` |
+| `audio_set` | any of `master`, `music`, `effects`, `voice`, `ambient`, `ui` (0–100), `mono`, `muted` (true/false) |
+| `audio_config` (PC only) | `max_voices` (4–64) |
 | `jelly_poke` | optional `strength` (0.1–1) |
 | `jelly_status` | |
 | `jelly_config` (PC only) | any of `stiffness` (20–400), `damping` (1–30) |
