@@ -53,6 +53,11 @@ module work, [docs/MODULE-FRAMEWORK.md](docs/MODULE-FRAMEWORK.md) and
   Exception (the owner's choice, 2026-10-29): the switch between Claude's
   web search and the net module's (`web_via_net`) is in the same section.
   The web limits (`web_search_max_uses` and the rest) stay PC only.
+  Exception (the owner's choice, 2026-10-31): sound volumes change in the
+  headset through `audio_set` (the Settings window's Sound section,
+  `audio.gd`): the Master, Music, Effects, Voice, Ambient and UI volumes
+  (0 to 100), Mono output and Mute. The voice limit (`max_voices`) stays
+  PC only (`audio_config`).
 - Assets ripped from games on the headset stay local: never in the repo,
   GitHub or a backup.
 

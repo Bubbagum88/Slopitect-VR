@@ -60,7 +60,7 @@ Yes in the headset.
   and downloads only over https from hosts allowed on the PC (`net_config`).
 - `NAME_config` settings change only from the PC, never from a button or
   the agent. The only exception is the comfort settings (`move_comfort`,
-  `ui_text_size`, `hands_colours`, `tts_set`, `vtt_set`). Anything touching
+  `ui_text_size`, `hands_colours`, `tts_set`, `vtt_set`, `audio_set`). Anything touching
   keys, the agent, the network, files, pairing or code stays PC only.
 - Personal info and API keys never go in issues, the repo, the APK or
   logs. Assets taken from games on the headset stay local, never in the
