@@ -44,7 +44,8 @@ extends SlopitectModule
 # difficulty file per chart (versions 2, 3 or 4). They go in the "Custom
 # songs" pack. The middle window shows only the difficulties (Easy to
 # Expert+) and modes (Standard, One saber, No arrows) a song has; each mode
-# keeps its own scores. Walls, arcs, chains and lights aren't played yet.
+# keeps its own scores. Walls (keep your head out) and arcs (shown) come
+# from the maps too; chains and lights aren't played yet.
 # With net.gd loaded, an Online pack finds and downloads such folders from
 # BeatSaver (see _online_elements), once its hosts are allowed on the PC.
 #
@@ -99,6 +100,44 @@ const CUT_FROM := -2.6           # notes check for cuts only from here on
 const NOTE_SIZE := 0.3
 const NOTE_HALF := 0.15
 const NOTE_ROUND := 0.03         # radius of the note's rounded edges
+const WALL_LAYERS := 5           # a full-height wall's layers (the map's units)
+# Walls: see-through with glowing edges and slow bands of light rippling
+# across them. The box is a unit cube scaled to size, so the edges are
+# measured in metres from its scale; no texture.
+const WALL_SHADER := """shader_type spatial;
+render_mode unshaded, cull_disabled, depth_draw_never, blend_mix, shadows_disabled;
+uniform vec4 colour : source_color = vec4(1.0, 0.2, 0.35, 1.0);
+varying vec3 local;
+varying vec3 size;
+varying vec3 world;
+void vertex() {
+	local = VERTEX;
+	size = vec3(length(MODEL_MATRIX[0].xyz), length(MODEL_MATRIX[1].xyz), length(MODEL_MATRIX[2].xyz));
+	world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+}
+void fragment() {
+	vec3 d = (0.5 - abs(local)) * size;  // metres to each pair of faces
+	float near = min(d.x, min(d.y, d.z));  // about 0: the face this is on
+	float far = max(d.x, max(d.y, d.z));
+	float edge = 1.0 - smoothstep(0.0, 0.035, d.x + d.y + d.z - near - far);  // the next nearest: an edge
+	float shimmer = 0.5 + 0.5 * sin(world.y * 9.0 + world.x * 5.0 - TIME * 2.2) * sin(world.z * 3.0 + TIME * 1.3);
+	ALBEDO = colour.rgb * (0.6 + 0.6 * shimmer) + edge * vec3(1.0, 0.75, 0.8);
+	ALPHA = clamp(0.14 + 0.12 * shimmer + edge * 0.8, 0.0, 1.0);
+}
+"""
+const MENU_DB := -10.0           # the menu music's level
+const MENU_PREVIEW := 12.0       # seconds of a song's preview before it starts again
+const MENU_FADE := 1.2           # seconds the menu music fades in
+const SLICE_SECONDS := 0.42      # the cut sound's length
+const SLICE_LOW_PASS := 2200.0   # Hz: the cut sound's final low-pass
+const FLY_FROM := -40.0          # metres beyond the track's far end a note appears
+const FLY_TIME := 0.45           # seconds it takes to fly in to the track
+const ARC_STEPS := 20            # pieces along an arc
+const ARC_WIDTH := 0.035
+const ARC_PULL := 0.6            # metres an arc's ends pull out along their notes' cut directions
+const ARROW_W := 0.2             # the arrow: a wide flat triangle
+const ARROW_H := 0.075
+const ARROW_EDGE := 0.025        # its flat end's gap from the block's edge
 const HIT_MARGIN := 0.05
 const POOL_NOTES := 32
 const POOL_BOMBS := 8
@@ -135,7 +174,7 @@ const MODE_LABELS := {"Standard": "Standard", "OneSaber": "One saber", "NoArrows
 const DAT_DIFFS := {"Easy": "easy", "Normal": "normal", "Hard": "hard", "Expert": "expert", "ExpertPlus": "expert_plus"}
 const DAT_DIRS := ["u", "d", "l", "r", "ul", "ur", "dl", "dr", "a"]
 const DAT_PACK := "Custom songs"
-const GAME_DEFAULTS := {"difficulty": "normal", "speed": 8.0, "bpm": 100.0, "hit_sounds": true, "trails": true, "auto_sabers": true}
+const GAME_DEFAULTS := {"difficulty": "normal", "speed": 8.0, "bpm": 100.0, "hit_sounds": true, "trails": true, "auto_sabers": true, "menu_music": true}
 const SPEED_RANGE := [4.0, 14.0]
 const BPM_RANGE := [60.0, 200.0]
 const RANKS := [[97.0, "S"], [90.0, "A"], [80.0, "B"], [70.0, "C"], [60.0, "D"], [0.0, "F"]]
@@ -180,6 +219,12 @@ var _track: Node3D          # notes, halves, labels; placed where you stand at t
 var _board: Label3D
 var _song_player: AudioStreamPlayer
 var _hit_player: AudioStreamPlayer
+var _menu_player: AudioStreamPlayer  # music while the menus are open
+var _menu_loop: Timer                # brings a preview back to its start
+var _menu_for := ""                  # what the menu music is playing ("calm" or a song folder)
+var _menu_from := 0.0
+var _calm: AudioStreamWAV            # the calm loop, made on a worker thread at load
+var _calm_task := -1
 var _hidden_boxes: Array = []
 var _sabers := {}           # side -> Node3D on that controller
 var _trails := {}           # side -> {"node", "mesh", "pts", "color"}
@@ -190,6 +235,7 @@ var _half_mesh: BoxMesh
 var _bomb_mesh: SphereMesh
 var _spike_mesh: CylinderMesh
 var _arrow_mesh: ArrayMesh
+var _wall_mesh: BoxMesh
 var _dot_mesh: CylinderMesh
 var _mat := {}              # "l", "r", "marker", "bomb", "spike", "trail", "silver", "handle"
 
@@ -205,6 +251,12 @@ var _pops: Array = []       # {"node", "life"}
 # The song being played.
 var _song := {}             # "id", "title", "bpm", "offset", "notes" (sorted), "audio"
 var _next := 0
+var _next_wall := 0
+var _next_arc := 0
+var _walls_on: Array = []   # {"node", "time", "end", "box" (AABB in track space at z 0, z from end to start)}
+var _arcs_on: Array = []    # {"node", "time", "end"}
+var _in_wall := false       # your head is inside a wall
+var bumped := 0             # times your head went into a wall this song
 var _clock := 0.0           # seconds into the song (negative during the lead-in)
 var _music_started := false
 var _music_done := false
@@ -246,7 +298,7 @@ func setup() -> String:
 	register("beatsaber_stop", _stop, "stop the song and clear the notes")
 	register("beatsaber_score", _score, "the score, combo, multiplier, cuts, misses, bad cuts, bombs hit, accuracy, and the last cut's points, direction and centre offset; after a song, its results")
 	register("beatsaber_songs", _songs_command, "the songs in the Slopitect folder's songs/ (folder, title, bpm, notes or made, best score)")
-	register("beatsaber_set", _set_command, "the game's settings (usable in the headset): any of difficulty (easy, normal, hard, expert, expert_plus), speed (note speed m/s, 4 to 14), bpm (free play tempo, 60 to 200), hit_sounds, trails, auto_sabers (sabers in the Rhythm world, hands back after; true/false)")
+	register("beatsaber_set", _set_command, "the game's settings (usable in the headset): any of difficulty (easy, normal, hard, expert, expert_plus), speed (note speed m/s, 4 to 14), bpm (free play tempo, 60 to 200), hit_sounds, trails, auto_sabers (sabers in the Rhythm world, hands back after; true/false), menu_music (true/false)")
 	register("beatsaber_do", _do, "the Rhythm window: act = toggle (goes to the Rhythm world first), show (optional page: a tab), refresh, page (page number for the song list), pack (pack), select (song), mode (mode), play, enter (go to the Rhythm world), leave (back to the world you came from); online songs (needs net.gd and BeatSaver's hosts allowed): online (list = search with query, latest or top), online_pick (key), online_page (page), online_get (key: downloads it, or plays it once it's here)")
 	register("beatsaber_leave", _leave, "stop the song and go back from the Rhythm world to the world you came from")
 	register("beatsaber_config", _config, "from the PC only: how the saber sits in the hand: any of angle (degrees it tilts up from where the controller points, -30 to 90), grip ([x, y, z] cm from the controller's point to the handle's middle, right hand), hold (cm down the hilt the hand holds it, 0 to 15), or reset true")
@@ -267,10 +319,18 @@ func setup() -> String:
 	_song_player = AudioStreamPlayer.new()
 	_song_player.finished.connect(_on_music_done)
 	add_child(_song_player)
+	_menu_player = AudioStreamPlayer.new()
+	_menu_player.volume_db = MENU_DB
+	add_child(_menu_player)
+	_menu_loop = Timer.new()
+	_menu_loop.one_shot = true
+	_menu_loop.timeout.connect(_menu_again)
+	add_child(_menu_loop)
+	_calm_task = WorkerThreadPool.add_task(_make_calm, false, "Rhythm Sabers menu music")  # off the main thread: no hitch
 	_hit_player = AudioStreamPlayer.new()
 	_hit_player.stream = _hit_sound()
 	_hit_player.max_polyphony = 4
-	_hit_player.volume_db = -6.0
+	_hit_player.volume_db = -4.0
 	add_child(_hit_player)
 	for side in ["right", "left"]:
 		_make_saber(side)
@@ -324,6 +384,9 @@ func _on_info_changed(module_name: String) -> void:
 
 
 func _exit_tree() -> void:
+	if _calm_task >= 0:
+		WorkerThreadPool.wait_for_task_completion(_calm_task)
+		_calm_task = -1
 	if _lib and _lib.info_changed.is_connected(_on_info_changed):
 		_lib.info_changed.disconnect(_on_info_changed)
 	_stage_off()
@@ -362,6 +425,8 @@ func settings_info() -> Dictionary:
 			"set": {"cmd": "beatsaber_set", "trails": "{value}"}},
 		{"id": "auto_sabers", "type": "toggle", "label": "Sabers in the Rhythm world", "value": game["auto_sabers"],
 			"set": {"cmd": "beatsaber_set", "auto_sabers": "{value}"}},
+		{"id": "menu_music", "type": "toggle", "label": "Music in the Rhythm menus", "value": game["menu_music"],
+			"set": {"cmd": "beatsaber_set", "menu_music": "{value}"}},
 		{"id": "start", "type": "button", "label": "Start free play", "set": {"cmd": "beatsaber_start", "song": "free"}},
 		{"id": "stop", "type": "button", "label": "Stop", "set": {"cmd": "beatsaber_stop"}},
 		{"id": "leave", "type": "button", "label": "Leave the Rhythm world", "set": {"cmd": "beatsaber_leave"}},
@@ -420,6 +485,7 @@ func _do(request: Dictionary) -> Dictionary:
 				return {"ok": false, "error": "\"song\" must be \"free\" or a folder in songs/"}
 			_selected = song
 			_fit_choice()
+			_menu_music()
 			var drawn := _build()
 			if not drawn.is_empty():
 				return {"ok": false, "error": drawn}
@@ -513,11 +579,13 @@ func _show_windows(page := "") -> Dictionary:
 	for id_panel in PANELS:
 		_run({"cmd": "ui_show", "id_panel": id_panel, "visible": true})
 	_sign_shown(true)
+	_menu_music()
 	return {"ok": true, "shown": true}
 
 
 func _hide_windows() -> void:
 	_sign_shown(false)
+	_menu_stop()
 	if not _has_ui():
 		return
 	for id_panel in PANELS:
@@ -584,10 +652,11 @@ func _left_elements() -> Array:
 	els.append({"type": "slider", "id": "bpm", "page": "Settings", "label": "Free play tempo (beats a minute)", "at": [0.0, y], "size": [w, 0.06],
 		"min": BPM_RANGE[0], "max": BPM_RANGE[1], "step": 5.0, "value": game["bpm"], "action": {"cmd": "beatsaber_set", "bpm": "{value}"}})
 	y -= 0.085
-	els.append({"type": "toggle", "id": "hit_sounds", "page": "Settings", "label": "Hit sounds", "at": [-w / 4.0 - 0.01, y], "size": [w / 2.0 - 0.02, 0.055],
-		"on": game["hit_sounds"], "action": {"cmd": "beatsaber_set", "hit_sounds": "{on}"}})
-	els.append({"type": "toggle", "id": "trails", "page": "Settings", "label": "Saber trails", "at": [w / 4.0 + 0.01, y], "size": [w / 2.0 - 0.02, 0.055],
-		"on": game["trails"], "action": {"cmd": "beatsaber_set", "trails": "{on}"}})
+	var toggles := [["hit_sounds", "Hit sounds"], ["trails", "Trails"], ["menu_music", "Menu music"]]
+	for i in toggles.size():
+		var key: String = toggles[i][0]
+		els.append({"type": "toggle", "id": key, "page": "Settings", "label": toggles[i][1], "at": [(i - 1) * w / 3.0, y], "size": [w / 3.0 - 0.015, 0.055],
+			"on": game[key], "action": {"cmd": "beatsaber_set", key: "{on}"}})
 	if _hands and is_instance_valid(_hands):
 		y -= 0.085
 		var style = _hands.get("settings").get("style") if typeof(_hands.get("settings")) == TYPE_DICTIONARY else ""
@@ -986,6 +1055,7 @@ func _bring_back() -> void:
 	for id_panel in PANELS:
 		_run({"cmd": "ui_show", "id_panel": id_panel, "visible": true})
 	_sign_shown(true)
+	_menu_music()
 
 
 func _rebuild_if_open() -> void:
@@ -1065,7 +1135,7 @@ func _stop(_request: Dictionary) -> Dictionary:
 
 func _score(_request: Dictionary) -> Dictionary:
 	var out := {"ok": true, "running": running, "song": _song.get("title", ""), "score": score, "combo": combo, "max_combo": max_combo,
-		"multiplier": _multiplier(), "cuts": cuts, "misses": missed, "bad_cuts": bad, "bombs_hit": bombs_hit,
+		"multiplier": _multiplier(), "cuts": cuts, "misses": missed, "bad_cuts": bad, "bombs_hit": bombs_hit, "walls_hit": bumped,
 		"accuracy": snappedf(_accuracy(), 0.1), "average": int(round(_acc * 100.0 / cuts)) if cuts > 0 else 0}
 	out.merge(_last)
 	if not _results.is_empty():
@@ -1099,15 +1169,16 @@ func _set_command(request: Dictionary) -> Dictionary:
 				if not _number(v) or v < r[0] or v > r[1]:
 					return {"ok": false, "error": "\"%s\" must be %d to %d" % [key, r[0], r[1]]}
 				changed[key] = float(v)
-			"hit_sounds", "trails", "auto_sabers":
+			"hit_sounds", "trails", "auto_sabers", "menu_music":
 				if typeof(v) == TYPE_STRING:
 					v = v == "true"
 				if typeof(v) != TYPE_BOOL:
 					return {"ok": false, "error": "\"%s\" must be true or false" % key}
 				changed[key] = v
 			_:
-				return {"ok": false, "error": "unknown setting \"%s\" (one of: difficulty, speed, bpm, hit_sounds, trails, auto_sabers)" % key}
+				return {"ok": false, "error": "unknown setting \"%s\" (one of: difficulty, speed, bpm, hit_sounds, trails, auto_sabers, menu_music)" % key}
 	game = changed
+	_menu_music()
 	if not game["trails"]:
 		for side in _trails:
 			_trails[side]["pts"].clear()
@@ -1318,6 +1389,106 @@ func _make_sign() -> Node3D:
 	return sign
 
 
+# --- Menu music --------------------------------------------------------------------------
+# While the windows are open in the Rhythm world (and no song plays): the
+# chosen song's preview, over and over, or for Free play and songs without
+# music a calm loop made here. Off with the Settings tab's Menu music.
+
+func _menu_music() -> void:
+	if not game["menu_music"] or running or not in_world() or not _shown(PANEL):
+		_menu_stop()
+		return
+	var want := "calm"
+	var info := {} if _selected == "free" else _song_info(_selected)
+	if not info.is_empty() and not str(info.get("audio", "")).is_empty():
+		want = _selected
+	if want == _menu_for and _menu_player.playing:
+		return
+	var stream: AudioStream = null
+	var from := 0.0
+	var length := 0.0
+	if want != "calm":
+		stream = _load_audio(info["audio"])
+		if stream != null:
+			var preview: Array = info.get("preview", [-1.0, MENU_PREVIEW])
+			var whole := stream.get_length()
+			from = preview[0] if preview[0] >= 0.0 else whole * 0.3
+			from = clampf(from, 0.0, maxf(whole - 2.0, 0.0))
+			length = minf(preview[1], maxf(whole - from, 1.0))
+	if stream == null:
+		want = "calm"
+		if _calm == null:
+			_menu_stop()  # still being made; it starts when ready (_calm_made)
+			return
+		stream = _calm
+	_menu_for = want
+	_menu_from = from
+	_menu_player.stream = stream
+	_menu_player.volume_db = -40.0
+	_menu_player.play(from)
+	create_tween().tween_property(_menu_player, "volume_db", MENU_DB, MENU_FADE)
+	_menu_loop.stop()
+	if length > 0.0:
+		_menu_loop.start(length)
+
+
+func _menu_again() -> void:
+	if _menu_player.playing and _menu_for != "calm":
+		_menu_player.volume_db = -40.0
+		_menu_player.play(_menu_from)
+		create_tween().tween_property(_menu_player, "volume_db", MENU_DB, MENU_FADE)
+		_menu_loop.start(_menu_loop.wait_time)
+
+
+func _menu_stop() -> void:
+	if _menu_player:
+		_menu_player.stop()
+	if _menu_loop:
+		_menu_loop.stop()
+	_menu_for = ""
+
+
+func _make_calm() -> void:
+	var made := _calm_loop()
+	_calm_made.call_deferred(made)
+
+
+func _calm_made(made: AudioStreamWAV) -> void:
+	_calm = made
+	_menu_music()
+
+
+# The calm loop: eight seconds, two soft chords (pads of detuned sines with
+# a slow swell) over a low note, looping cleanly; made once.
+func _calm_loop() -> AudioStreamWAV:
+	var rate := 16000
+	var seconds := 8.0
+	var count := int(rate * seconds)
+	var data := PackedByteArray()
+	data.resize(count * 2)
+	var chords := [[220.0, 261.63, 329.63, 392.0], [196.0, 246.94, 293.66, 369.99]]  # A minor 7, G major 7
+	var bass := [110.0, 98.0]
+	for i in count:
+		var t := float(i) / rate
+		var half := int(t / (seconds / 2.0))
+		var local := fmod(t, seconds / 2.0) / (seconds / 2.0)
+		var swell := sin(PI * local)  # each chord swells in and out, so the joins are silent
+		var v := 0.0
+		for f in chords[half]:
+			v += sin(TAU * f * t) + 0.5 * sin(TAU * f * 1.004 * t)
+		v = v / 6.0 * swell * swell
+		v += 0.35 * sin(TAU * bass[half] * t) * swell
+		data.encode_s16(i * 2, int(clampf(v * 0.5, -1.0, 1.0) * 30000.0))
+	var s := AudioStreamWAV.new()
+	s.format = AudioStreamWAV.FORMAT_16_BITS
+	s.mix_rate = rate
+	s.data = data
+	s.loop_mode = AudioStreamWAV.LOOP_FORWARD
+	s.loop_begin = 0
+	s.loop_end = count
+	return s
+
+
 func _sign_shown(on: bool) -> void:
 	if _sign != null and is_instance_valid(_sign):
 		_sign.visible = on
@@ -1429,7 +1600,7 @@ func _song_info(dir_name: String) -> Dictionary:
 					break
 		return {"id": dir_name, "title": _text(map.get("title"), dir_name, 60), "artist": _text(map.get("artist"), "", 40), "mapper": "",
 			"pack": _text(map.get("pack"), "", 24), "bpm": float(map["bpm"]), "offset": float(map.get("offset", 0.0)) if _number(map.get("offset", 0.0)) else 0.0,
-			"audio": audio, "cover": _cover(folder, ""), "made": made, "format": "slopitect",
+			"audio": audio, "cover": _cover(folder, ""), "made": made, "format": "slopitect", "preview": _preview(map.get("preview_start"), map.get("preview_seconds")),
 			"charts": {} if made else {"Standard": {"normal": "map.json"}}}
 	var info = _lib.call("read_json", folder + "/Info.dat")
 	if info == null:
@@ -1446,6 +1617,7 @@ func _song_info(dir_name: String) -> Dictionary:
 		out["offset"] = float(info.get("_songTimeOffset", 0.0)) if _number(info.get("_songTimeOffset", 0.0)) else 0.0
 		out["audio"] = _named_file(folder, info.get("_songFilename"))
 		out["cover"] = _cover(folder, info.get("_coverImageFilename"))
+		out["preview"] = _preview(info.get("_previewStartTime"), info.get("_previewDuration"))
 		for set in info.get("_difficultyBeatmapSets", []) if typeof(info.get("_difficultyBeatmapSets")) == TYPE_ARRAY else []:
 			if typeof(set) != TYPE_DICTIONARY or not set.get("_beatmapCharacteristicName") in MODES:
 				continue
@@ -1461,6 +1633,7 @@ func _song_info(dir_name: String) -> Dictionary:
 		out["bpm"] = float(audio.get("bpm", 0.0)) if _number(audio.get("bpm")) else 0.0
 		out["audio"] = _named_file(folder, audio.get("songFilename"))
 		out["cover"] = _cover(folder, info.get("coverImageFilename"))
+		out["preview"] = _preview(audio.get("previewStartTime"), audio.get("previewDuration"))
 		for d in info.get("difficultyBeatmaps", []) if typeof(info.get("difficultyBeatmaps")) == TYPE_ARRAY else []:
 			if typeof(d) == TYPE_DICTIONARY and d.get("characteristic") in MODES and d.get("difficulty") in DAT_DIFFS and _file_name_ok(d.get("beatmapDataFilename")):
 				charts.get_or_add(d["characteristic"], {})[DAT_DIFFS[d["difficulty"]]] = d["beatmapDataFilename"]
@@ -1473,6 +1646,14 @@ func _song_info(dir_name: String) -> Dictionary:
 		return {}
 	out["charts"] = charts
 	return out
+
+
+# [start, seconds] of a song's preview for the menu music; without one, a
+# stretch a little way in.
+func _preview(start, seconds) -> Array:
+	var from: float = float(start) if _number(start) and start >= 0.0 else -1.0
+	var length: float = clampf(float(seconds), 4.0, 30.0) if _number(seconds) and seconds > 0.0 else MENU_PREVIEW
+	return [from, length]
 
 
 func _text(v, fallback: String, most: int) -> String:
@@ -1551,6 +1732,8 @@ func _load_song(dir_name: String) -> Dictionary:
 		return {"error": "the music file named in %s/Info.dat isn't there" % folder}
 	var bpm: float = info["bpm"]
 	var notes := []
+	var walls := []
+	var arcs := []
 	if info["made"]:
 		var length := stream.get_length() if stream else 60.0
 		var beats := int((length - float(info["offset"])) * bpm / 60.0) - 2
@@ -1570,18 +1753,26 @@ func _load_song(dir_name: String) -> Dictionary:
 		if read.has("error"):
 			return read
 		notes = read["notes"]
+		walls = read["walls"]
+		arcs = read["arcs"]
 	if _mode == "NoArrows":
 		for n in notes:
 			n[4] = "a"
 	notes.sort_custom(func(a, b): return a[0] < b[0])
-	return {"id": dir_name, "title": info["title"], "bpm": bpm, "offset": info["offset"], "audio": stream, "notes": notes, "mode": _mode}
+	walls.sort_custom(func(a, b): return a[0] < b[0])
+	arcs.sort_custom(func(a, b): return a[0] < b[0])
+	return {"id": dir_name, "title": info["title"], "bpm": bpm, "offset": info["offset"], "audio": stream, "notes": notes, "mode": _mode,
+		"walls": walls, "arcs": arcs}
 
 
 # The notes of a custom song's difficulty file, in our [beat, lane, row,
 # hand, dir] form: version 2 (_notes), 3 (colorNotes, bombNotes) or 4
 # (colorNotes / bombNotes pointing into colorNotesData / bombNotesData).
-# Walls, arcs, chains and lights aren't played yet; notes outside the
-# 4 x 3 grid are left out. Returns {"notes", "skipped"} or {"error"}.
+# Also its walls ([beat, beats long, lane, lanes wide, layer, layers high])
+# and arcs ([head beat, lane, row, dir, tail beat, lane, row, dir, hand,
+# head pull, tail pull]) from the same versions (and v2.6 _sliders).
+# Chains and lights aren't played yet; notes outside the 4 x 3 grid are
+# left out. Returns {"notes", "walls", "arcs", "skipped"} or {"error"}.
 func _read_dat(path: String) -> Dictionary:
 	var data = _lib.call("read_json", path)
 	if typeof(data) != TYPE_DICTIONARY:
@@ -1623,7 +1814,84 @@ func _read_dat(path: String) -> Dictionary:
 		return {"error": "%s isn't a difficulty file we know (versions 2, 3 and 4)" % path}
 	if notes.is_empty():
 		return {"error": "%s has no notes we can play" % path}
-	return {"notes": notes, "skipped": skipped}
+	return {"notes": notes, "walls": _read_walls(data), "arcs": _read_arcs(data), "skipped": skipped}
+
+
+func _list(data: Dictionary, key: String) -> Array:
+	return data[key] if typeof(data.get(key)) == TYPE_ARRAY else []
+
+
+# A list's entry, or its data entry when version 4 points into one with "i".
+func _entry(n, list_data) -> Variant:
+	if typeof(n) != TYPE_DICTIONARY:
+		return null
+	if typeof(list_data) != TYPE_ARRAY:
+		return n
+	var i = n.get("i", 0)
+	return list_data[int(i)] if _number(i) and i >= 0 and i < list_data.size() and typeof(list_data[int(i)]) == TYPE_DICTIONARY else null
+
+
+func _read_walls(data: Dictionary) -> Array:
+	var out := []
+	for o in _list(data, "_obstacles"):  # version 2: full height or crouch
+		if typeof(o) == TYPE_DICTIONARY:
+			var crouch: bool = o.get("_type", 0) == 1
+			_add_wall(out, o.get("_time"), o.get("_duration"), o.get("_lineIndex"), o.get("_width"), 2 if crouch else 0, 3 if crouch else WALL_LAYERS)
+	var data4 = data.get("obstaclesData")
+	for o in _list(data, "obstacles"):  # versions 3 and 4
+		var d = _entry(o, data4)
+		if d != null:
+			_add_wall(out, o.get("b"), d.get("d"), d.get("x"), d.get("w"), d.get("y", 0), d.get("h", WALL_LAYERS))
+	return out
+
+
+func _add_wall(out: Array, beat, beats, lane, lanes, layer, layers) -> void:
+	for v in [beat, beats, lane, lanes, layer, layers]:
+		if not _number(v):
+			return
+	if beat < 0 or beats <= 0 or lanes <= 0 or layers <= 0 or lane < -2 or lane + lanes > 6 or layer < 0 or layer > WALL_LAYERS:
+		return  # mapping tricks (negative or huge walls) aren't played
+	out.append([float(beat), float(beats), float(lane), float(lanes), float(layer), minf(float(layers), WALL_LAYERS - float(layer))])
+
+
+func _read_arcs(data: Dictionary) -> Array:
+	var out := []
+	for a in _list(data, "_sliders"):  # version 2.6
+		if typeof(a) == TYPE_DICTIONARY:
+			_add_arc(out, a.get("_headTime"), a.get("_headLineIndex"), a.get("_headLineLayer"), a.get("_headCutDirection"),
+				a.get("_tailTime"), a.get("_tailLineIndex"), a.get("_tailLineLayer"), a.get("_tailCutDirection"), a.get("_colorType"),
+				a.get("_headControlPointLengthMultiplier", 1.0), a.get("_tailControlPointLengthMultiplier", 1.0))
+	if typeof(data.get("arcsData")) == TYPE_ARRAY:  # version 4: head and tail are notes in colorNotesData
+		var notes4 = data.get("colorNotesData")
+		for a in _list(data, "arcs"):
+			if typeof(a) != TYPE_DICTIONARY or typeof(notes4) != TYPE_ARRAY:
+				continue
+			var ad = _entry({"i": a.get("ai", 0)}, data["arcsData"])
+			var h = _entry({"i": a.get("hi", 0)}, notes4)
+			var t = _entry({"i": a.get("ti", 0)}, notes4)
+			if ad != null and h != null and t != null:
+				_add_arc(out, a.get("hb"), h.get("x"), h.get("y"), h.get("d", 8), a.get("tb"), t.get("x"), t.get("y"), t.get("d", 8), h.get("c", 0),
+					ad.get("m", 1.0), ad.get("tm", 1.0))
+	else:
+		for a in _list(data, "sliders"):  # version 3
+			if typeof(a) == TYPE_DICTIONARY:
+				_add_arc(out, a.get("b"), a.get("x"), a.get("y"), a.get("d", 8), a.get("tb"), a.get("tx"), a.get("ty"), a.get("tc", 8), a.get("c", 0),
+					a.get("mu", 1.0), a.get("tmu", 1.0))
+	return out
+
+
+func _add_arc(out: Array, hb, hx, hy, hd, tb, tx, ty, td, colour, mu, tmu) -> void:
+	for v in [hb, hx, hy, hd, tb, tx, ty, td, colour, mu, tmu]:
+		if not _number(v):
+			return
+	if hb < 0 or tb <= hb or hx < 0 or hx > 3 or tx < 0 or tx > 3 or hy < 0 or hy > 2 or ty < 0 or ty > 2:
+		return
+	out.append([float(hb), int(hx), int(hy), _dat_dir(hd), float(tb), int(tx), int(ty), _dat_dir(td), "r" if colour == 1 else "l",
+		clampf(float(mu), 0.0, 3.0), clampf(float(tmu), 0.0, 3.0)])
+
+
+func _dat_dir(cut) -> String:
+	return DAT_DIRS[int(cut)] if int(cut) >= 0 and int(cut) < DAT_DIRS.size() else "a"
 
 
 func _add_dat_note(notes: Array, beat, lane, row, hand: String, cut) -> bool:
@@ -1703,6 +1971,9 @@ func _generate(bpm: float, beats: int, difficulty: String, seed_value: int) -> A
 func _begin(song: Dictionary) -> void:
 	_song = song
 	_next = 0
+	_next_wall = 0
+	_next_arc = 0
+	bumped = 0
 	score = 0
 	combo = 0
 	max_combo = 0
@@ -1717,7 +1988,7 @@ func _begin(song: Dictionary) -> void:
 	_music_done = false
 	var notes: Array = song["notes"]
 	var first: float = _beat_time(notes[0][0]) if not notes.is_empty() else 0.0
-	_clock = -maxf(LEAD_MIN, _ahead() - first)
+	_clock = -maxf(LEAD_MIN, _lead() - first)
 	_song_player.stream = song["audio"]
 	if _projects() == null:
 		_sabers_on()
@@ -1758,6 +2029,7 @@ func track_transform() -> Transform3D:
 func _clear() -> void:
 	running = false
 	_song_player.stop()
+	_clear_extras()
 	for a in _active:
 		_release(a)
 	_active.clear()
@@ -1779,6 +2051,33 @@ func _beat_time(beat: float) -> float:
 
 
 # Seconds a note takes from appearing to its beat.
+# Where on the track something due in `left` seconds is. On the track it
+# moves at the note speed; before that it flies in: it appears far down
+# (FLY_FROM), rushes up and slows to the note speed just as it reaches the
+# track's far end, like coming in from a long way off (isaac).
+func _track_z(left: float) -> float:
+	var speed: float = game["speed"]
+	var on_track := _ahead()
+	if left <= on_track:
+		return HIT_Z - left * speed
+	# A cubic from FLY_FROM to SPAWN_Z over FLY_TIME seconds: fast at first,
+	# ending at the note speed, so there's no jolt where it joins the track.
+	var s := clampf(1.0 - (left - on_track) / FLY_TIME, 0.0, 1.0)
+	var p0 := SPAWN_Z + FLY_FROM
+	var p1 := SPAWN_Z
+	var m1 := speed * FLY_TIME
+	var m0 := 3.0 * (p1 - p0) - 2.0 * m1  # with this start slope the ease never overshoots
+	m0 = maxf(m0, 0.0)
+	var s2 := s * s
+	var s3 := s2 * s
+	return (2.0 * s3 - 3.0 * s2 + 1.0) * p0 + (s3 - 2.0 * s2 + s) * m0 + (-2.0 * s3 + 3.0 * s2) * p1 + (s3 - s2) * m1
+
+
+# Seconds before its beat that something comes into view (it flies in first).
+func _lead() -> float:
+	return _ahead() + FLY_TIME
+
+
 func _ahead() -> float:
 	return (HIT_Z - SPAWN_Z) / float(game["speed"])
 
@@ -1791,8 +2090,10 @@ func _process(delta: float) -> void:
 	if running:
 		_tick_clock(delta)
 		_spawn_due()
+		_spawn_extras()
 		_update_blades(delta)
 		_move_and_cut(delta)
+		_move_extras()
 		if _song_over():
 			_finish()
 	_update_halves(delta)
@@ -1823,19 +2124,33 @@ func _tick_clock(delta: float) -> void:
 
 func _spawn_due() -> void:
 	var notes: Array = _song["notes"]
-	var ahead := _ahead()
+	var ahead := _lead()
 	while _next < notes.size() and _beat_time(notes[_next][0]) - _clock <= ahead:
 		_spawn(notes[_next])
 		_next += 1
 
 
 func _note_pos(n: Array) -> Vector3:
+	return Vector3((float(n[1]) - 1.5) * LANE_W, _row_heights()[int(n[2])], 0.0)
+
+
+# The three note rows' heights, set by how tall you stand.
+func _row_heights() -> Array:
 	var head := 1.6
 	var cam: Node3D = ctx.get("camera")
 	if cam and is_instance_valid(cam):
 		head = clampf(_track.to_local(cam.global_position).y, 1.0, 2.1) if cam.is_inside_tree() else head
-	var rows := [head * 0.48, head * 0.71, head * 0.94]
-	return Vector3((float(n[1]) - 1.5) * LANE_W, rows[int(n[2])], 0.0)
+	return [head * 0.48, head * 0.71, head * 0.94]
+
+
+# A map layer's height in metres: the rows' spacing, layer 0 on the floor
+# (a full wall stands on it), half a row under the bottom row from 1 up.
+func _layer_y(layer: float) -> float:
+	if layer <= 0.0:
+		return 0.0
+	var rows := _row_heights()
+	var step: float = rows[1] - rows[0]
+	return rows[0] + (layer - 0.5) * step
 
 
 func _spawn(n: Array) -> void:
@@ -1858,7 +2173,7 @@ func _spawn(n: Array) -> void:
 	node.rotation = Vector3(0, 0, rot)
 	var pos := _note_pos(n)
 	var t := _beat_time(n[0])
-	pos.z = HIT_Z - (t - _clock) * float(game["speed"])
+	pos.z = _track_z(t - _clock)
 	node.position = pos
 	node.visible = true
 	_active.append({"node": node, "kind": "bomb" if bomb else "note", "hand": n[3], "dir": dir, "time": t, "pos": pos, "rot": rot})
@@ -1903,6 +2218,137 @@ func _update_blades(delta: float) -> void:
 			_update_trail(side, sab.global_transform * Vector3(0, 0, -0.05), sab.global_transform * Vector3(0, 0, -1.05))
 
 
+# --- Walls and arcs (from custom maps) ------------------------------------------------
+# Walls come down the track like notes: keep your head out of them (lean or
+# crouch). Going in breaks your combo; inside, the music goes quiet and both
+# controllers buzz softly, as in BeepSaber (its _spawn_wall and
+# _quiet_song, MIT, ideas only). Arcs are glowing lines from a note to a
+# later one, the way to swing between them; they're only shown, not scored.
+
+func _spawn_extras() -> void:
+	var ahead := _lead()
+	var walls: Array = _song.get("walls", [])
+	while _next_wall < walls.size() and _beat_time(walls[_next_wall][0]) - _clock <= ahead:
+		_spawn_wall(walls[_next_wall])
+		_next_wall += 1
+	var arcs: Array = _song.get("arcs", [])
+	while _next_arc < arcs.size() and _beat_time(arcs[_next_arc][0]) - _clock <= ahead:
+		_spawn_arc(arcs[_next_arc])
+		_next_arc += 1
+
+
+func _spawn_wall(w: Array) -> void:
+	var start := _beat_time(w[0])
+	var end := _beat_time(w[0] + w[1])
+	var left: float = (w[2] - 2.0) * LANE_W
+	var bottom := _layer_y(w[4])
+	var top := _layer_y(w[4] + w[5])
+	var depth := (end - start) * float(game["speed"])
+	var node := MeshInstance3D.new()
+	node.mesh = _wall_mesh
+	node.material_override = _mat["wall"]
+	node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	node.scale = Vector3(w[3] * LANE_W, maxf(top - bottom, 0.05), maxf(depth, 0.05))
+	_track.add_child(node)
+	# The box is placed by its front face's z; its own frame has z running back.
+	var box := AABB(Vector3(left, bottom, -depth), Vector3(w[3] * LANE_W, top - bottom, depth))
+	_walls_on.append({"node": node, "time": start, "end": end, "box": box})
+	_place_wall(_walls_on[-1])
+
+
+func _place_wall(e: Dictionary) -> void:
+	var front := _track_z(float(e["time"]) - _clock)
+	var box: AABB = e["box"]
+	(e["node"] as Node3D).position = Vector3(box.position.x + box.size.x / 2.0, box.position.y + box.size.y / 2.0, front - box.size.z / 2.0)
+	e["front"] = front
+
+
+func _spawn_arc(a: Array) -> void:
+	var head := _note_pos([a[0], a[1], a[2]])
+	var tail := _note_pos([a[4], a[5], a[6]])
+	var start := _beat_time(a[0])
+	var end := _beat_time(a[4])
+	tail.z = -(end - start) * float(game["speed"])
+	var hd: Vector2 = DIRS[a[3]]
+	var td: Vector2 = DIRS[a[7]]
+	var reach := absf(tail.z) / 3.0
+	var p1: Vector3 = head + Vector3(hd.x, hd.y, 0.0) * ARC_PULL * float(a[9]) + Vector3(0, 0, -reach)
+	var p2: Vector3 = tail - Vector3(td.x, td.y, 0.0) * ARC_PULL * float(a[10]) + Vector3(0, 0, reach)
+	# A thin ribbon in two crossed strips, so it reads from any side.
+	var verts := PackedVector3Array()
+	var last := head
+	for i in range(1, ARC_STEPS + 1):
+		var t := float(i) / ARC_STEPS
+		var p := head.bezier_interpolate(p1, p2, tail, t)
+		for side in [Vector3(ARC_WIDTH, 0, 0), Vector3(0, ARC_WIDTH, 0)]:
+			verts.append_array([last - side, last + side, p + side, last - side, p + side, p - side])
+		last = p
+	var arr := []
+	arr.resize(Mesh.ARRAY_MAX)
+	arr[Mesh.ARRAY_VERTEX] = verts
+	var mesh := ArrayMesh.new()
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
+	var node := MeshInstance3D.new()
+	node.mesh = mesh
+	node.material_override = _mat["arc_" + a[8]]
+	node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_track.add_child(node)
+	_arcs_on.append({"node": node, "time": start, "end": end})
+
+
+func _move_extras() -> void:
+	var speed: float = game["speed"]
+	for i in range(_arcs_on.size() - 1, -1, -1):
+		var e: Dictionary = _arcs_on[i]
+		var z := HIT_Z - (float(e["time"]) - _clock) * speed
+		(e["node"] as Node3D).position = Vector3(0, 0, z)
+		if HIT_Z - (float(e["end"]) - _clock) * speed > MISS_Z:
+			e["node"].queue_free()
+			_arcs_on.remove_at(i)
+	var head := Vector3(INF, INF, INF)
+	var cam: Node3D = ctx.get("camera")
+	if cam and is_instance_valid(cam) and cam.is_inside_tree():
+		head = _track.to_local(cam.global_position)
+	var inside := false
+	for i in range(_walls_on.size() - 1, -1, -1):
+		var e: Dictionary = _walls_on[i]
+		_place_wall(e)
+		var box: AABB = e["box"]
+		var here := AABB(Vector3(box.position.x, box.position.y, e["front"] - box.size.z), box.size)
+		if here.grow(0.05).has_point(head):
+			inside = true
+		if e["front"] - box.size.z > MISS_Z + 1.0:
+			e["node"].queue_free()
+			_walls_on.remove_at(i)
+	_wall_feel(inside)
+
+
+# Into a wall: the combo breaks once; while in, quiet music and a buzz.
+func _wall_feel(inside: bool) -> void:
+	if inside and not _in_wall:
+		bumped += 1
+		combo = 0
+		_pop(_track.to_local(ctx["camera"].global_position) + Vector3(0, -0.3, -0.6), "Wall!", 0)
+		_update_board()
+	if inside != _in_wall:
+		_song_player.volume_db = -15.0 if inside else 0.0
+	_in_wall = inside
+	if inside:
+		_pulse("left", 0.15, 0.05)
+		_pulse("right", 0.15, 0.05)
+
+
+func _clear_extras() -> void:
+	for e in _walls_on + _arcs_on:
+		if is_instance_valid(e["node"]):
+			e["node"].queue_free()
+	_walls_on.clear()
+	_arcs_on.clear()
+	if _in_wall:
+		_song_player.volume_db = 0.0
+	_in_wall = false
+
+
 func _move_and_cut(delta: float) -> void:
 	var speed: float = game["speed"]
 	for i in range(_active.size() - 1, -1, -1):
@@ -1910,7 +2356,7 @@ func _move_and_cut(delta: float) -> void:
 		var node: MeshInstance3D = a["node"]
 		var pos: Vector3 = a["pos"]
 		var was_z := pos.z
-		pos.z = HIT_Z - (float(a["time"]) - _clock) * speed
+		pos.z = _track_z(float(a["time"]) - _clock)
 		a["pos"] = pos
 		node.position = pos
 		if pos.z >= CUT_FROM and pos.z <= MISS_Z:
@@ -2088,7 +2534,7 @@ func _finish() -> void:
 	scores[key] = list.slice(0, TOP_SCORES)
 	_save_settings()
 	_results = {"title": _song["title"], "score": score, "max_combo": max_combo, "accuracy": snappedf(acc, 0.1), "rank": rank,
-		"cuts": cuts, "misses": missed, "bad_cuts": bad, "bombs_hit": bombs_hit, "new_best": new_best, "best": best.get(id, score)}
+		"cuts": cuts, "misses": missed, "bad_cuts": bad, "bombs_hit": bombs_hit, "walls_hit": bumped, "new_best": new_best, "best": best.get(id, score)}
 	running = false
 	_song_player.stop()
 	_board.text = "%s\n%d  rank %s\n%d%%  best combo %d" % [_song["title"], score, rank, int(acc), max_combo]
@@ -2209,19 +2655,87 @@ func _update_trail(side: String, base: Vector3, tip: Vector3) -> void:
 	im.surface_end()
 
 
-# A short soft click made here (no sound file).
-func _hit_sound() -> AudioStreamWAV:
-	var rate := 22050
-	var count := int(rate * 0.05)
+# The cut sound, made here (no sound file): an energy blade slicing through.
+# Three takes, picked at random with a little pitch and level change each
+# time (AudioStreamRandomizer), so a run of cuts doesn't sound like one
+# sample on repeat.
+func _hit_sound() -> AudioStream:
+	var takes := AudioStreamRandomizer.new()
+	takes.random_pitch = 1.06
+	takes.random_volume_offset_db = 1.5
+	for take in 3:
+		takes.add_stream(-1, _slice_take(take))
+	return takes
+
+
+# One take, about a third of a second, three layers mixed and softly
+# clipped:
+#   - the blade: two detuned low buzzes (saw-like, a few harmonics) whose
+#     pitch falls as it passes, like a saber swung past your ear;
+#   - the sizzle: noise through a band-pass filter that sweeps down from a
+#     bright hiss, the "kssh" of it burning through;
+#   - the hit: a short low thump that falls in pitch, so the cut lands;
+#   - the swoosh: softer, wider noise that rises and falls, the air the
+#     swing moves.
+# isaac 2026-10-31: lower, with a little swoosh, then a low-pass over all.
+func _slice_take(take: int) -> AudioStreamWAV:
+	var rate := 32000
+	var length := SLICE_SECONDS
+	var count := int(rate * length)
 	var data := PackedByteArray()
 	data.resize(count * 2)
 	var rng := RandomNumberGenerator.new()
-	rng.seed = 7
+	rng.seed = 101 + take * 17
+	var base: float = [76.0, 68.0, 84.0][take]   # each take a little different
+	var sweep: float = [2800.0, 2400.0, 3200.0][take]
+	var phase_a := 0.0
+	var phase_b := 0.0
+	var phase_t := 0.0
+	var bp1 := 0.0  # band-pass state (two passes of a simple state-variable filter)
+	var bp2 := 0.0
+	var lp1 := 0.0
+	var lp2 := 0.0
+	var wb := 0.0  # the swoosh's own band-pass
+	var wl := 0.0
+	var low_a := 0.0  # the final low-pass: two one-pole stages
+	var low_b := 0.0
+	var low_k := 1.0 - exp(-TAU * SLICE_LOW_PASS / rate)
 	for i in count:
 		var t := float(i) / rate
-		var env := exp(-t * 90.0)
-		var v := (0.6 * sin(TAU * 1800.0 * t) + 0.4 * rng.randf_range(-1.0, 1.0)) * env
-		data.encode_s16(i * 2, int(clampf(v, -1.0, 1.0) * 30000.0))
+		# The blade's buzz.
+		var bend := 1.0 + 0.35 * exp(-t * 14.0)  # starts high, settles
+		phase_a = fmod(phase_a + base * bend / rate, 1.0)
+		phase_b = fmod(phase_b + base * 1.013 * bend / rate, 1.0)
+		var buzz := 0.0
+		for h in [1, 2, 3, 5]:
+			buzz += (sin(TAU * phase_a * h) + sin(TAU * phase_b * h)) / float(h)
+		var buzz_env := minf(t / 0.006, 1.0) * exp(-t * 9.0)
+		# The sizzle: noise through a sweeping band-pass.
+		var centre := 600.0 + sweep * exp(-t * 18.0)
+		var f := 2.0 * sin(PI * centre / rate)
+		var q := 0.35
+		var noise := rng.randf_range(-1.0, 1.0)
+		var hp1 := noise - lp1 - q * bp1
+		bp1 += f * hp1
+		lp1 += f * bp1
+		var hp2 := bp1 - lp2 - q * bp2
+		bp2 += f * hp2
+		lp2 += f * bp2
+		var sizzle_env := minf(t / 0.003, 1.0) * exp(-t * 16.0)
+		# The hit: a falling thump.
+		phase_t = fmod(phase_t + (40.0 + 100.0 * exp(-t * 40.0)) / rate, 1.0)
+		var thump := sin(TAU * phase_t) * exp(-t * 32.0)
+		# The swoosh: wide band-passed noise, its centre rising then falling.
+		var wf := 2.0 * sin(PI * (350.0 + 1100.0 * sin(PI * minf(t / 0.3, 1.0))) / rate)
+		var whp := rng.randf_range(-1.0, 1.0) - wl - 1.2 * wb
+		wb += wf * whp
+		wl += wf * wb
+		var swoosh_env := sin(PI * minf(t / 0.36, 1.0)) * exp(-t * 3.0)
+		var v := 0.16 * buzz * buzz_env + 0.5 * bp2 * sizzle_env + 0.55 * thump + 0.35 * wb * swoosh_env
+		v = tanh(v * 1.6)  # soft clip: full but never harsh
+		low_a += low_k * (v - low_a)  # then a low-pass takes the hiss's edge off (isaac)
+		low_b += low_k * (low_a - low_b)
+		data.encode_s16(i * 2, int(clampf(low_b * 1.15, -1.0, 1.0) * 30000.0))
 	var s := AudioStreamWAV.new()
 	s.format = AudioStreamWAV.FORMAT_16_BITS
 	s.mix_rate = rate
@@ -2250,12 +2764,11 @@ func _make_assets() -> void:
 	_dot_mesh.bottom_radius = 0.05
 	_dot_mesh.height = 0.01
 	_dot_mesh.radial_segments = 16
-	# A chevron (two triangles) in the XY plane facing +z, tip up.
+	# A wide flat triangle in the XY plane facing +z, flat end along y = 0
+	# and its point up (isaac: the flat end lines up with the block's edge).
 	var arr := []
 	arr.resize(Mesh.ARRAY_MAX)
-	arr[Mesh.ARRAY_VERTEX] = PackedVector3Array([
-		Vector3(-0.09, 0.0, 0.0), Vector3(0.0, 0.07, 0.0), Vector3(0.0, 0.035, 0.0),
-		Vector3(0.0, 0.07, 0.0), Vector3(0.09, 0.0, 0.0), Vector3(0.0, 0.035, 0.0)])
+	arr[Mesh.ARRAY_VERTEX] = PackedVector3Array([Vector3(-ARROW_W / 2.0, 0.0, 0.0), Vector3(0.0, ARROW_H, 0.0), Vector3(ARROW_W / 2.0, 0.0, 0.0)])
 	_arrow_mesh = ArrayMesh.new()
 	_arrow_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
 	_mat["r"] = _glow(Color(1.0, 0.2, 0.2))
@@ -2266,6 +2779,18 @@ func _make_assets() -> void:
 	_mat["bomb"].shading_mode = BaseMaterial3D.SHADING_MODE_PER_PIXEL
 	_mat["bomb"].roughness = 0.4
 	_mat["spike"] = _glow(Color(0.5, 0.05, 0.4))
+	_wall_mesh = BoxMesh.new()
+	_wall_mesh.size = Vector3.ONE
+	var wall_shader := Shader.new()
+	wall_shader.code = WALL_SHADER
+	var wall := ShaderMaterial.new()
+	wall.shader = wall_shader
+	_mat["wall"] = wall
+	for hand in ["l", "r"]:
+		var line := _flat(Color(1.0, 0.3, 0.3, 0.7) if hand == "r" else Color(0.3, 0.5, 1.0, 0.7))
+		line.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		line.cull_mode = BaseMaterial3D.CULL_DISABLED
+		_mat["arc_" + hand] = line
 	var silver := StandardMaterial3D.new()
 	silver.albedo_color = Color(0.8, 0.8, 0.85)
 	silver.metallic = 1.0
@@ -2316,7 +2841,9 @@ func _new_note() -> MeshInstance3D:
 	var a := MeshInstance3D.new()
 	a.mesh = _arrow_mesh
 	a.material_override = _mat["marker"]
-	a.position = Vector3(0, 0.03, NOTE_HALF + 0.01)  # straight up on the face; the cube turns
+	# Pointing up the face, its flat end along the bottom edge: an up note's
+	# arrow starts at the bottom, a down note (the cube turned over) at the top.
+	a.position = Vector3(0, -NOTE_HALF + ARROW_EDGE, NOTE_HALF + 0.01)
 	m.add_child(a)
 	var d := MeshInstance3D.new()
 	d.mesh = _dot_mesh

@@ -83,6 +83,23 @@ func _go() -> void:
 	await _frames(3)
 	var hands = ctx["modules"].module("hands")
 	_check("hands chosen outside the game: sabers hidden", not saber.visible)
+	var cut_sound = _beat._hit_player.stream
+	var sound_ok: bool = cut_sound is AudioStreamRandomizer and cut_sound.streams_count == 3
+	for take in (cut_sound.streams_count if sound_ok else 0):
+		var w: AudioStreamWAV = cut_sound.get_stream(take)
+		var loudest := 0
+		for i in range(0, w.data.size(), 2):
+			loudest = maxi(loudest, absi(w.data.decode_s16(i)))
+		sound_ok = sound_ok and absf(w.get_length() - _beat.SLICE_SECONDS) < 0.01 and loudest > 12000 and loudest <= 32000
+	_check("cut sound: three takes, full but not clipping", sound_ok)
+	var fly_ok: bool = is_equal_approx(_beat._track_z(_beat._ahead()), _beat.SPAWN_Z) and is_equal_approx(_beat._track_z(_beat._lead()), _beat.SPAWN_Z + _beat.FLY_FROM)
+	var last_z: float = _beat._track_z(_beat._lead())
+	for i in range(1, 41):
+		var z: float = _beat._track_z(_beat._lead() - _beat.FLY_TIME * i / 40.0)
+		fly_ok = fly_ok and z > last_z
+		last_z = z
+	var join_speed: float = (_beat._track_z(_beat._ahead()) - _beat._track_z(_beat._ahead() + 0.01)) / 0.01
+	_check("notes fly in fast and join the track at note speed", fly_ok and absf(join_speed - float(_beat.game["speed"])) < 0.5, join_speed)
 	var labels_ok := true
 	for s in _beat.settings_info()["settings"]:
 		if s.has("label") and s["label"].length() > 40:
@@ -247,16 +264,21 @@ func _go() -> void:
 				{"_time": 2, "_lineIndex": 1, "_lineLayer": 0, "_type": 0, "_cutDirection": 6},
 				{"_time": 3, "_lineIndex": 2, "_lineLayer": 1, "_type": 1, "_cutDirection": 1},
 				{"_time": 4, "_lineIndex": 0, "_lineLayer": 2, "_type": 3, "_cutDirection": 0},
-				{"_time": 5, "_lineIndex": 5, "_lineLayer": 0, "_type": 1, "_cutDirection": 1}], "_obstacles": [], "_events": []},
+				{"_time": 5, "_lineIndex": 5, "_lineLayer": 0, "_type": 1, "_cutDirection": 1}],
+				"_obstacles": [{"_time": 3, "_lineIndex": 0, "_type": 1, "_duration": 2, "_width": 4}], "_events": []},
 			"ExpertPlus.dat": {"_version": "2.0.0", "_notes": [{"_time": 2, "_lineIndex": 3, "_lineLayer": 0, "_type": 1, "_cutDirection": 8}]},
 			"One.dat": {"version": "3.0.0", "colorNotes": [{"b": 2, "x": 1, "y": 1, "c": 1, "d": 7}, {"b": 3, "x": 2, "y": 0, "c": 1, "d": 0}],
-				"bombNotes": [{"b": 4, "x": 3, "y": 2}]}},
+				"bombNotes": [{"b": 4, "x": 3, "y": 2}],
+				"obstacles": [{"b": 2, "x": 0, "y": 0, "d": 1, "w": 1, "h": 5}, {"b": 3, "x": 0, "y": 0, "d": -1, "w": 1, "h": 5}],
+				"sliders": [{"c": 1, "b": 2, "x": 1, "y": 1, "d": 7, "mu": 1, "tb": 3, "tx": 2, "ty": 0, "tc": 0, "tmu": 1, "m": 0}]}},
 		"zz_v4": {"Info.dat": {"version": "4.0.0", "song": {"title": "Four", "author": "Band"}, "audio": {"songFilename": "music.wav", "bpm": 150},
 			"coverImageFilename": "cover.png", "difficultyBeatmaps": [{"characteristic": "Standard", "difficulty": "Normal",
 				"beatmapAuthors": {"mappers": ["Four mapper"]}, "beatmapDataFilename": "Normal.dat"}]},
 			"Normal.dat": {"version": "4.0.0", "colorNotes": [{"b": 1, "i": 0}, {"b": 2, "i": 1}, {"b": 3, "i": 7}],
 				"colorNotesData": [{"x": 0, "y": 0, "c": 0, "d": 4}, {"x": 3, "y": 1, "c": 1, "d": 3}],
-				"bombNotes": [{"b": 4, "i": 0}], "bombNotesData": [{"x": 1, "y": 2}]}},
+				"bombNotes": [{"b": 4, "i": 0}], "bombNotesData": [{"x": 1, "y": 2}],
+				"obstacles": [{"b": 2, "i": 0}], "obstaclesData": [{"d": 0.5, "x": 3, "y": 0, "w": 1, "h": 3}],
+				"arcs": [{"hb": 1, "tb": 2, "hi": 0, "ti": 1, "ai": 0}], "arcsData": [{"m": 1.5, "tm": 0.5, "a": 0}]}},
 		"zz_nomusic": {"Info.dat": {"_songName": "Silent", "_beatsPerMinute": 100, "_songFilename": "gone.egg",
 			"_difficultyBeatmapSets": [{"_beatmapCharacteristicName": "Standard", "_difficultyBeatmaps": [{"_difficulty": "Hard", "_beatmapFilename": "Hard.dat"}]}]},
 			"Hard.dat": {"_notes": [{"_time": 1, "_lineIndex": 0, "_lineLayer": 0, "_type": 0, "_cutDirection": 1}]}}}
@@ -284,6 +306,7 @@ func _go() -> void:
 	var read_notes: Array = _beat._song.get("notes", [])
 	_check("v2 hands, diagonal and bomb", read_notes.size() == 3 and read_notes[0] == [2.0, 1, 0, "l", "dl"] and read_notes[1] == [3.0, 2, 1, "r", "d"]
 		and read_notes[2] == [4.0, 0, 2, "b", "a"], read_notes)
+	_check("v2 crouch wall read", _beat._song.get("walls") == [[3.0, 2.0, 0.0, 4.0, 2.0, 3.0]] and _beat._song.get("arcs") == [], _beat._song.get("walls"))
 	_run({"cmd": "beatsaber_stop"})
 	_check("No arrows isn't offered when it has none", not _run({"cmd": "beatsaber_do", "act": "mode", "mode": "NoArrows"}).get("ok", true))
 	reply = _run({"cmd": "beatsaber_do", "act": "mode", "mode": "OneSaber"})
@@ -293,6 +316,8 @@ func _go() -> void:
 	read_notes = _beat._song.get("notes", [])
 	_check("v3 file read (colour and bomb notes)", reply.get("mode") == "OneSaber" and read_notes == [[2.0, 1, 1, "r", "dr"], [3.0, 2, 0, "r", "u"], [4.0, 3, 2, "b", "a"]],
 		[reply, read_notes])
+	_check("v3 wall (bad one left out) and arc read", _beat._song.get("walls") == [[2.0, 1.0, 0.0, 1.0, 0.0, 5.0]]
+		and _beat._song.get("arcs") == [[2.0, 1, 1, "dr", 3.0, 2, 0, "u", "r", 1.0, 1.0]], [_beat._song.get("walls"), _beat._song.get("arcs")])
 	await _frames(3)
 	_check("one saber: the left blade doesn't cut", not _beat._blade.has("left") and _beat._blade.has("right"), _beat._blade.keys())
 	_run({"cmd": "beatsaber_stop"})
@@ -302,12 +327,50 @@ func _go() -> void:
 	read_notes = _beat._song.get("notes", [])
 	_check("v4 Info and file read (data lists, bad index left out)", reply.get("ok", false) and reply.get("mode") == "Standard" and reply.get("difficulty") == "normal"
 		and reply.get("bpm") == 150.0 and read_notes == [[1.0, 0, 0, "l", "ul"], [2.0, 3, 1, "r", "r"], [4.0, 1, 2, "b", "a"]], [reply, read_notes])
+	_check("v4 wall and arc read (data lists)", _beat._song.get("walls") == [[2.0, 0.5, 3.0, 1.0, 0.0, 3.0]]
+		and _beat._song.get("arcs") == [[1.0, 0, 0, "ul", 2.0, 3, 1, "r", "l", 1.5, 0.5]], [_beat._song.get("walls"), _beat._song.get("arcs")])
+	_run({"cmd": "beatsaber_stop"})
+	# A wall across the whole track comes through you; an arc rides along.
+	_beat._begin({"id": "zz walls", "title": "Walls", "bpm": 60.0, "offset": 0.0, "audio": null, "notes": [[20.0, 0, 0, "r", "a"]], "mode": "Standard",
+		"walls": [[1.0, 2.0, 0.0, 4.0, 0.0, 5.0]], "arcs": [[1.0, 0, 0, "d", 2.0, 3, 2, "u", "l", 1.0, 1.0]]})
+	while _beat._clock < 0.3:
+		await _frames(1)
+	_check("wall and arc come down the track", _beat._walls_on.size() == 1 and _beat._arcs_on.size() == 1 and not _beat._in_wall)
+	while _beat._clock < 1.6:
+		await _frames(1)
+	_check("in the wall: combo breaks, music quiet", _beat._in_wall and _beat.bumped == 1 and _beat.combo == 0 and _beat._song_player.volume_db < -10.0,
+		[_beat._in_wall, _beat.bumped, _beat._song_player.volume_db])
+	while _beat._clock < 3.6:
+		await _frames(1)
+	_check("out again: music back, counted once", not _beat._in_wall and _beat.bumped == 1 and _beat._song_player.volume_db == 0.0
+		and _run({"cmd": "beatsaber_score"}).get("walls_hit") == 1)
+	_run({"cmd": "beatsaber_stop"})
+	_check("stop clears walls and arcs", _beat._walls_on.is_empty() and _beat._arcs_on.is_empty())
+	reply = _run({"cmd": "beatsaber_start", "song": "zz_v4"})
 	_check("v4 mapper shown", "mapped by Four mapper" in str(_beat._selected_info().get("detail")), _beat._selected_info())
 	_run({"cmd": "beatsaber_stop"})
 	reply = _run({"cmd": "beatsaber_start", "song": "zz_nomusic"})
 	_check("missing music is an error", not reply.get("ok", true) and "isn't there" in str(reply.get("error")), reply)
 
 	_check("Leave after the songs", _run({"cmd": "beatsaber_leave"}).get("back_in") == "start" and _world() == "start")
+
+	# Menu music: a calm loop for Free play, the song's preview when it has music
+	_run({"cmd": "beatsaber_do", "act": "enter"})
+	await _frames(3)
+	_run({"cmd": "beatsaber_do", "act": "select", "song": "free"})
+	_run({"cmd": "beatsaber_do", "act": "show"})
+	_check("menu music: the calm loop for Free play", _beat._menu_player.playing and _beat._menu_for == "calm"
+		and _beat._menu_player.stream.loop_mode == AudioStreamWAV.LOOP_FORWARD, [_beat._menu_player.playing, _beat._menu_for])
+	_run({"cmd": "beatsaber_do", "act": "select", "song": "zz_music"})
+	_check("a song's preview, a little way in", _beat._menu_for == "zz_music" and _beat._menu_player.playing and absf(_beat._menu_from - 6.0) < 0.01
+		and not _beat._menu_loop.is_stopped(), [_beat._menu_for, _beat._menu_from])
+	_run({"cmd": "beatsaber_set", "menu_music": false})
+	_check("Menu music off stops it", not _beat._menu_player.playing)
+	_run({"cmd": "beatsaber_set", "menu_music": true})
+	_check("and on again", _beat._menu_player.playing)
+	_run({"cmd": "beatsaber_start", "song": "free"})
+	_check("quiet while a song plays", not _beat._menu_player.playing and _beat._menu_loop.is_stopped())
+	_run({"cmd": "beatsaber_stop"})
 
 	# Online songs, through a stand-in net module
 	_check("no Online pack without net", not "Online" in _beat._packs())
