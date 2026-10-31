@@ -92,6 +92,30 @@ func _go() -> void:
 			loudest = maxi(loudest, absi(w.data.decode_s16(i)))
 		sound_ok = sound_ok and absf(w.get_length() - _beat.SLICE_SECONDS) < 0.01 and loudest > 12000 and loudest <= 32000
 	_check("cut sound: three takes, full but not clipping", sound_ok)
+	# Your own cut sounds: files in sounds/rhythm/ replace the made one, and
+	# it comes back when they're gone.
+	var cut_dir: String = _beat._lib.home().path_join(_beat.CUT_FOLDER)
+	DirAccess.make_dir_recursive_absolute(cut_dir)
+	var tone := AudioStreamWAV.new()
+	tone.format = AudioStreamWAV.FORMAT_16_BITS
+	tone.mix_rate = 22050
+	var tone_pcm := PackedByteArray()
+	tone_pcm.resize(4410)
+	for i in 2205:
+		tone_pcm.encode_s16(i * 2, int(8000.0 * sin(i * 0.2)))
+	tone.data = tone_pcm
+	tone.save_to_wav(cut_dir.path_join("cut-1.wav"))
+	tone.save_to_wav(cut_dir.path_join("cut-2.wav"))
+	tone.save_to_wav(cut_dir.path_join("other.wav"))
+	_beat._rescan()
+	var files_stream = _beat._hit_player.stream
+	var files_ok: bool = files_stream is AudioStreamRandomizer and files_stream.streams_count == 2 and files_stream.get_stream(0) is AudioStreamWAV \
+		and is_equal_approx(_beat._hit_player.volume_db, 0.0)
+	for f in ["cut-1.wav", "cut-2.wav", "other.wav"]:
+		DirAccess.remove_absolute(cut_dir.path_join(f))
+	_beat._rescan()
+	var made_back: bool = _beat._hit_player.stream.streams_count == 3 and is_equal_approx(_beat._hit_player.volume_db, _beat.CUT_MADE_DB)
+	_check("cut sound files in sounds/rhythm are the takes; the made one comes back without them", files_ok and made_back)
 	var fly_ok: bool = is_equal_approx(_beat._track_z(_beat._ahead()), _beat.SPAWN_Z) and is_equal_approx(_beat._track_z(_beat._lead()), _beat.SPAWN_Z + _beat.FLY_FROM)
 	var last_z: float = _beat._track_z(_beat._lead())
 	for i in range(1, 41):

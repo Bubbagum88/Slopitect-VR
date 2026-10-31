@@ -130,6 +130,11 @@ const MENU_PREVIEW := 12.0       # seconds of a song's preview before it starts 
 const MENU_FADE := 1.2           # seconds the menu music fades in
 const SLICE_SECONDS := 0.42      # the cut sound's length
 const SLICE_LOW_PASS := 2200.0   # Hz: the cut sound's final low-pass
+# Your own cut sounds (isaac): every cut*.ogg / cut*.wav in the Slopitect
+# folder's sounds/rhythm/ is one take, played as they are (set their level
+# in the files). Without any, the cut sound made in code plays.
+const CUT_FOLDER := "sounds/rhythm"
+const CUT_MADE_DB := -4.0        # the made-in-code cut sound's level
 const FLY_FROM := -40.0          # metres beyond the track's far end a note appears
 const FLY_TIME := 0.45           # seconds it takes to fly in to the track
 # How notes come in (isaac): from far away, falling onto the track, popping
@@ -227,6 +232,7 @@ var _track: Node3D          # notes, halves, labels; placed where you stand at t
 var _board: Label3D
 var _song_player: AudioStreamPlayer
 var _hit_player: AudioStreamPlayer
+var _cut_files := ""             # the cut sound files in use ("" = the made one)
 var _menu_player: AudioStreamPlayer  # music while the menus are open
 var _menu_loop: Timer                # brings a preview back to its start
 var _menu_for := ""                  # what the menu music is playing ("calm" or a song folder)
@@ -338,7 +344,7 @@ func setup() -> String:
 	_hit_player = AudioStreamPlayer.new()
 	_hit_player.stream = _hit_sound()
 	_hit_player.max_polyphony = 4
-	_hit_player.volume_db = -4.0
+	_hit_player.volume_db = CUT_MADE_DB
 	add_child(_hit_player)
 	for side in ["right", "left"]:
 		_make_saber(side)
@@ -357,6 +363,7 @@ func lib_ready(lib) -> void:
 		_show_sabers()
 		return
 	_load_settings()
+	_load_cut_sounds()
 	lib.info_changed.connect(_on_info_changed)
 	lib.watch(self, "controls", _controls_here, _controls_gone)
 	lib.watch(self, "hands", _hands_here, _hands_gone)
@@ -1587,6 +1594,7 @@ func _songs() -> Array:
 
 func _rescan() -> void:
 	_song_cache = null
+	_load_cut_sounds()
 
 
 func _song_dir_ok(dir_name) -> bool:
@@ -2731,6 +2739,43 @@ func _update_trail(side: String, base: Vector3, tip: Vector3) -> void:
 # Three takes, picked at random with a little pitch and level change each
 # time (AudioStreamRandomizer), so a run of cuts doesn't sound like one
 # sample on repeat.
+# Use the cut sound files if there are any (looked at again each time the
+# song list is), else the made one.
+func _load_cut_sounds() -> void:
+	if _lib == null or _hit_player == null:
+		return
+	var folder: String = _lib.home().path_join(CUT_FOLDER)
+	var names := []
+	for f in DirAccess.get_files_at(folder):
+		var low := f.to_lower()
+		if low.begins_with("cut") and (low.ends_with(".ogg") or low.ends_with(".wav")):
+			names.append(f)
+	names.sort()
+	var key := ""
+	for f in names:
+		key += "%s:%d;" % [f, FileAccess.get_modified_time(folder.path_join(f))]
+	if key == _cut_files:
+		return
+	_cut_files = key
+	var takes := AudioStreamRandomizer.new()
+	takes.random_pitch = 1.03
+	takes.random_volume_offset_db = 1.0
+	for f in names:
+		var path := folder.path_join(f)
+		var take: AudioStream = AudioStreamOggVorbis.load_from_file(path) if f.to_lower().ends_with(".ogg") else AudioStreamWAV.load_from_file(path)
+		if take == null:
+			push_warning("Rhythm Sabers: couldn't read the cut sound " + path)
+			continue
+		takes.add_stream(-1, take)
+	if takes.streams_count == 0:
+		_cut_files = ""
+		_hit_player.stream = _hit_sound()
+		_hit_player.volume_db = CUT_MADE_DB
+		return
+	_hit_player.stream = takes
+	_hit_player.volume_db = 0.0
+
+
 func _hit_sound() -> AudioStream:
 	var takes := AudioStreamRandomizer.new()
 	takes.random_pitch = 1.06
