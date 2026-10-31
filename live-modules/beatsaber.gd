@@ -99,6 +99,9 @@ const CUT_FROM := -2.6           # notes check for cuts only from here on
 const NOTE_SIZE := 0.3
 const NOTE_HALF := 0.15
 const NOTE_ROUND := 0.03         # radius of the note's rounded edges
+const ARROW_W := 0.2             # the arrow: a wide flat triangle
+const ARROW_H := 0.075
+const ARROW_EDGE := 0.025        # its flat end's gap from the block's edge
 const HIT_MARGIN := 0.05
 const POOL_NOTES := 32
 const POOL_BOMBS := 8
@@ -270,7 +273,7 @@ func setup() -> String:
 	_hit_player = AudioStreamPlayer.new()
 	_hit_player.stream = _hit_sound()
 	_hit_player.max_polyphony = 4
-	_hit_player.volume_db = -6.0
+	_hit_player.volume_db = -4.0
 	add_child(_hit_player)
 	for side in ["right", "left"]:
 		_make_saber(side)
@@ -2209,19 +2212,71 @@ func _update_trail(side: String, base: Vector3, tip: Vector3) -> void:
 	im.surface_end()
 
 
-# A short soft click made here (no sound file).
-func _hit_sound() -> AudioStreamWAV:
-	var rate := 22050
-	var count := int(rate * 0.05)
+# The cut sound, made here (no sound file): an energy blade slicing through.
+# Three takes, picked at random with a little pitch and level change each
+# time (AudioStreamRandomizer), so a run of cuts doesn't sound like one
+# sample on repeat.
+func _hit_sound() -> AudioStream:
+	var takes := AudioStreamRandomizer.new()
+	takes.random_pitch = 1.06
+	takes.random_volume_offset_db = 1.5
+	for take in 3:
+		takes.add_stream(-1, _slice_take(take))
+	return takes
+
+
+# One take, about a third of a second, three layers mixed and softly
+# clipped:
+#   - the blade: two detuned low buzzes (saw-like, a few harmonics) whose
+#     pitch falls as it passes, like a saber swung past your ear;
+#   - the sizzle: noise through a band-pass filter that sweeps down from a
+#     bright hiss, the "kssh" of it burning through;
+#   - the hit: a short low thump that falls in pitch, so the cut lands.
+func _slice_take(take: int) -> AudioStreamWAV:
+	var rate := 32000
+	var length := 0.34
+	var count := int(rate * length)
 	var data := PackedByteArray()
 	data.resize(count * 2)
 	var rng := RandomNumberGenerator.new()
-	rng.seed = 7
+	rng.seed = 101 + take * 17
+	var base: float = [112.0, 98.0, 124.0][take]   # each take a little different
+	var sweep: float = [4200.0, 3600.0, 4800.0][take]
+	var phase_a := 0.0
+	var phase_b := 0.0
+	var phase_t := 0.0
+	var bp1 := 0.0  # band-pass state (two passes of a simple state-variable filter)
+	var bp2 := 0.0
+	var lp1 := 0.0
+	var lp2 := 0.0
 	for i in count:
 		var t := float(i) / rate
-		var env := exp(-t * 90.0)
-		var v := (0.6 * sin(TAU * 1800.0 * t) + 0.4 * rng.randf_range(-1.0, 1.0)) * env
-		data.encode_s16(i * 2, int(clampf(v, -1.0, 1.0) * 30000.0))
+		# The blade's buzz.
+		var bend := 1.0 + 0.35 * exp(-t * 14.0)  # starts high, settles
+		phase_a = fmod(phase_a + base * bend / rate, 1.0)
+		phase_b = fmod(phase_b + base * 1.013 * bend / rate, 1.0)
+		var buzz := 0.0
+		for h in [1, 2, 3, 5]:
+			buzz += (sin(TAU * phase_a * h) + sin(TAU * phase_b * h)) / float(h)
+		var buzz_env := minf(t / 0.006, 1.0) * exp(-t * 9.0)
+		# The sizzle: noise through a sweeping band-pass.
+		var centre := 900.0 + sweep * exp(-t * 18.0)
+		var f := 2.0 * sin(PI * centre / rate)
+		var q := 0.35
+		var noise := rng.randf_range(-1.0, 1.0)
+		var hp1 := noise - lp1 - q * bp1
+		bp1 += f * hp1
+		lp1 += f * bp1
+		var hp2 := bp1 - lp2 - q * bp2
+		bp2 += f * hp2
+		lp2 += f * bp2
+		var sizzle_env := minf(t / 0.003, 1.0) * exp(-t * 16.0)
+		# The hit: a falling thump.
+		phase_t = fmod(phase_t + (55.0 + 140.0 * exp(-t * 40.0)) / rate, 1.0)
+		var thump := sin(TAU * phase_t) * exp(-t * 32.0)
+		var v := 0.16 * buzz * buzz_env + 0.55 * bp2 * sizzle_env + 0.55 * thump
+		v = tanh(v * 1.6) * 0.9  # soft clip: full but never harsh
+		data.encode_s16(i * 2, int(v * 32000.0))
 	var s := AudioStreamWAV.new()
 	s.format = AudioStreamWAV.FORMAT_16_BITS
 	s.mix_rate = rate
@@ -2250,12 +2305,11 @@ func _make_assets() -> void:
 	_dot_mesh.bottom_radius = 0.05
 	_dot_mesh.height = 0.01
 	_dot_mesh.radial_segments = 16
-	# A chevron (two triangles) in the XY plane facing +z, tip up.
+	# A wide flat triangle in the XY plane facing +z, flat end along y = 0
+	# and its point up (isaac: the flat end lines up with the block's edge).
 	var arr := []
 	arr.resize(Mesh.ARRAY_MAX)
-	arr[Mesh.ARRAY_VERTEX] = PackedVector3Array([
-		Vector3(-0.09, 0.0, 0.0), Vector3(0.0, 0.07, 0.0), Vector3(0.0, 0.035, 0.0),
-		Vector3(0.0, 0.07, 0.0), Vector3(0.09, 0.0, 0.0), Vector3(0.0, 0.035, 0.0)])
+	arr[Mesh.ARRAY_VERTEX] = PackedVector3Array([Vector3(-ARROW_W / 2.0, 0.0, 0.0), Vector3(0.0, ARROW_H, 0.0), Vector3(ARROW_W / 2.0, 0.0, 0.0)])
 	_arrow_mesh = ArrayMesh.new()
 	_arrow_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
 	_mat["r"] = _glow(Color(1.0, 0.2, 0.2))
@@ -2316,7 +2370,9 @@ func _new_note() -> MeshInstance3D:
 	var a := MeshInstance3D.new()
 	a.mesh = _arrow_mesh
 	a.material_override = _mat["marker"]
-	a.position = Vector3(0, 0.03, NOTE_HALF + 0.01)  # straight up on the face; the cube turns
+	# Pointing up the face, its flat end along the bottom edge: an up note's
+	# arrow starts at the bottom, a down note (the cube turned over) at the top.
+	a.position = Vector3(0, -NOTE_HALF + ARROW_EDGE, NOTE_HALF + 0.01)
 	m.add_child(a)
 	var d := MeshInstance3D.new()
 	d.mesh = _dot_mesh

@@ -83,6 +83,15 @@ func _go() -> void:
 	await _frames(3)
 	var hands = ctx["modules"].module("hands")
 	_check("hands chosen outside the game: sabers hidden", not saber.visible)
+	var cut_sound = _beat._hit_player.stream
+	var sound_ok: bool = cut_sound is AudioStreamRandomizer and cut_sound.streams_count == 3
+	for take in (cut_sound.streams_count if sound_ok else 0):
+		var w: AudioStreamWAV = cut_sound.get_stream(take)
+		var loudest := 0
+		for i in range(0, w.data.size(), 2):
+			loudest = maxi(loudest, absi(w.data.decode_s16(i)))
+		sound_ok = sound_ok and absf(w.get_length() - 0.34) < 0.01 and loudest > 12000 and loudest <= 32000
+	_check("cut sound: three takes, full but not clipping", sound_ok)
 	var labels_ok := true
 	for s in _beat.settings_info()["settings"]:
 		if s.has("label") and s["label"].length() > 40:
