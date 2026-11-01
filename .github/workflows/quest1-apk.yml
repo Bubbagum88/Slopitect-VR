@@ -23,6 +23,10 @@ env:
   # need to turn text into sounds (2.0 removed it).
   SHERPA_ONNX_VERSION: 1.13.8
   SHERPA_AAR_SHA256: 633c24321e06b1fe79feafa03ea16cbc0f8a286641e2da3559bac91bdb13bd96
+  # GameCoob-Bios (isaac's own): the GameCube intro and cube menu in Rust,
+  # for gamecube.gd through the gamecoob extension (native/gamecoob). No
+  # Nintendo data is in it; the intro reads the player's own ipl.bin.
+  GAMECOOB_COMMIT: 93b3e4a5c851bddbca3c34d64e4e1bbc0e724c53
 
 jobs:
   whisper:
@@ -93,8 +97,40 @@ jobs:
           name: godot-whisper
           path: whisper-out
 
+  gamecoob:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: slopitect
+          sparse-checkout: native
+
+      - uses: actions/checkout@v4
+        with:
+          repository: Bubbagum88/GameCoob-Bios
+          ref: ${{ env.GAMECOOB_COMMIT }}
+          path: slopitect/native/gamecoob/GameCoob-Bios
+
+      # The Quest's library goes in the APK; the Linux one is for the editor
+      # that imports and exports the project here (see the whisper job).
+      - name: Build the gamecoob extension for the Quest (Android arm64) and for Linux
+        run: |
+          set -euo pipefail
+          rustup target add aarch64-linux-android x86_64-unknown-linux-gnu
+          ANDROID_NDK="$ANDROID_NDK_LATEST_HOME" slopitect/native/gamecoob/build.sh
+          nm="$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-nm"
+          "$nm" -D --defined-only slopitect/game/addons/gamecoob/bin/libgamecoob.android.arm64.so | grep -q ' gamecoob_init$' \
+            || { echo "::error::the Android library has no gamecoob_init"; exit 1; }
+          mkdir -p gamecoob-out/bin
+          cp slopitect/game/addons/gamecoob/bin/*.so gamecoob-out/bin/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gamecoob
+          path: gamecoob-out
+
   build:
-    needs: whisper
+    needs: [whisper, gamecoob]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -130,6 +166,11 @@ jobs:
           name: godot-whisper
           path: game/addons/godot_whisper
 
+      - uses: actions/download-artifact@v4
+        with:
+          name: gamecoob
+          path: game/addons/gamecoob
+
       # Godot's gradle build adds any .aar in res://addons to the APK.
       - name: Download sherpa-onnx's Android library
         env:
@@ -156,7 +197,8 @@ jobs:
           # later open of the project, and the import exits cleanly.
           mkdir -p game/.godot
           printf '%s\n' res://addons/godotopenxrvendors/plugin.gdextension \
-            res://addons/godot_whisper/godot_whisper.gdextension > game/.godot/extension_list.cfg
+            res://addons/godot_whisper/godot_whisper.gdextension \
+            res://addons/gamecoob/gamecoob.gdextension > game/.godot/extension_list.cfg
           ./godot --headless --path game --import
 
       - name: Export the APK
@@ -192,6 +234,7 @@ jobs:
             grep -q "android.permission.$perm\"" manifest.txt && echo "has permission $perm" || { echo "::error::missing permission $perm"; fail=1; }
           done
           for lib in lib/arm64-v8a/libgodot_android.so lib/arm64-v8a/libgodotopenxrvendors.so lib/arm64-v8a/libgodot_whisper.android.template_release.arm64.so \
+            lib/arm64-v8a/libgamecoob.android.arm64.so \
             lib/arm64-v8a/libsherpa-onnx-jni.so lib/arm64-v8a/libonnxruntime.so; do
             unzip -l "$apk" "$lib" > /dev/null && echo "has $lib" || { echo "::error::missing $lib"; fail=1; }
           done

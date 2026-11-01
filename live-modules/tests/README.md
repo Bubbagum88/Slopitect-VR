@@ -41,6 +41,7 @@ The modules each test loads, in order (the order matters: some load lib last on 
 | `zz_pause.gd` | `pause controls vrui tools lib zz_pause` |
 | `zz_paths.gd` | `paths lib landscape tools zz_paths` |
 | `zz_perf.gd` | `lib perf zz_perf` |
+| `zz_gamecube.gd` | `lib vrui gamecube zz_gamecube` (needs the gamecoob extension built: `native/gamecoob/build.sh`; set `GAMECUBE_IPL` to your own dump for the intro checks) |
 | `zz_physics.gd` | `physics lib landscape zz_physics` |
 | `zz_prefabs.gd` | `lib tools prefabs zz_prefabs` |
 | `zz_projects.gd` | `save projects lib zz_projects` |

@@ -1,0 +1,20 @@
+[package]
+name = "gamecoob"
+version = "0.1.0"
+edition = "2024"
+description = "Godot extension for Slopitect: GameCoob-Bios's rebuilt GameCube intro and cube menu, drawn into a picture"
+
+# Standalone: GameCoob-Bios's src/ is read from ./GameCoob-Bios (a checkout of
+# isaac's repo at the commit in .github/workflows/quest1-apk.yml), as its own
+# tools/ do. Build with build.sh.
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+libm = "0.2.16"
+
+[profile.release]
+opt-level = 3
+lto = true

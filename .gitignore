@@ -11,3 +11,8 @@ game/addons/sherpa-onnx-*.aar
 *.apk
 *.aab
 slopi-key.txt
+
+# The gamecoob extension: built by CI or native/gamecoob/build.sh
+game/addons/gamecoob/bin/
+native/gamecoob/target/
+native/gamecoob/GameCoob-Bios
