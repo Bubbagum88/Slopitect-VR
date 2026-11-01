@@ -2405,6 +2405,13 @@ func focus() -> String:
 	return _focus
 
 
+# The panel the pointer is on right now ("" for none): for a module that
+# goes before this one for the trigger (a game) and leaves presses on
+# windows to it.
+func pointing() -> String:
+	return _pointing
+
+
 func last_pointed(except := "") -> String:
 	for id_panel in _pointed:
 		if id_panel != except:
