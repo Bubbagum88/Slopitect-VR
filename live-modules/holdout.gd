@@ -1051,6 +1051,8 @@ func _stage_on() -> void:
 	add_child(_arena)  # its own, not World's: nothing to save or select
 	_place_arena()
 	_build_lodge()
+	if _lib and _lib.has_method("add_app_things"):
+		_lib.call("add_app_things", self)
 
 
 func _stage_off() -> void:
@@ -1064,6 +1066,10 @@ func _stage_off() -> void:
 	_swapped.clear()
 	_hold_gear(false)
 	if _arena != null and is_instance_valid(_arena):
+		# Out of the tree now, not at the end of the frame: a new map's pieces
+		# are built straight after, with the same names.
+		if _arena.get_parent():
+			_arena.get_parent().remove_child(_arena)
 		_arena.queue_free()
 	_arena = null
 	_zombie_mm = null
@@ -1105,10 +1111,10 @@ func _place_arena() -> void:
 
 func _build_lodge() -> void:
 	# Ground, and each room's floorboards.
-	_box(_arena, Vector3(90.0, 0.02, 90.0), Vector3(0.0, -0.02, 0.0), _mats["ground"])
+	_tag(_box(_arena, Vector3(90.0, 0.02, 90.0), Vector3(0.0, -0.02, 0.0), _mats["ground"]), "ground")
 	for room in _map["rooms"]:
 		var r: Array = _map["rooms"][room]
-		_box(_arena, Vector3(r[2], 0.02, r[3]), Vector3(r[0] + r[2] / 2.0, 0.0, r[1] + r[3] / 2.0), _mats["dirt"] if room in _map["outdoor"] else _mats["boards"])
+		_tag(_box(_arena, Vector3(r[2], 0.02, r[3]), Vector3(r[0] + r[2] / 2.0, 0.0, r[1] + r[3] / 2.0), _mats["dirt"] if room in _map["outdoor"] else _mats["boards"]), "floor_" + room)
 	# Walls, with gaps for the doors and windows: one MultiMesh.
 	var parts := []  # [size, centre]
 	for room in _map["rooms"]:
@@ -1135,18 +1141,23 @@ func _build_lodge() -> void:
 		_walls.append(AABB(at - size / 2.0, size))
 	var walls := MultiMeshInstance3D.new()
 	walls.name = "walls"
+	_tag(walls, "walls")
 	walls.multimesh = mm
 	walls.material_override = _mats["wall"]
 	_arena.add_child(walls)
 	# Obstacles outside: they stop shots and the dead walk round them.
-	for o in _map.get("obstacles", []):
+	var obstacles: Array = _map.get("obstacles", [])
+	for oi in obstacles.size():
+		var o: Array = obstacles[oi]
 		var size := Vector3(o[2], o[4], o[3])
 		var at := Vector3(o[0], o[4] / 2.0, o[1])
-		_box(_arena, size, at, _mats["trunk"])
+		_tag(_box(_arena, size, at, _mats["trunk"]), "obstacle_%d" % oi)
 		_walls.append(AABB(at - size / 2.0, size))
 	# Lanterns: glowing, no real light.
-	for at in _map["lanterns"]:
-		_box(_arena, Vector3(0.12, 0.2, 0.12), Vector3(at[0], at[1], at[2]), _mats["lantern"])
+	var lanterns: Array = _map["lanterns"]
+	for li in lanterns.size():
+		var at: Array = lanterns[li]
+		_tag(_box(_arena, Vector3(0.12, 0.2, 0.12), Vector3(at[0], at[1], at[2]), _mats["lantern"]), "lantern_%d" % li)
 	_build_trees()
 	_build_windows()
 	_build_doors()
@@ -1160,6 +1171,7 @@ func _build_lodge() -> void:
 	_zombie_mm.instance_count = POOL
 	var dead := MultiMeshInstance3D.new()
 	dead.name = "dead"
+	_tag(dead, "dead")  # texturing it skins every one of them
 	dead.multimesh = _zombie_mm
 	dead.material_override = _mats["zombie"]
 	dead.custom_aabb = AABB(Vector3(-60, -5, -60), Vector3(120, 15, 120))  # never culled: they move
@@ -1269,6 +1281,7 @@ func _build_trees() -> void:
 			else:
 				mm.set_instance_transform(i, Transform3D(Basis.from_scale(Vector3(1.6 * s, 5.0 * s, 1.6 * s)), at + Vector3(0, 4.5 * s, 0)))
 		var node := MultiMeshInstance3D.new()
+		_tag(node, "trunks" if part[0] == trunk else "crowns")
 		node.multimesh = mm
 		node.material_override = part[1]
 		node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
@@ -1286,6 +1299,7 @@ func _build_windows() -> void:
 		var list := []
 		for i in PLANKS:
 			var p := MeshInstance3D.new()
+			_tag(p, "plank_%s_%d" % [wnd["id"], i])
 			p.mesh = board
 			p.material_override = _mats["plank"]
 			_arena.add_child(p)
@@ -1301,6 +1315,7 @@ func _build_doors() -> void:
 	for d in _map["doors"]:
 		var at := Vector3(d["at"][0], 0, d["at"][1])
 		var pile := Node3D.new()
+		_tag(pile, "debris_" + d["id"])
 		_arena.add_child(pile)
 		pile.position = at
 		var inward0 := _into_room(at, d["rooms"][0])
@@ -1338,11 +1353,13 @@ func _build_wall_things() -> void:
 		var inward := Vector3(spot["in"][0], 0, spot["in"][1])
 		var yaw := atan2(inward.x, inward.z)
 		var board := _box(_arena, Vector3(0.9, 0.5, 0.03), at + inward * (WALL_T / 2.0 + 0.02) + Vector3(0, 1.45, 0), _mats["chalkboard"])
+		_tag(board, "board_" + spot["gun"])
 		board.rotation.y = yaw
 		# The gun's outline in chalk: its own shape, flat and pale.
 		var outline := MeshInstance3D.new()
 		outline.mesh = _gun_mesh_for(spot["gun"])
 		outline.material_override = _mats["chalk"]
+		_tag(outline, "outline_" + spot["gun"])
 		_arena.add_child(outline)
 		outline.transform = Transform3D(Basis(Vector3.UP, yaw + PI / 2.0) * Basis.from_scale(Vector3(1.2, 1.2, 1.2) * minf(1.0, 0.36 / g["len"])),
 			at + inward * (WALL_T / 2.0 + 0.06) + Vector3(0, 1.5, 0))
@@ -1356,8 +1373,10 @@ func _build_wall_things() -> void:
 		var inward := Vector3(spot["in"][0], 0, spot["in"][1])
 		var yaw := atan2(inward.x, inward.z)
 		var body := _box(_arena, Vector3(0.7, 1.8, 0.45), at + inward * (WALL_T / 2.0 + 0.24) + Vector3(0, 0.9, 0), _mats["machine"])
+		_tag(body, "machine_" + spot["tonic"])
 		body.rotation.y = yaw
 		var glow := _box(_arena, Vector3(0.5, 0.55, 0.02), at + inward * (WALL_T / 2.0 + 0.47) + Vector3(0, 1.3, 0), _flat_glow(t["color"]))
+		_tag(glow, "glow_" + spot["tonic"])
 		glow.rotation.y = yaw
 		var label := _label(_arena, "%s  %d\n%s" % [t["name"], t["cost"], t["does"]], 40, t["color"].lightened(0.4))
 		label.position = at + inward * (WALL_T / 2.0 + 0.5) + Vector3(0, 0.75, 0)
@@ -1367,8 +1386,10 @@ func _build_wall_things() -> void:
 	var c_in := Vector3(_map["crate"]["in"][0], 0, _map["crate"]["in"][1])
 	var c_yaw := atan2(c_in.x, c_in.z)
 	var chest := _box(_arena, Vector3(1.2, 0.6, 0.6), c_at + c_in * (WALL_T / 2.0 + 0.35) + Vector3(0, 0.3, 0), _mats["crate"])
+	_tag(chest, "crate")
 	chest.rotation.y = c_yaw
 	var rim := _box(_arena, Vector3(1.24, 0.04, 0.64), c_at + c_in * (WALL_T / 2.0 + 0.35) + Vector3(0, 0.6, 0), _flat_glow(Color(0.95, 0.75, 0.2)))
+	_tag(rim, "crate_rim")
 	rim.rotation.y = c_yaw
 	_crate_label = _label(_arena, "Lucky Crate\n%d" % CRATE_COST, 52, Color(1.0, 0.85, 0.35))
 	_crate_label.position = c_at + c_in * (WALL_T / 2.0 + 0.35) + Vector3(0, 1.05, 0)
@@ -2824,6 +2845,7 @@ func _build_power_things() -> void:
 	var g_in := Vector3(_map["generator"]["in"][0], 0, _map["generator"]["in"][1])
 	var g_yaw := atan2(g_in.x, g_in.z)
 	var engine := _box(_arena, Vector3(1.0, 0.8, 0.6), g_at + g_in * (WALL_T / 2.0 + 0.32) + Vector3(0, 0.4, 0), _mats["machine"])
+	_tag(engine, "generator")
 	engine.rotation.y = g_yaw
 	var tank := _box(_arena, Vector3(0.7, 0.25, 0.4), g_at + g_in * (WALL_T / 2.0 + 0.32) + Vector3(0, 0.92, 0), _mats["crate"])
 	tank.rotation.y = g_yaw
@@ -2840,7 +2862,9 @@ func _build_power_things() -> void:
 	var a_yaw := atan2(a_in.x, a_in.z)
 	var spot := a_at + a_in * (WALL_T / 2.0 + 0.45)
 	_box(_arena, Vector3(0.5, 0.6, 0.5), spot + Vector3(0, 0.3, 0), _mats["trunk"]).rotation.y = a_yaw
-	_box(_arena, Vector3(0.7, 0.18, 0.28), spot + Vector3(0, 0.72, 0), _mats["iron"]).rotation.y = a_yaw
+	var anvil_top := _box(_arena, Vector3(0.7, 0.18, 0.28), spot + Vector3(0, 0.72, 0), _mats["iron"])
+	anvil_top.rotation.y = a_yaw
+	_tag(anvil_top, "anvil")
 	_box(_arena, Vector3(0.3, 0.12, 0.18), spot + Vector3(0, 0.6, 0), _mats["iron"]).rotation.y = a_yaw
 	var glow := _box(_arena, Vector3(0.72, 0.02, 0.3), spot + Vector3(0, 0.82, 0), _mats["off"])
 	glow.rotation.y = a_yaw
@@ -3310,6 +3334,13 @@ func _flat_glow(color: Color) -> StandardMaterial3D:
 	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	m.albedo_color = color
 	return m
+
+
+# Marks a piece for the world's list (lib.gd's add_app_things, when it has
+# it): the agent and the inspect / textures tools can then find it by name.
+# The same name every time the buildings go up.
+func _tag(node: Node, thing_name: String) -> void:
+	node.set_meta("slopitect_app_thing", "holdout_" + thing_name)
 
 
 func _box(parent: Node3D, size: Vector3, at: Vector3, material: Material) -> MeshInstance3D:

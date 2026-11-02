@@ -479,6 +479,10 @@ func _go() -> void:
 	# The one-barrier map: one room, one window, and the dead find their way to it.
 	_run({"cmd": "holdout_stop"})
 	var cab = await _r({"cmd": "holdout_start", "map": "cabin"})
+	var libm = ctx["modules"].module("lib")
+	if libm.has_method("add_app_things"):  # lib.gd with the world list of apps' pieces
+		_check("app things: the Cabin's walls, crate and dead are in the world list", libm.thing("holdout_walls") != null
+			and libm.thing("holdout_crate") != null and libm.thing("holdout_dead") != null)
 	_check("the Cabin starts", cab.get("ok", false) and _h.settings["map"] == "cabin" and _h._arena != null, cab)
 	_check("one room, one window, no doors", _h._map["rooms"].size() == 1 and _h._map["windows"].size() == 1 and _h._map["doors"].is_empty()
 		and _h.planks.size() == 1)
