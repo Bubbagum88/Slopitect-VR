@@ -13,8 +13,9 @@ extends SlopitectModule
 #   - guns on the walls (chalk outlines with a price): buy one, or its ammo
 #     for half the price once you have it. You carry two; a third replaces
 #     the one in your hand.
-#   - debris in the doorways (Trophy Room, Back Yard): clearing it opens the
-#     room, and the dead come in through its windows too from then on.
+#   - the debris in the doorway to the Back Yard (the first map has one
+#     barrier): clearing it opens the yard, and the dead come in through
+#     its windows too from then on.
 #   - the Lucky Crate (950): a random gun, some found nowhere else. It
 #     shuffles, then offers one for a few seconds: take it or lose it.
 #   - tonics from the old machines along the walls: Ironbark (more health),
@@ -75,37 +76,42 @@ const POOL := 20                 # the most of the dead there can be at once
 # Rooms are [x, z, width, depth] on the ground.
 const ROOMS := {
 	"hall": [-4.0, -4.0, 8.0, 8.0],
-	"trophy": [4.0, -3.0, 6.0, 6.0],
 	"yard": [-4.0, 4.0, 8.0, 6.0],
 }
-const ROOM_NAMES := {"hall": "Great Hall", "trophy": "Trophy Room", "yard": "Back Yard"}
+const ROOM_NAMES := {"hall": "Great Hall", "yard": "Back Yard"}
+# The first map: one barrier. Later maps can add rooms and doors here.
 const DOORS := [
-	{"id": "trophy_door", "rooms": ["hall", "trophy"], "at": [4.0, 0.0], "cost": 750},
 	{"id": "yard_door", "rooms": ["hall", "yard"], "at": [0.0, 4.0], "cost": 1000},
 ]
 # Windows: where on a wall, and "out" (the way out of the room).
 const WINDOWS := [
 	{"id": "w1", "room": "hall", "at": [-2.0, -4.0], "out": [0.0, -1.0]},
 	{"id": "w2", "room": "hall", "at": [-4.0, 1.5], "out": [-1.0, 0.0]},
-	{"id": "w3", "room": "trophy", "at": [7.0, -3.0], "out": [0.0, -1.0]},
-	{"id": "w4", "room": "trophy", "at": [10.0, 0.0], "out": [1.0, 0.0]},
+	{"id": "w3", "room": "hall", "at": [4.0, 0.3], "out": [1.0, 0.0]},
+	{"id": "w4", "room": "yard", "at": [4.0, 5.2], "out": [1.0, 0.0]},
 	{"id": "w5", "room": "yard", "at": [-4.0, 7.0], "out": [-1.0, 0.0]},
 	{"id": "w6", "room": "yard", "at": [0.0, 10.0], "out": [0.0, 1.0]},
 ]
 # Things on the walls: "in" is the way into the room.
 const WALL_GUNS := [
-	{"gun": "scattergun", "at": [-4.0, -2.0], "in": [1.0, 0.0]},
-	{"gun": "buzzer", "at": [4.0, -2.6], "in": [-1.0, 0.0]},
-	{"gun": "ridgeback", "at": [7.0, 3.0], "in": [0.0, -1.0]},
-	{"gun": "longreach", "at": [5.4, -3.0], "in": [0.0, 1.0]},
+	{"gun": "double_barrel", "at": [-4.0, -2.0], "in": [1.0, 0.0]},
+	{"gun": "mp5", "at": [4.0, -2.6], "in": [-1.0, 0.0]},
+	{"gun": "m14", "at": [4.0, 2.6], "in": [-1.0, 0.0]},
+	{"gun": "ak47", "at": [-2.4, 4.0], "in": [0.0, 1.0]},
 ]
 const TONIC_SPOTS := [
 	{"tonic": "quickhands", "at": [-2.6, 4.0], "in": [0.0, -1.0]},
-	{"tonic": "rattle_rum", "at": [10.0, -1.8], "in": [-1.0, 0.0]},
-	{"tonic": "mending_moss", "at": [8.8, 3.0], "in": [0.0, -1.0]},
+	{"tonic": "rattle_rum", "at": [-4.0, 5.2], "in": [1.0, 0.0]},
+	{"tonic": "mending_moss", "at": [2.4, 10.0], "in": [0.0, -1.0]},
 	{"tonic": "ironbark", "at": [-4.0, 8.8], "in": [1.0, 0.0]},
 ]
-const CRATE_SPOT := {"at": [4.0, 7.0], "in": [-1.0, 0.0]}
+const CRATE_SPOT := {"at": [4.0, 7.4], "in": [-1.0, 0.0]}
+const GENERATOR_SPOT := {"at": [-2.4, 10.0], "in": [0.0, -1.0]}
+const ANVIL_SPOT := {"at": [2.4, 4.0], "in": [0.0, 1.0]}
+const BENCH_SPOT := {"at": [2.2, 4.0], "in": [0.0, -1.0]}
+const SECOND_WIND_SPOT := {"tonic": "second_wind", "at": [2.4, -4.0], "in": [0.0, 1.0]}
+# Where the shield's three parts lie (on the floor).
+const PART_SPOTS := [[3.3, -3.3], [-3.2, 3.3], [3.2, 9.2]]
 const WALL_H := 3.0
 const WALL_T := 0.2
 const DOOR_W := 1.6
@@ -121,26 +127,31 @@ const PLANKS := 5
 # only), pierce (how many it goes through), splash (radius, m), chain (how
 # many more it jumps to), chill (seconds slowed), colour, len (m).
 const GUNS := {
-	"nailer": {"name": "Nailer", "damage": 40.0, "rate": 0.22, "mag": 8, "reserve": 64, "reload": 1.4, "pellets": 1, "spread": 1.0,
-		"auto": false, "cost": 0, "pierce": 1, "color": Color(0.45, 0.42, 0.38), "len": 0.2},
-	"scattergun": {"name": "Scattergun", "damage": 32.0, "rate": 0.6, "mag": 6, "reserve": 36, "reload": 2.2, "pellets": 7, "spread": 6.0,
-		"auto": false, "cost": 500, "pierce": 1, "color": Color(0.42, 0.28, 0.16), "len": 0.42},
-	"buzzer": {"name": "Buzzer", "damage": 30.0, "rate": 0.08, "mag": 30, "reserve": 180, "reload": 1.8, "pellets": 1, "spread": 2.5,
-		"auto": true, "cost": 1000, "pierce": 1, "color": Color(0.25, 0.3, 0.32), "len": 0.3},
-	"ridgeback": {"name": "Ridgeback", "damage": 75.0, "rate": 0.16, "mag": 20, "reserve": 120, "reload": 2.0, "pellets": 1, "spread": 0.8,
-		"auto": false, "cost": 1200, "pierce": 1, "color": Color(0.3, 0.33, 0.24), "len": 0.5},
-	"longreach": {"name": "Longreach", "damage": 220.0, "rate": 0.7, "mag": 5, "reserve": 40, "reload": 2.6, "pellets": 1, "spread": 0.0,
-		"auto": false, "cost": 1500, "pierce": 4, "color": Color(0.36, 0.24, 0.14), "len": 0.62},
+	"m1911": {"name": "M1911", "damage": 40.0, "rate": 0.22, "mag": 8, "reserve": 64, "reload": 1.4, "pellets": 1, "spread": 1.0,
+		"auto": false, "cost": 0, "pierce": 1, "len": 0.2},
+	"double_barrel": {"name": "Double Barrel", "damage": 34.0, "rate": 0.35, "mag": 2, "reserve": 36, "reload": 2.0, "pellets": 8, "spread": 6.5,
+		"auto": false, "cost": 500, "pierce": 1, "len": 0.5},
+	"mp5": {"name": "MP5", "damage": 30.0, "rate": 0.075, "mag": 30, "reserve": 180, "reload": 1.8, "pellets": 1, "spread": 2.5,
+		"auto": true, "cost": 1000, "pierce": 1, "len": 0.32},
+	"m14": {"name": "M14", "damage": 80.0, "rate": 0.17, "mag": 20, "reserve": 120, "reload": 2.0, "pellets": 1, "spread": 0.8,
+		"auto": false, "cost": 1200, "pierce": 1, "len": 0.6},
+	"ak47": {"name": "AK-47", "damage": 50.0, "rate": 0.1, "mag": 30, "reserve": 180, "reload": 2.3, "pellets": 1, "spread": 1.8,
+		"auto": true, "cost": 1500, "pierce": 1, "len": 0.52},
+	"python": {"name": "Python", "damage": 160.0, "rate": 0.4, "mag": 6, "reserve": 48, "reload": 2.6, "pellets": 1, "spread": 0.5,
+		"auto": false, "cost": 0, "pierce": 2, "len": 0.26},
+	"m60": {"name": "M60", "damage": 60.0, "rate": 0.09, "mag": 100, "reserve": 400, "reload": 3.6, "pellets": 1, "spread": 2.2,
+		"auto": true, "cost": 0, "pierce": 2, "len": 0.62},
+	"barrett": {"name": "Barrett M82", "damage": 500.0, "rate": 0.8, "mag": 10, "reserve": 40, "reload": 3.0, "pellets": 1, "spread": 0.0,
+		"auto": false, "cost": 0, "pierce": 5, "len": 0.85},
+	"rpg7": {"name": "RPG-7", "damage": 700.0, "rate": 1.0, "mag": 1, "reserve": 12, "reload": 2.4, "pellets": 1, "spread": 0.0,
+		"auto": false, "cost": 0, "pierce": 1, "splash": 3.0, "len": 0.78},
 	"thunderjug": {"name": "Thunderjug", "damage": 400.0, "rate": 0.45, "mag": 12, "reserve": 60, "reload": 2.4, "pellets": 1, "spread": 0.0,
-		"auto": false, "cost": 0, "pierce": 1, "chain": 4, "color": Color(0.25, 0.45, 0.9), "len": 0.34},
-	"grinder": {"name": "Grinder", "damage": 60.0, "rate": 0.09, "mag": 80, "reserve": 320, "reload": 3.2, "pellets": 1, "spread": 2.0,
-		"auto": true, "cost": 0, "pierce": 2, "color": Color(0.2, 0.2, 0.22), "len": 0.55},
+		"auto": false, "cost": 0, "pierce": 1, "chain": 4, "len": 0.34},
 	"frostbite": {"name": "Frostbite", "damage": 150.0, "rate": 0.3, "mag": 15, "reserve": 75, "reload": 2.0, "pellets": 1, "spread": 0.0,
-		"auto": false, "cost": 0, "pierce": 1, "chill": 4.0, "color": Color(0.6, 0.85, 1.0), "len": 0.36},
-	"cinderpipe": {"name": "Cinderpipe", "damage": 600.0, "rate": 0.9, "mag": 4, "reserve": 24, "reload": 2.8, "pellets": 1, "spread": 0.0,
-		"auto": false, "cost": 0, "pierce": 1, "splash": 2.5, "color": Color(0.7, 0.25, 0.1), "len": 0.6},
+		"auto": false, "cost": 0, "pierce": 1, "chill": 4.0, "len": 0.36},
 }
-const CRATE_GUNS := ["scattergun", "buzzer", "ridgeback", "longreach", "thunderjug", "grinder", "frostbite", "cinderpipe"]
+# Real guns you'll know, plus two of our own odd ones in the crate.
+const CRATE_GUNS := ["double_barrel", "mp5", "m14", "ak47", "python", "m60", "barrett", "rpg7", "thunderjug", "frostbite"]
 const CRATE_COST := 950
 const CRATE_SHUFFLE := 2.4       # seconds it shuffles
 const CRATE_OFFER := 8.0         # seconds it offers the gun
@@ -149,7 +160,47 @@ const TONICS := {
 	"quickhands": {"name": "Quickhands", "cost": 3000, "color": Color(0.2, 0.75, 0.35), "does": "reload twice as fast"},
 	"rattle_rum": {"name": "Rattle Rum", "cost": 2000, "color": Color(0.8, 0.15, 0.2), "does": "shoot a third faster"},
 	"mending_moss": {"name": "Mending Moss", "cost": 1500, "color": Color(0.35, 0.55, 0.9), "does": "heal sooner and faster"},
+	"second_wind": {"name": "Second Wind", "cost": 500, "color": Color(0.95, 0.9, 0.3), "does": "get back up once (no power needed)"},
 }
+const NO_POWER_TONICS := ["second_wind"]  # works before the generator runs
+const SECOND_WINDS := 3          # times a game it can be bought
+const DOWN_TIME := 5.0           # seconds you're down before getting up
+const DOWN_PUSH := 2.5           # the dead are pushed back this far as you fall
+# The Anvil: makes the gun in your hand stronger (needs power).
+const ANVIL_COST := 5000
+const ANVIL_TIME := 3.0          # seconds it works
+const ANVIL_OFFER := 10.0        # seconds to take it back
+const FORGED_AMMO_COST := 2500   # a forged gun's ammo off its wall
+# Drops: a killed one sometimes leaves one behind; walk over it to take it.
+const DROPS := {
+	"ammo": {"name": "Ammo Cache", "color": Color(0.4, 0.9, 0.4)},
+	"one_shot": {"name": "One Shot", "color": Color(0.95, 0.3, 0.25)},
+	"double_pay": {"name": "Double Pay", "color": Color(1.0, 0.85, 0.2)},
+	"blackout": {"name": "Blackout", "color": Color(0.7, 0.5, 1.0)},
+	"hammer": {"name": "Hammer & Nails", "color": Color(0.9, 0.6, 0.3)},
+}
+# A drop is earned by scoring: each time the points earned pass a goal
+# (2000 at first, each gap 14% bigger than the last) one is "ready", and
+# kills then release it (DROP_READY_CHANCE each); besides that, any kill
+# has a small chance. Which kind comes from a shuffled deck, dealt in turn,
+# so you see every kind before one comes twice.
+const DROP_GOAL := 2000
+const DROP_GOAL_GROWTH := 1.14
+const DROP_READY_CHANCE := 0.35
+const DROP_CHANCE := 0.02
+const SPAWN_GAP := 2.0
+const SPAWN_GAP_MIN := 0.25
+const STUCK_TIME := 8.0          # a chasing one that's hardly moved this long goes back outside
+const STUCK_MOVE := 0.5
+const DROPS_A_ROUND := 4
+const DROP_LIFE := 25.0
+const DROP_REACH := 1.0
+const DROP_EFFECT := 30.0        # seconds One Shot and Double Pay last
+# The Barn-Door Shield: three parts, built at the workbench, worn on the
+# left arm; it takes the hits from in front of it until it breaks.
+const SHIELD_BLOCKS := 6
+const SHIELD_REBUILD := 500
+const SHIELD_FACING := 0.3       # how square on to the shield a hit must be
 
 # --- You and the dead ---------------------------------------------------------------
 const START_POINTS := 500
@@ -198,6 +249,13 @@ var tonics: Array = []
 var open_rooms := {"hall": true}
 var planks := {}                 # window id -> boards on it
 var results := {}
+var power := false
+var parts := []                  # the shield's parts found (indexes into PART_SPOTS)
+var shield := 0                  # blocks the shield has left (0: none worn)
+var shield_built := false        # built once this game (rebuilt for points after)
+var effects := {}                # "one_shot" / "double_pay" -> seconds left
+var downed := false
+var second_winds := 0
 
 var _lib: SlopitectModule
 var _controls: SlopitectModule
@@ -256,6 +314,23 @@ var _knife_cd := 0.0
 var _groan_cd := 0.0
 var _return_to := ""
 var _wrist_text := ""
+var _down_t := 0.0
+var _drops: Array = []           # {"kind", "node", "pos", "life"}
+var _drops_round := 0
+var _drop_goal := float(DROP_GOAL)
+var _drop_gap := float(DROP_GOAL)
+var _drop_ready := false
+var _drop_deck: Array = []
+var _anvil_state := "idle"       # idle, working, offer
+var _anvil_t := 0.0
+var _anvil_gun := {}             # the gun on the Anvil
+var _anvil_label: Label3D
+var _anvil_show: MeshInstance3D
+var _generator_label: Label3D
+var _power_lamps: Array = []     # glow on the tonic machines and Anvil once the power's on
+var _part_nodes: Array = []
+var _shield_node: Node3D
+var _up_specs := {}
 
 
 func setup() -> String:
@@ -625,7 +700,19 @@ func _start(request: Dictionary) -> Dictionary:
 	headshots = 0
 	earned = 0
 	tonics.clear()
-	guns = [{"id": "nailer", "mag": GUNS["nailer"]["mag"], "reserve": GUNS["nailer"]["reserve"]}]
+	power = false
+	parts.clear()
+	shield = 0
+	shield_built = false
+	effects.clear()
+	downed = false
+	second_winds = 0
+	_drop_goal = float(DROP_GOAL)
+	_drop_gap = float(DROP_GOAL)
+	_drop_ready = false
+	_drop_deck.clear()
+	_anvil_state = "idle"
+	guns = [{"id": "m1911", "mag": GUNS["m1911"]["mag"], "reserve": GUNS["m1911"]["reserve"]}]
 	gun_index = 0
 	results = {}
 	_cooldown = 0.0
@@ -636,6 +723,8 @@ func _start(request: Dictionary) -> Dictionary:
 	_player_room = "hall"
 	_move_player_to(Vector3.ZERO)
 	_hold_gear(true)
+	_wear_shield(false)
+	_reset_power()
 	running = true
 	round_number = first - 1
 	_break_t = FIRST_BREAK
@@ -668,6 +757,15 @@ func _end_game(overrun: bool) -> void:
 		_hide_slot(z["slot"])
 		_free_slots.append(z["slot"])
 	_zombies.clear()
+	_clear_drops()
+	_wear_shield(false)
+	downed = false
+	effects.clear()
+	_anvil_state = "idle"
+	if _anvil_label:
+		_anvil_label.text = "The Anvil  %d\nmakes your gun stronger" % ANVIL_COST
+	if _anvil_show:
+		_anvil_show.visible = false
 	_crate_state = "idle"
 	if _crate_label:
 		_crate_label.text = "Lucky Crate\n%d" % CRATE_COST
@@ -698,9 +796,10 @@ func _end_game(overrun: bool) -> void:
 func _status(_request: Dictionary) -> Dictionary:
 	var held := []
 	for g in guns:
-		held.append({"gun": g["id"], "name": GUNS[g["id"]]["name"], "mag": g["mag"], "reserve": g["reserve"]})
+		held.append({"gun": g["id"], "name": _spec(g)["name"], "forged": g.get("up", false), "mag": g["mag"], "reserve": g["reserve"]})
 	return {"ok": true, "running": running, "round": round_number, "points": points, "health": health, "max_health": _max_health(),
-		"guns": held, "in_hand": guns[gun_index]["id"] if gun_index < guns.size() else "", "tonics": tonics.duplicate(),
+		"guns": held, "in_hand": guns[gun_index]["id"] if gun_index < guns.size() else "", "tonics": tonics.duplicate(), "power": power, "parts": parts.size(), "shield": shield,
+		"effects": effects.duplicate(), "downed": downed, "drops": _drops.map(func(d): return d["kind"]), "anvil": _anvil_state,
 		"open_rooms": open_rooms.keys(), "boards": planks.duplicate(), "alive": _zombies.size(), "to_come": _to_spawn,
 		"kills": kills, "headshots": headshots, "crate": _crate_state, "settings": settings.duplicate(), "best": best.duplicate(),
 		"results": results.duplicate(), "in_world": in_world() if _lib else true}
@@ -766,6 +865,12 @@ func _stage_off() -> void:
 	_prompt = null
 	_sign = null
 	_crate_label = null
+	_anvil_label = null
+	_anvil_show = null
+	_generator_label = null
+	_power_lamps.clear()
+	_part_nodes.clear()
+	_drops.clear()
 	_crate_show = null
 	_tracer = null
 	_boom = null
@@ -823,12 +928,13 @@ func _build_lodge() -> void:
 	walls.material_override = _mats["wall"]
 	_arena.add_child(walls)
 	# Lanterns: glowing, no real light.
-	for at in [Vector3(-3.85, 2.2, -2.8), Vector3(3.85, 2.2, 2.6), Vector3(9.85, 2.2, 1.6), Vector3(-3.85, 2.2, 5.5), Vector3(0.0, 2.2, -3.85)]:
+	for at in [Vector3(-3.85, 2.2, -2.8), Vector3(3.85, 2.2, 1.5), Vector3(-3.85, 2.2, 6.2), Vector3(0.0, 2.2, -3.85)]:
 		_box(_arena, Vector3(0.12, 0.2, 0.12), at, _mats["lantern"])
 	_build_trees()
 	_build_windows()
 	_build_doors()
 	_build_wall_things()
+	_build_power_things()
 	# The dead: one MultiMesh, every instance hidden until used.
 	_zombie_mm = MultiMesh.new()
 	_zombie_mm.transform_format = MultiMesh.TRANSFORM_3D
@@ -1025,7 +1131,7 @@ func _build_wall_things() -> void:
 		label.position = at + inward * (WALL_T / 2.0 + 0.05) + Vector3(0, 1.08, 0)
 		label.rotation.y = yaw
 		_uses.append({"kind": "gun", "id": spot["gun"], "at": at + inward * 0.7, "label": label})
-	for spot in TONIC_SPOTS:
+	for spot in TONIC_SPOTS + [SECOND_WIND_SPOT]:
 		var t: Dictionary = TONICS[spot["tonic"]]
 		var at := Vector3(spot["at"][0], 0, spot["at"][1])
 		var inward := Vector3(spot["in"][0], 0, spot["in"][1])
@@ -1104,6 +1210,18 @@ func _move_player_to(spot: Vector3) -> void:
 	origin.global_position += shift
 
 
+# A point this far in front of where you look, at eye height (lodge space).
+func _ahead_of_you(metres: float) -> Vector3:
+	var cam := ctx.get("camera") as Node3D
+	var ahead := Vector3.FORWARD
+	if cam and _arena:
+		ahead = _arena.global_transform.basis.inverse() * -cam.global_transform.basis.z
+		ahead.y = 0.0
+		if ahead.length() < 0.01:
+			ahead = Vector3.FORWARD
+	return _cam_local() + ahead.normalized() * metres
+
+
 func _max_health() -> float:
 	return IRON_HEALTH if "ironbark" in tonics else HEALTH
 
@@ -1155,9 +1273,72 @@ func _hurt_you(amount: float) -> void:
 	_update_hud()
 	if health <= 0.0:
 		health = 0.0
+		if "second_wind" in tonics:
+			_go_down()
+			return
 		_end_game(true)
 		if in_world():
 			_show_window()
+
+
+# A swipe from one of the dead: the shield takes it when it's between you
+# (it faces the way your left hand points); while you're down, nothing.
+func _struck_by(z: Dictionary) -> void:
+	if downed:
+		return
+	if shield > 0 and _shield_node != null:
+		var left := ctx.get("left") as Node3D
+		if left:
+			var facing := _arena.global_transform.basis.inverse() * -left.global_transform.basis.z
+			facing.y = 0.0
+			var to: Vector3 = z["pos"] - _cam_local()
+			to.y = 0.0
+			if facing.length() > 0.01 and to.length() > 0.01 and facing.normalized().dot(to.normalized()) > SHIELD_FACING:
+				shield -= 1
+				_sound("nail", _arena.to_global(z["pos"] + Vector3(0, 1.2, 0)), 1.0, 0.6)
+				_pulse("left", 1.0, 0.12)
+				if shield <= 0:
+					_wear_shield(false)
+					_sound("rip", null, 1.0)
+				_update_hud()
+				return
+	_hurt_you(DIFF_HIT[settings["difficulty"]])
+
+
+# Second Wind: you fall, the dead nearby are thrown back, and after a few
+# seconds you're up again with full health. The tonics are lost (Second
+# Wind with them), like going down always costs.
+func _go_down() -> void:
+	downed = true
+	_down_t = DOWN_TIME
+	tonics.clear()
+	effects.erase("one_shot")
+	var you := _cam_local()
+	you.y = 0.0
+	for z in _zombies:
+		if z["state"] != "chase":
+			continue
+		var away: Vector3 = z["pos"] - you
+		away.y = 0.0
+		if away.length() < DOWN_PUSH:
+			z["pos"] = _inside(you + (away.normalized() if away.length() > 0.01 else Vector3.FORWARD) * DOWN_PUSH, z["room"])
+			z["cd"] = ATTACK_TIME
+	_sign.text = "Down!\nGetting back up..."
+	_sign.position = _ahead_of_you(2.0) + Vector3(0, 0.2, 0)
+	_sign.visible = true
+	_sign_left = DOWN_TIME
+	_sound("hurt", null, 1.0, 0.6)
+	_update_hud()
+
+
+func _get_up() -> void:
+	downed = false
+	health = _max_health()
+	_hit_t = 99.0
+	_sign.visible = false
+	_sign_left = 0.0
+	_sound("gulp", null, 0.8)
+	_update_hud()
 
 
 # --- Each frame ----------------------------------------------------------------------
@@ -1186,6 +1367,19 @@ func _process(delta: float) -> void:
 	_knife_frame(delta)
 	_use_frame(delta, here)
 	_crate_frame(delta)
+	_anvil_frame(delta)
+	_drops_frame(delta, here)
+	if downed:
+		_down_t -= delta
+		if _down_t <= 0.0:
+			_get_up()
+	for e in effects.keys():
+		effects[e] -= delta
+		if effects[e] <= 0.0:
+			effects.erase(e)
+			_update_hud()
+	if not effects.is_empty() and int(effects.values().max() * 4.0) != int((effects.values().max() + delta) * 4.0):
+		_update_hud()  # the countdown, four times a second
 	if _sign_left > 0.0:
 		_sign_left -= delta
 		_sign.visible = _sign_left > 0.0
@@ -1212,7 +1406,7 @@ func _rounds(delta: float) -> void:
 		if _spawn_t <= 0.0 and _zombies.size() < int(settings["max_zombies"]) and not _free_slots.is_empty():
 			if _spawn_one():
 				_to_spawn -= 1
-			_spawn_t = maxf(0.5, 2.2 - 0.12 * round_number)
+			_spawn_t = spawn_gap(round_number)
 	elif _zombies.is_empty():
 		_break_t = ROUND_BREAK
 		_sound("bell", null, 0.6)
@@ -1223,12 +1417,10 @@ func _next_round() -> void:
 	_to_spawn = round_count(round_number)
 	_round_hp = round_health(round_number) * DIFF_HEALTH[settings["difficulty"]]
 	_repair_points = 0
+	_drops_round = 0
 	_spawn_t = 1.0
 	_sign.text = "Round %d" % round_number
-	var cam_local := _cam_local()
-	var ahead := _arena.global_transform.basis.inverse() * -(ctx["camera"] as Node3D).global_transform.basis.z if ctx.get("camera") else Vector3.FORWARD
-	ahead.y = 0.0
-	_sign.position = cam_local + ahead.normalized() * 3.0 + Vector3(0, 0.6, 0)
+	_sign.position = _ahead_of_you(3.0) + Vector3(0, 0.6, 0)
 	_sign.visible = true
 	_sign_left = 3.5
 	_sound("bell", null, 1.0)
@@ -1241,6 +1433,12 @@ func _next_round() -> void:
 # How many come in a round, and how tough each is.
 static func round_count(n: int) -> int:
 	return mini(6 + 3 * n + int(n * n * 0.15), 90)
+
+
+# Seconds between the dead coming up: 2 on round 1, 5% less each round,
+# never under a quarter second (the most at once holds them back anyway).
+static func spawn_gap(n: int) -> float:
+	return maxf(SPAWN_GAP_MIN, SPAWN_GAP * pow(0.95, n - 1))
 
 
 static func round_health(n: int) -> float:
@@ -1338,6 +1536,8 @@ func _move_dead(delta: float, you: Vector3) -> void:
 					z["y"] = 0.0
 					_set_state(z, "chase")
 			"chase":
+				if _stuck(z, delta):
+					continue
 				var target := you_flat
 				if z["room"] != _player_room:
 					var door := _door_toward(z["room"], _player_room)
@@ -1363,7 +1563,7 @@ func _move_dead(delta: float, you: Vector3) -> void:
 			z["cd"] -= delta
 			if (z["pos"] as Vector3).distance_to(you_flat) < ATTACK_RANGE and z["cd"] <= 0.0:
 				z["cd"] = ATTACK_TIME
-				_hurt_you(DIFF_HIT[settings["difficulty"]])
+				_struck_by(z)
 				if not running:
 					return
 		if z["state"] != "dying":
@@ -1375,6 +1575,35 @@ func _move_dead(delta: float, you: Vector3) -> void:
 					_sound("groan", _arena.to_global(z["pos"] + Vector3(0, 1.5, 0)), 0.7, _rng.randf_range(0.85, 1.15))
 		_place_zombie(z)
 	_spread_out()
+
+
+# --- Fixes ---------------------------------------------------------------------------------
+# Known troubles in games like this, each handled in one place.
+
+# A chasing one that has hardly moved for a while, and isn't next to you,
+# is stuck (wedged in a corner or between others): it goes back out to a
+# window of your room and comes in again. Whether it was moved.
+func _stuck(z: Dictionary, delta: float) -> bool:
+	var pos: Vector3 = z["pos"]
+	if not z.has("anchor") or pos.distance_to(z["anchor"]) > STUCK_MOVE:
+		z["anchor"] = pos
+		z["still"] = 0.0
+		return false
+	z["still"] += delta
+	if z["still"] < STUCK_TIME or pos.distance_to(Vector3(_cam_local().x, 0, _cam_local().z)) < ATTACK_RANGE * 1.5:
+		return false
+	var choices := WINDOWS.filter(func(w): return w["room"] == _player_room)
+	if choices.is_empty():
+		return false
+	var wnd: Dictionary = choices[_rng.randi() % choices.size()]
+	var out := Vector3(wnd["out"][0], 0, wnd["out"][1])
+	z["window"] = wnd["id"]
+	z["room"] = wnd["room"]
+	z["pos"] = Vector3(wnd["at"][0], 0, wnd["at"][1]) + out * 2.5
+	z.erase("anchor")
+	_set_state(z, "approach")
+	_place_zombie(z)
+	return true
 
 
 func _set_state(z: Dictionary, state: String) -> void:
@@ -1482,6 +1711,23 @@ func _hide_slot(slot: int) -> void:
 
 # --- Shooting -----------------------------------------------------------------------------
 
+# A held gun's numbers: a forged one hits twice as hard, goes through one
+# more, and holds half as much again (twice the spare ammo).
+func _spec(g: Dictionary) -> Dictionary:
+	var id: String = g["id"]
+	if not g.get("up", false):
+		return GUNS[id]
+	if not _up_specs.has(id):
+		var s: Dictionary = GUNS[id].duplicate()
+		s["name"] = "Forged " + s["name"]
+		s["damage"] = s["damage"] * 2.0
+		s["mag"] = int(ceil(s["mag"] * 1.5))
+		s["reserve"] = int(s["reserve"]) * 2
+		s["pierce"] = int(s["pierce"]) + 1
+		_up_specs[id] = s
+	return _up_specs[id]
+
+
 func _gun() -> Dictionary:
 	return guns[gun_index] if gun_index < guns.size() else {}
 
@@ -1490,7 +1736,7 @@ func _rate() -> float:
 	var g := _gun()
 	if g.is_empty():
 		return 0.3
-	return GUNS[g["id"]]["rate"] / (1.33 if "rattle_rum" in tonics else 1.0)
+	return _spec(g)["rate"] / (1.33 if "rattle_rum" in tonics else 1.0)
 
 
 func _gun_frame(delta: float) -> void:
@@ -1500,7 +1746,7 @@ func _gun_frame(delta: float) -> void:
 		if _reload_t <= 0.0:
 			_finish_reload()
 	var g := _gun()
-	if _trigger and not g.is_empty() and GUNS[g["id"]]["auto"] and _cooldown <= 0.0:
+	if _trigger and not g.is_empty() and _spec(g)["auto"] and _cooldown <= 0.0:
 		_fire()
 
 
@@ -1512,7 +1758,10 @@ func _fire() -> void:
 		_sound("click", null, 0.6)
 		_reload()
 		return
-	var spec: Dictionary = GUNS[g["id"]]
+	var spec: Dictionary = _spec(g)
+	if effects.has("one_shot"):
+		spec = spec.duplicate()
+		spec["one_shot"] = true
 	g["mag"] = int(g["mag"]) - 1
 	_cooldown = _rate()
 	var hand := ctx.get("right") as Node3D
@@ -1648,7 +1897,7 @@ static func _ray_capsule(from: Vector3, dir: Vector3, a: Vector3, b: Vector3, r:
 func _damage(z: Dictionary, amount: float, head: bool, spec: Dictionary) -> void:
 	if z["state"] == "dying":
 		return
-	z["hp"] -= amount
+	z["hp"] -= INF if spec.get("one_shot", false) or effects.has("one_shot") else amount
 	z["flash"] = 0.08
 	if spec.has("chill"):
 		z["chill"] = spec["chill"]
@@ -1665,6 +1914,9 @@ func _kill(z: Dictionary, head: bool, knife: bool) -> void:
 		headshots += 1
 	_add_points(130 if knife else (100 if head else 60))
 	_set_state(z, "dying")
+	if _drops_round < DROPS_A_ROUND and _rng.randf() < (DROP_READY_CHANCE if _drop_ready else DROP_CHANCE):
+		_drop_ready = false
+		_add_drop(_deal_drop(), z["pos"])
 	z["chill"] = 0.0
 	_sound("hit", _arena.to_global(z["pos"] + Vector3(0, 1.2, 0)), 0.8, 0.7)
 
@@ -1715,9 +1967,9 @@ func _chain_from(at: Vector3, spec: Dictionary, im: ImmediateMesh) -> void:
 
 func _reload() -> void:
 	var g := _gun()
-	if g.is_empty() or _reload_t > 0.0 or int(g["reserve"]) <= 0 or int(g["mag"]) >= int(GUNS[g["id"]]["mag"]):
+	if g.is_empty() or _reload_t > 0.0 or int(g["reserve"]) <= 0 or int(g["mag"]) >= int(_spec(g)["mag"]):
 		return
-	_reload_t = GUNS[g["id"]]["reload"] * (0.5 if "quickhands" in tonics else 1.0)
+	_reload_t = _spec(g)["reload"] * (0.5 if "quickhands" in tonics else 1.0)
 	_sound("reload", null, 0.6)
 	if _ammo_label:
 		_ammo_label.text = "reloading"
@@ -1728,7 +1980,7 @@ func _finish_reload() -> void:
 	var g := _gun()
 	if g.is_empty():
 		return
-	var need: int = int(GUNS[g["id"]]["mag"]) - int(g["mag"])
+	var need: int = int(_spec(g)["mag"]) - int(g["mag"])
 	var take := mini(need, int(g["reserve"]))
 	g["mag"] = int(g["mag"]) + take
 	g["reserve"] = int(g["reserve"]) - take
@@ -1794,6 +2046,8 @@ func _nearest_use(here: Vector3) -> Dictionary:
 	for u in _uses:
 		if u["kind"] == "door" and not _debris[u["id"]].visible:
 			continue
+		if u["kind"] == "part" and u["id"] in parts:
+			continue
 		var d := flat.distance_to(u["at"])
 		if d < gap:
 			gap = d
@@ -1819,7 +2073,13 @@ func _prompt_text(u: Dictionary) -> String:
 			return ("A: ammo for %s  %d" % [g["name"], g["cost"] / 2]) if _holding(u["id"]) >= 0 else "A: buy %s  %d" % [g["name"], g["cost"]]
 		"tonic":
 			var t: Dictionary = TONICS[u["id"]]
-			return "" if u["id"] in tonics else "A: drink %s  %d" % [t["name"], t["cost"]]
+			if u["id"] in tonics:
+				return ""
+			if not power and not u["id"] in NO_POWER_TONICS:
+				return "Needs power"
+			if u["id"] == "second_wind" and second_winds >= SECOND_WINDS:
+				return "Empty"
+			return "A: drink %s  %d" % [t["name"], t["cost"]]
 		"door":
 			var d := _door(u["id"])
 			return "A: clear the way  %d" % d["cost"]
@@ -1832,6 +2092,28 @@ func _prompt_text(u: Dictionary) -> String:
 			return ""
 		"window":
 			return "Hold A: board up" if int(planks[u["id"]]) < PLANKS else ""
+		"generator":
+			return "" if power else "A: start the generator"
+		"anvil":
+			if not power:
+				return "Needs power"
+			match _anvil_state:
+				"idle":
+					var g := _gun()
+					if g.is_empty() or g.get("up", false):
+						return "Already forged"
+					return "A: forge the %s  %d" % [GUNS[g["id"]]["name"], ANVIL_COST]
+				"offer":
+					return "A: take the %s" % _spec(_anvil_gun)["name"]
+			return ""
+		"part":
+			return "" if u["id"] in parts else "A: pick up the shield part"
+		"bench":
+			if shield > 0:
+				return ""
+			if parts.size() < PART_SPOTS.size():
+				return "Shield parts: %d of %d" % [parts.size(), PART_SPOTS.size()]
+			return "A: build the Barn-Door Shield" if not shield_built else "A: rebuild the shield  %d" % SHIELD_REBUILD
 	return ""
 
 
@@ -1848,6 +2130,14 @@ func _use() -> void:
 			open_door(u["id"])
 		"crate":
 			use_crate()
+		"generator":
+			power_on()
+		"anvil":
+			use_anvil()
+		"part":
+			pick_part(u["id"])
+		"bench":
+			build_shield()
 	_show_prompt()
 
 
@@ -1870,8 +2160,14 @@ func _spend(cost: int) -> bool:
 
 
 func _add_points(n: int) -> void:
+	if effects.has("double_pay"):
+		n *= 2
 	points += n
 	earned += n
+	if earned >= _drop_goal:
+		_drop_ready = true
+		_drop_gap *= DROP_GOAL_GROWTH
+		_drop_goal += _drop_gap
 	points_changed.emit(points)
 	_update_hud()
 
@@ -1882,8 +2178,18 @@ func buy_gun(id: String) -> bool:
 		return false
 	var have := _holding(id)
 	var cost: int = GUNS[id]["cost"] / 2 if have >= 0 else GUNS[id]["cost"]
-	if have >= 0 and int(guns[have]["reserve"]) >= int(GUNS[id]["reserve"]) and int(guns[have]["mag"]) >= int(GUNS[id]["mag"]):
-		return false  # full already
+	if have >= 0:
+		var spec := _spec(guns[have])
+		if int(guns[have]["reserve"]) >= int(spec["reserve"]) and int(guns[have]["mag"]) >= int(spec["mag"]):
+			return false  # full already
+		if guns[have].get("up", false):
+			cost = FORGED_AMMO_COST
+		if not _spend(cost):
+			return false
+		guns[have]["mag"] = spec["mag"]
+		guns[have]["reserve"] = spec["reserve"]
+		_update_ammo()
+		return true
 	if not _spend(cost):
 		return false
 	_give_gun(id)
@@ -1908,9 +2214,16 @@ func _give_gun(id: String) -> void:
 func buy_tonic(id: String) -> bool:
 	if not TONICS.has(id) or id in tonics:
 		return false
+	if not power and not id in NO_POWER_TONICS:
+		_sound("deny", null, 0.6)
+		return false
+	if id == "second_wind" and second_winds >= SECOND_WINDS:
+		return false
 	if not _spend(TONICS[id]["cost"]):
 		return false
 	tonics.append(id)
+	if id == "second_wind":
+		second_winds += 1
 	if id == "ironbark":
 		health = _max_health()
 	_sound("gulp", null, 0.8)
@@ -2006,6 +2319,304 @@ func _crate_frame(delta: float) -> void:
 				_show_prompt()
 
 
+# --- Power, the Anvil, the shield --------------------------------------------------------
+
+func _build_power_things() -> void:
+	_power_lamps.clear()
+	# The generator: a squat engine on the yard's back wall.
+	var g_at := Vector3(GENERATOR_SPOT["at"][0], 0, GENERATOR_SPOT["at"][1])
+	var g_in := Vector3(GENERATOR_SPOT["in"][0], 0, GENERATOR_SPOT["in"][1])
+	var g_yaw := atan2(g_in.x, g_in.z)
+	var engine := _box(_arena, Vector3(1.0, 0.8, 0.6), g_at + g_in * (WALL_T / 2.0 + 0.32) + Vector3(0, 0.4, 0), _mats["machine"])
+	engine.rotation.y = g_yaw
+	var tank := _box(_arena, Vector3(0.7, 0.25, 0.4), g_at + g_in * (WALL_T / 2.0 + 0.32) + Vector3(0, 0.92, 0), _mats["crate"])
+	tank.rotation.y = g_yaw
+	var lamp := _box(_arena, Vector3(0.12, 0.12, 0.02), g_at + g_in * (WALL_T / 2.0 + 0.63) + Vector3(0.3, 0.6, 0), _mats["off"])
+	lamp.rotation.y = g_yaw
+	_power_lamps.append(lamp)
+	_generator_label = _label(_arena, "Generator\nno power", 46, Color(0.9, 0.9, 0.85))
+	_generator_label.position = g_at + g_in * (WALL_T / 2.0 + 0.4) + Vector3(0, 1.45, 0)
+	_generator_label.rotation.y = g_yaw
+	_uses.append({"kind": "generator", "id": "generator", "at": g_at + g_in * 1.0, "label": _generator_label})
+	# The Anvil: an anvil on a stump, glowing once the power's on.
+	var a_at := Vector3(ANVIL_SPOT["at"][0], 0, ANVIL_SPOT["at"][1])
+	var a_in := Vector3(ANVIL_SPOT["in"][0], 0, ANVIL_SPOT["in"][1])
+	var a_yaw := atan2(a_in.x, a_in.z)
+	var spot := a_at + a_in * (WALL_T / 2.0 + 0.45)
+	_box(_arena, Vector3(0.5, 0.6, 0.5), spot + Vector3(0, 0.3, 0), _mats["trunk"]).rotation.y = a_yaw
+	_box(_arena, Vector3(0.7, 0.18, 0.28), spot + Vector3(0, 0.72, 0), _mats["iron"]).rotation.y = a_yaw
+	_box(_arena, Vector3(0.3, 0.12, 0.18), spot + Vector3(0, 0.6, 0), _mats["iron"]).rotation.y = a_yaw
+	var glow := _box(_arena, Vector3(0.72, 0.02, 0.3), spot + Vector3(0, 0.82, 0), _mats["off"])
+	glow.rotation.y = a_yaw
+	_power_lamps.append(glow)
+	_anvil_label = _label(_arena, "The Anvil  %d\nmakes your gun stronger" % ANVIL_COST, 44, Color(1.0, 0.7, 0.4))
+	_anvil_label.position = spot + Vector3(0, 1.5, 0)
+	_anvil_label.rotation.y = a_yaw
+	_anvil_show = MeshInstance3D.new()
+	_anvil_show.material_override = _mats["forged"]
+	_anvil_show.position = spot + Vector3(0, 1.05, 0)
+	_anvil_show.rotation.y = a_yaw + PI / 2.0
+	_anvil_show.scale = Vector3.ONE * 1.5
+	_anvil_show.visible = false
+	_arena.add_child(_anvil_show)
+	_uses.append({"kind": "anvil", "id": "anvil", "at": a_at + a_in * 1.1, "label": _anvil_label})
+	# The workbench, and the shield's parts lying about.
+	var b_at := Vector3(BENCH_SPOT["at"][0], 0, BENCH_SPOT["at"][1])
+	var b_in := Vector3(BENCH_SPOT["in"][0], 0, BENCH_SPOT["in"][1])
+	var b_yaw := atan2(b_in.x, b_in.z)
+	_box(_arena, Vector3(1.2, 0.08, 0.6), b_at + b_in * (WALL_T / 2.0 + 0.32) + Vector3(0, 0.85, 0), _mats["plank"]).rotation.y = b_yaw
+	for side in [-0.5, 0.5]:
+		var across := Vector3(-b_in.z, 0, b_in.x)
+		_box(_arena, Vector3(0.08, 0.85, 0.5), b_at + b_in * (WALL_T / 2.0 + 0.32) + across * side + Vector3(0, 0.42, 0), _mats["plank"]).rotation.y = b_yaw
+	var b_label := _label(_arena, "Workbench\nfind 3 shield parts", 40, Color(0.9, 0.85, 0.7))
+	b_label.position = b_at + b_in * (WALL_T / 2.0 + 0.3) + Vector3(0, 1.6, 0)
+	b_label.rotation.y = b_yaw
+	_uses.append({"kind": "bench", "id": "bench", "at": b_at + b_in * 0.95, "label": b_label})
+	_part_nodes.clear()
+	for i in PART_SPOTS.size():
+		var at := Vector3(PART_SPOTS[i][0], 0, PART_SPOTS[i][1])
+		var bundle := Node3D.new()
+		_arena.add_child(bundle)
+		bundle.position = at
+		bundle.rotation.y = 0.7 * i
+		_box(bundle, [Vector3(0.6, 0.05, 0.16), Vector3(0.16, 0.06, 0.45), Vector3(0.3, 0.08, 0.3)][i], Vector3(0, 0.05, 0), _mats["plank"])
+		_box(bundle, Vector3(0.06, 0.06, 0.06), Vector3(0.12, 0.12, 0.0), _flat_glow(Color(0.95, 0.85, 0.4)))  # a glint, so it can be found
+		_part_nodes.append(bundle)
+		_uses.append({"kind": "part", "id": i, "at": at, "label": null})
+
+
+# A new game: no power, the parts back where they lie.
+func _reset_power() -> void:
+	power = false
+	for lamp in _power_lamps:
+		if is_instance_valid(lamp):
+			lamp.material_override = _mats["off"]
+	if _generator_label:
+		_generator_label.text = "Generator\nno power"
+	for node in _part_nodes:
+		if is_instance_valid(node):
+			node.visible = true
+
+
+func power_on() -> bool:
+	if power or _arena == null:
+		return false
+	power = true
+	for lamp in _power_lamps:
+		if is_instance_valid(lamp):
+			lamp.material_override = _mats["lamp_on"]
+	if _generator_label:
+		_generator_label.text = "Generator\nrunning"
+	_sound("boom", _arena.to_global(Vector3(GENERATOR_SPOT["at"][0], 1.0, GENERATOR_SPOT["at"][1])), 0.7, 1.6)
+	_sound("bell", null, 0.5, 1.5)
+	return true
+
+
+# The Anvil: pay, leave the gun on it for a moment, take it back forged.
+func use_anvil() -> bool:
+	if not power:
+		_sound("deny", null, 0.6)
+		return false
+	match _anvil_state:
+		"idle":
+			var g := _gun()
+			if g.is_empty() or g.get("up", false) or guns.size() < 1:
+				return false
+			if not _spend(ANVIL_COST):
+				return false
+			_anvil_gun = g
+			guns.remove_at(gun_index)
+			if guns.is_empty():
+				guns.append({"id": "m1911", "mag": 0, "reserve": 0})  # empty hands: a spent M1911 till it's back
+			gun_index = 0
+			_show_gun()
+			_anvil_state = "working"
+			_anvil_t = ANVIL_TIME
+			_anvil_show.mesh = _gun_mesh_for(_anvil_gun["id"])
+			_anvil_show.visible = true
+			_anvil_label.text = "Forging..."
+			_sound("nail", _arena.to_global(_anvil_show.position), 1.0, 0.5)
+			return true
+		"offer":
+			var forged := {"id": _anvil_gun["id"], "up": true}
+			var spec := _spec(forged)
+			forged["mag"] = spec["mag"]
+			forged["reserve"] = spec["reserve"]
+			if guns.size() == 1 and guns[0]["id"] == "m1911" and int(guns[0]["mag"]) == 0 and int(guns[0]["reserve"]) == 0:
+				guns.clear()  # the stand-in goes
+			if guns.size() < 2:
+				guns.append(forged)
+				gun_index = guns.size() - 1
+			else:
+				guns[gun_index] = forged
+			_anvil_done()
+			_show_gun()
+			_sound("buy", null, 0.8, 0.8)
+			return true
+	return false
+
+
+func _anvil_frame(delta: float) -> void:
+	if _anvil_state == "idle" or _anvil_label == null:
+		return
+	_anvil_t -= delta
+	if _anvil_state == "working" and _anvil_t <= 0.0:
+		_anvil_state = "offer"
+		_anvil_t = ANVIL_OFFER
+		_anvil_label.text = "%s!\nA to take it" % _spec({"id": _anvil_gun["id"], "up": true})["name"]
+		_sound("bell", _arena.to_global(_anvil_show.position), 0.6, 2.0)
+		_show_prompt()
+	elif _anvil_state == "offer" and _anvil_t <= 0.0:
+		_anvil_done()  # not taken: gone, like the crate's
+		_show_prompt()
+
+
+func _anvil_done() -> void:
+	_anvil_state = "idle"
+	_anvil_gun = {}
+	if _anvil_show:
+		_anvil_show.visible = false
+	if _anvil_label:
+		_anvil_label.text = "The Anvil  %d\nmakes your gun stronger" % ANVIL_COST
+
+
+func pick_part(index) -> bool:
+	if typeof(index) != TYPE_INT or index < 0 or index >= PART_SPOTS.size() or index in parts:
+		return false
+	parts.append(index)
+	if index < _part_nodes.size() and is_instance_valid(_part_nodes[index]):
+		_part_nodes[index].visible = false
+	_sound("nail", null, 0.7, 1.4)
+	_pulse("right", 0.5, 0.08)
+	return true
+
+
+func build_shield() -> bool:
+	if shield > 0 or parts.size() < PART_SPOTS.size():
+		if parts.size() < PART_SPOTS.size():
+			_sound("deny", null, 0.6)
+		return false
+	if shield_built and not _spend(SHIELD_REBUILD):
+		return false
+	shield_built = true
+	_wear_shield(true)
+	_sound("nail", null, 1.0)
+	_update_hud()
+	return true
+
+
+# The shield on the left forearm: planks nailed across a frame, facing out
+# the way the hand points.
+func _wear_shield(on: bool) -> void:
+	if not on:
+		shield = 0
+		if _shield_node != null and is_instance_valid(_shield_node):
+			_shield_node.queue_free()
+		_shield_node = null
+		return
+	shield = SHIELD_BLOCKS
+	var left := ctx.get("left") as Node3D
+	if left == null or _shield_node != null:
+		return
+	_shield_node = Node3D.new()
+	_shield_node.name = "holdout_shield"
+	left.add_child(_shield_node)
+	_shield_node.position = Vector3(0.0, -0.02, 0.12)
+	for i in 4:
+		var plank := _box(_shield_node, Vector3(0.5, 0.11, 0.025), Vector3(0, -0.18 + i * 0.12, 0), _mats["plank"])
+		plank.rotation.z = deg_to_rad([3.0, -2.0, 4.0, -3.0][i])
+	_box(_shield_node, Vector3(0.06, 0.48, 0.03), Vector3(-0.18, 0, 0.02), _mats["debris"])
+	_box(_shield_node, Vector3(0.06, 0.48, 0.03), Vector3(0.18, 0, 0.02), _mats["debris"])
+	_shield_node.rotation_degrees = Vector3(0, 90, 0)  # flat along the forearm, its face out to the side the hand points
+
+
+# --- Drops -------------------------------------------------------------------------------
+
+func _deal_drop() -> String:
+	if _drop_deck.is_empty():
+		_drop_deck = DROPS.keys()
+		for i in range(_drop_deck.size() - 1, 0, -1):  # shuffled with the game's own dice
+			var j := _rng.randi() % (i + 1)
+			var keep = _drop_deck[i]
+			_drop_deck[i] = _drop_deck[j]
+			_drop_deck[j] = keep
+	return _drop_deck.pop_back()
+
+
+func _add_drop(kind: String, at: Vector3) -> void:
+	if _arena == null or not DROPS.has(kind):
+		return
+	_drops_round += 1
+	var spot := Vector3(at.x, 0, at.z)
+	if _room_at(spot).is_empty():
+		var wnd_room := _player_room
+		spot = _inside(spot, wnd_room)  # dropped outside: put it just inside
+	var node := Node3D.new()
+	_arena.add_child(node)
+	node.position = spot + Vector3(0, 0.9, 0)
+	var token := _box(node, Vector3(0.28, 0.28, 0.06), Vector3.ZERO, _flat_glow(DROPS[kind]["color"]))
+	token.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var label := _label(node, DROPS[kind]["name"], 40, DROPS[kind]["color"].lightened(0.3))
+	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	label.double_sided = true
+	label.position = Vector3(0, 0.3, 0)
+	_drops.append({"kind": kind, "node": node, "pos": spot, "life": DROP_LIFE, "token": token})
+	_sound("crate", _arena.to_global(node.position), 0.4, 1.8)
+
+
+func _drops_frame(delta: float, here: Vector3) -> void:
+	var flat := Vector3(here.x, 0, here.z)
+	for d in _drops.duplicate():
+		d["life"] -= delta
+		var node: Node3D = d["node"]
+		(d["token"] as Node3D).rotation.y += delta * 2.5
+		node.visible = d["life"] > 5.0 or int(d["life"] * 4.0) % 2 == 0  # blinks as it's about to go
+		if flat.distance_to(d["pos"]) < DROP_REACH:
+			_take_drop(d["kind"])
+			node.queue_free()
+			_drops.erase(d)
+		elif d["life"] <= 0.0:
+			node.queue_free()
+			_drops.erase(d)
+
+
+func _take_drop(kind: String) -> void:
+	_sound("bell", null, 0.7, 1.8)
+	_sign.text = DROPS[kind]["name"]
+	_sign.position = _ahead_of_you(3.0) + Vector3(0, 0.6, 0)
+	_sign.visible = true
+	_sign_left = 2.0
+	match kind:
+		"ammo":
+			for g in guns:
+				var spec := _spec(g)
+				g["mag"] = spec["mag"]
+				g["reserve"] = spec["reserve"]
+			_reload_t = 0.0
+			_update_ammo()
+		"one_shot", "double_pay":
+			effects[kind] = DROP_EFFECT
+		"blackout":
+			for z in _zombies:
+				if z["state"] != "dying":
+					_set_state(z, "dying")
+					kills += 1
+			_add_points(400)
+		"hammer":
+			for wnd in WINDOWS:
+				planks[wnd["id"]] = PLANKS
+				_show_planks(wnd["id"])
+			_add_points(200)
+	_update_hud()
+
+
+func _clear_drops() -> void:
+	for d in _drops:
+		if is_instance_valid(d["node"]):
+			d["node"].queue_free()
+	_drops.clear()
+
+
 # --- What you hold and see --------------------------------------------------------------------
 
 # The gun on the right controller, the knife on the left, the wrist label,
@@ -2096,6 +2707,7 @@ func _show_gun() -> void:
 		return
 	_gun_mesh.mesh = _gun_mesh_for(g["id"])
 	_flash.position = Vector3(0, 0.02, -GUNS[g["id"]]["len"] - 0.04)
+	_gun_mesh.material_override = _mats["forged"] if g.get("up", false) else _mats["gun"]
 	_update_ammo()
 	_update_hud()
 
@@ -2111,7 +2723,11 @@ func _update_ammo() -> void:
 func _update_hud() -> void:
 	if _wrist == null:
 		return
-	var text := "Round %d\n%d points\nHealth %d" % [maxi(round_number, 1), points, int(round(health))]
+	var text := "Round %d\n%d points\n%s" % [maxi(round_number, 1), points, "DOWN" if downed else "Health %d" % int(round(health))]
+	if shield > 0:
+		text += "\nShield %d/%d" % [shield, SHIELD_BLOCKS]
+	for e in effects:
+		text += "\n%s %d" % [DROPS[e]["name"], int(ceil(effects[e]))]
 	if text != _wrist_text:
 		_wrist_text = text
 		_wrist.text = text
@@ -2148,6 +2764,9 @@ func _make_materials() -> void:
 	_mats["crate"] = _flat(Color(0.35, 0.22, 0.1))
 	_mats["lantern"] = _flat_glow(Color(1.0, 0.7, 0.3))
 	_mats["chalk"] = _flat_glow(Color(0.85, 0.88, 0.82))
+	_mats["off"] = _flat(Color(0.15, 0.15, 0.15))
+	_mats["lamp_on"] = _flat_glow(Color(0.5, 1.0, 0.55))
+	_mats["iron"] = _flat(Color(0.18, 0.18, 0.2))
 	_mats["blade"] = _flat(Color(0.75, 0.78, 0.8))
 	_mats["grip"] = _flat(Color(0.15, 0.1, 0.07))
 	var zombie := StandardMaterial3D.new()
@@ -2159,6 +2778,11 @@ func _make_materials() -> void:
 	gun.roughness = 0.6
 	gun.metallic = 0.3
 	_mats["gun"] = gun
+	var forged := gun.duplicate() as StandardMaterial3D
+	forged.emission_enabled = true
+	forged.emission = Color(0.9, 0.35, 0.05)
+	forged.emission_energy_multiplier = 0.6
+	_mats["forged"] = forged
 	var tracer := StandardMaterial3D.new()
 	tracer.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	tracer.vertex_color_use_as_albedo = true
@@ -2260,31 +2884,110 @@ func _zombie_mesh() -> ArrayMesh:
 	return st.commit()
 
 
-# A gun from a few boxes, pointing -z from the hand: body, barrel, grip,
-# and a stock or magazine for the bigger ones. Made once each.
+# Each gun from a handful of boxes in its own colours, pointing -z from the
+# hand (the hand holds the grip at the origin): enough of its outline to
+# know it at a glance. Made once each, one draw.
 func _gun_mesh_for(id: String) -> ArrayMesh:
 	if _gun_meshes.has(id):
 		return _gun_meshes[id]
-	var spec: Dictionary = GUNS[id]
-	var c: Color = spec["color"]
-	var metal := Color(0.22, 0.22, 0.24)
-	var length: float = spec["len"]
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	_add_box(st, Vector3(0, 0.02, -length * 0.35), Vector3(0.045, 0.06, length * 0.6), c)
-	_add_box(st, Vector3(0, 0.03, -length * 0.8), Vector3(0.025, 0.025, length * 0.45), metal)
-	_add_box(st, Vector3(0, -0.05, 0.0), Vector3(0.035, 0.11, 0.045), c.darkened(0.3))
-	if length > 0.3:
-		_add_box(st, Vector3(0, 0.0, 0.12), Vector3(0.04, 0.07, 0.18), c.darkened(0.2))
-	if spec["mag"] >= 20:
-		_add_box(st, Vector3(0, -0.06, -length * 0.3), Vector3(0.03, 0.1, 0.05), metal)
-	if spec.has("chain") or spec.has("chill"):
-		_add_box(st, Vector3(0, 0.03, -length * 0.5), Vector3(0.07, 0.07, 0.07), c.lightened(0.4))
-	if spec.has("splash"):
-		_add_box(st, Vector3(0, 0.03, -length * 0.75), Vector3(0.08, 0.08, length * 0.45), c)
+	var steel := Color(0.2, 0.2, 0.22)
+	var black := Color(0.09, 0.09, 0.1)
+	var wood := Color(0.42, 0.24, 0.12)
+	var olive := Color(0.27, 0.3, 0.2)
+	for part in _gun_parts(id, steel, black, wood, olive):
+		var b := Basis.IDENTITY
+		if part.size() > 3:
+			b = Basis(Vector3.RIGHT, deg_to_rad(part[3]))
+		_add_box_turned(st, part[0], part[1], part[2], b)
 	var mesh := st.commit()
 	_gun_meshes[id] = mesh
 	return mesh
+
+
+# [centre, size, colour, (tilt about x, degrees)] for each box.
+func _gun_parts(id: String, steel: Color, black: Color, wood: Color, olive: Color) -> Array:
+	match id:
+		"m1911":
+			return [[Vector3(0, 0.03, -0.08), Vector3(0.03, 0.035, 0.2), steel],
+				[Vector3(0, -0.04, 0.0), Vector3(0.03, 0.1, 0.045), Color(0.35, 0.22, 0.12), -12.0],
+				[Vector3(0, -0.005, -0.035), Vector3(0.008, 0.02, 0.04), steel]]
+		"double_barrel":
+			return [[Vector3(-0.012, 0.03, -0.3), Vector3(0.022, 0.022, 0.5), steel], [Vector3(0.012, 0.03, -0.3), Vector3(0.022, 0.022, 0.5), steel],
+				[Vector3(0, 0.015, -0.2), Vector3(0.045, 0.025, 0.2), wood],
+				[Vector3(0, 0.01, -0.02), Vector3(0.04, 0.05, 0.08), steel],
+				[Vector3(0, -0.01, 0.15), Vector3(0.04, 0.07, 0.26), wood, -10.0]]
+		"mp5":
+			return [[Vector3(0, 0.03, -0.1), Vector3(0.04, 0.05, 0.28), black],
+				[Vector3(0, 0.03, -0.28), Vector3(0.018, 0.018, 0.1), black],
+				[Vector3(0, -0.04, -0.14), Vector3(0.022, 0.12, 0.035), black, 18.0],
+				[Vector3(0, -0.04, 0.0), Vector3(0.03, 0.09, 0.04), black, -12.0],
+				[Vector3(0, 0.05, -0.02), Vector3(0.02, 0.025, 0.04), black],
+				[Vector3(0, 0.03, 0.1), Vector3(0.02, 0.04, 0.14), black]]
+		"m14":
+			return [[Vector3(0, 0.03, -0.42), Vector3(0.018, 0.018, 0.36), steel],
+				[Vector3(0, 0.02, -0.2), Vector3(0.045, 0.045, 0.42), wood],
+				[Vector3(0, 0.05, -0.1), Vector3(0.03, 0.02, 0.2), steel],
+				[Vector3(0, -0.04, -0.08), Vector3(0.03, 0.08, 0.06), black],
+				[Vector3(0, -0.01, 0.15), Vector3(0.045, 0.08, 0.3), wood, -8.0]]
+		"ak47":
+			return [[Vector3(0, 0.03, -0.42), Vector3(0.018, 0.018, 0.22), steel],
+				[Vector3(0, 0.025, -0.25), Vector3(0.045, 0.04, 0.16), wood],
+				[Vector3(0, 0.04, -0.08), Vector3(0.045, 0.05, 0.22), steel],
+				[Vector3(0, -0.05, -0.12), Vector3(0.028, 0.14, 0.045), Color(0.55, 0.33, 0.12), 25.0],
+				[Vector3(0, -0.04, 0.0), Vector3(0.03, 0.08, 0.04), wood, -15.0],
+				[Vector3(0, 0.0, 0.14), Vector3(0.04, 0.07, 0.24), wood, -10.0]]
+		"python":
+			return [[Vector3(0, 0.035, -0.15), Vector3(0.022, 0.03, 0.22), steel],
+				[Vector3(0, 0.055, -0.15), Vector3(0.012, 0.012, 0.22), steel],
+				[Vector3(0, 0.02, -0.03), Vector3(0.045, 0.045, 0.05), steel],
+				[Vector3(0, -0.04, 0.01), Vector3(0.032, 0.1, 0.045), wood, -15.0]]
+		"m60":
+			return [[Vector3(0, 0.03, -0.5), Vector3(0.022, 0.022, 0.32), steel],
+				[Vector3(0, 0.035, -0.15), Vector3(0.06, 0.07, 0.36), olive],
+				[Vector3(0.05, -0.02, -0.12), Vector3(0.06, 0.08, 0.1), olive],
+				[Vector3(0, -0.04, 0.0), Vector3(0.03, 0.08, 0.04), black, -12.0],
+				[Vector3(0, 0.01, 0.17), Vector3(0.045, 0.07, 0.24), olive],
+				[Vector3(-0.03, -0.04, -0.55), Vector3(0.008, 0.1, 0.008), steel, 30.0], [Vector3(0.03, -0.04, -0.55), Vector3(0.008, 0.1, 0.008), steel, 30.0]]
+		"barrett":
+			return [[Vector3(0, 0.03, -0.62), Vector3(0.025, 0.025, 0.38), steel],
+				[Vector3(0, 0.03, -0.82), Vector3(0.05, 0.04, 0.06), steel],
+				[Vector3(0, 0.03, -0.25), Vector3(0.06, 0.08, 0.5), black],
+				[Vector3(0, 0.1, -0.2), Vector3(0.04, 0.04, 0.24), black],
+				[Vector3(0, -0.06, -0.15), Vector3(0.04, 0.1, 0.07), black],
+				[Vector3(0, -0.04, 0.0), Vector3(0.03, 0.08, 0.04), black, -12.0],
+				[Vector3(0, 0.02, 0.14), Vector3(0.05, 0.1, 0.18), black]]
+		"rpg7":
+			return [[Vector3(0, 0.05, -0.15), Vector3(0.05, 0.05, 0.8), olive],
+				[Vector3(0, 0.05, -0.18), Vector3(0.06, 0.06, 0.18), wood],
+				[Vector3(0, 0.05, -0.62), Vector3(0.09, 0.09, 0.14), olive.darkened(0.3)],
+				[Vector3(0, 0.05, -0.72), Vector3(0.04, 0.04, 0.08), olive.darkened(0.3)],
+				[Vector3(0, -0.03, -0.05), Vector3(0.03, 0.09, 0.04), wood, -10.0],
+				[Vector3(0, -0.03, -0.25), Vector3(0.03, 0.09, 0.04), wood, -10.0]]
+		"thunderjug":
+			return [[Vector3(0, 0.03, -0.16), Vector3(0.05, 0.06, 0.24), Color(0.25, 0.35, 0.6)],
+				[Vector3(0, 0.04, -0.17), Vector3(0.08, 0.08, 0.08), Color(0.5, 0.75, 1.0)],
+				[Vector3(0, 0.03, -0.33), Vector3(0.03, 0.03, 0.1), steel],
+				[Vector3(0, -0.04, 0.0), Vector3(0.03, 0.1, 0.045), black, -12.0]]
+		"frostbite":
+			return [[Vector3(0, 0.03, -0.15), Vector3(0.045, 0.055, 0.26), Color(0.75, 0.88, 0.95)],
+				[Vector3(0, 0.04, -0.3), Vector3(0.07, 0.07, 0.06), Color(0.55, 0.85, 1.0)],
+				[Vector3(0, -0.04, 0.0), Vector3(0.03, 0.1, 0.045), steel, -12.0]]
+	return [[Vector3(0, 0.02, -0.1), Vector3(0.04, 0.06, 0.2), steel]]
+
+
+func _add_box_turned(st: SurfaceTool, centre: Vector3, size: Vector3, color: Color, turn: Basis) -> void:
+	var tmp := SurfaceTool.new()
+	tmp.begin(Mesh.PRIMITIVE_TRIANGLES)
+	_add_box(tmp, Vector3.ZERO, size, color)
+	var arrays := tmp.commit_to_arrays()
+	var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+	var normals: PackedVector3Array = arrays[Mesh.ARRAY_NORMAL]
+	for i in verts.size():
+		st.set_color(color)
+		st.set_normal(turn * normals[i])
+		st.add_vertex(centre + turn * verts[i])
 
 
 # --- Sounds --------------------------------------------------------------------------------

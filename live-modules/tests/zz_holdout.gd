@@ -110,7 +110,7 @@ func _go() -> void:
 	_check("running and processing", _h.running and _h.is_processing())
 	await _frames(2)
 	_check("the window stays out of the way while you play", not _run({"cmd": "ui_get", "id_panel": "holdout"}).get("panel", {}).get("visible", false))
-	_check("the Nailer in the right hand", ctx["right"].has_node("holdout_gun") and _h._gun().get("id") == "nailer")
+	_check("the M1911 in the right hand", ctx["right"].has_node("holdout_gun") and _h._gun().get("id") == "m1911")
 	_check("500 points to start", _h.points == 500)
 	_check("every window has 5 boards", _h.planks.values().all(func(n): return n == 5) and _h.planks.size() == 6)
 	_check("you stand in the hall's middle", Vector2(_you().x, _you().z).length() < 0.05, _you())
@@ -164,25 +164,28 @@ func _go() -> void:
 
 	# Buying: too poor, then a door, a wall gun, its ammo, a tonic.
 	_h.points = 100
-	_check("too poor to clear a door", not _h.open_door("trophy_door") and not _h.open_rooms.has("trophy"))
+	_check("too poor to clear a door", not _h.open_door("yard_door") and not _h.open_rooms.has("yard"))
 	_h.points = 9000
-	_check("clearing the debris opens the Trophy Room", _h.open_door("trophy_door") and _h.open_rooms.has("trophy") and _h.points == 8250)
-	_check("debris gone", not _h._debris["trophy_door"].visible)
-	# A real press of A at the Scattergun's wall.
+	_check("clearing the debris opens the Back Yard", _h.open_door("yard_door") and _h.open_rooms.has("yard") and _h.points == 8000)
+	_check("debris gone", not _h._debris["yard_door"].visible)
+	# A real press of A at the Double Barrel's wall.
 	_h._move_player_to(Vector3(-3.2, 0, -2.0))
 	await _wait(0.25)
-	_check("standing at the Scattergun: the prompt says so", _h._prompt.visible and "Scattergun" in _h._prompt.text, _h._prompt.text)
+	_check("standing at the Double Barrel: the prompt says so", _h._prompt.visible and "Double Barrel" in _h._prompt.text, _h._prompt.text)
 	await _shot("wall-gun", Vector3(-1.5, 1.6, -0.8), Vector3(-4, 1.4, -2.0))
 	before = _h.points
 	_button("right", "ax_button", true)
 	_button("right", "ax_button", false)
-	_check("A buys it: two guns, the Scattergun in hand", _h.guns.size() == 2 and _h._gun()["id"] == "scattergun" and _h.points == before - 500)
-	_check("full ammo: buying ammo does nothing", not _h.buy_gun("scattergun"))
+	_check("A buys it: two guns, the Double Barrel in hand", _h.guns.size() == 2 and _h._gun()["id"] == "double_barrel" and _h.points == before - 500)
+	_check("full ammo: buying ammo does nothing", not _h.buy_gun("double_barrel"))
 	_h._gun()["reserve"] = 0
-	_check("ammo costs half", _h.buy_gun("scattergun") and _h._gun()["reserve"] == 36)
+	_check("ammo costs half", _h.buy_gun("double_barrel") and _h._gun()["reserve"] == 36)
 	_button("left", "by_button", true)
 	_button("left", "by_button", false)
-	_check("Y switches guns", _h._gun()["id"] == "nailer")
+	_check("Y switches guns", _h._gun()["id"] == "m1911")
+	_check("tonics need power", not _h.buy_tonic("ironbark") and "Needs power" == _h._prompt_text({"kind": "tonic", "id": "ironbark"}))
+	_check("the Anvil needs power", not _h.use_anvil())
+	_check("the generator turns the power on", _h.power_on() and _h.power and not _h.power_on())
 	_check("Ironbark: 250 health", _h.buy_tonic("ironbark") and _h._max_health() == 250.0 and _h.health == 250.0)
 	_check("a tonic once only", not _h.buy_tonic("ironbark"))
 	_check("Quickhands", _h.buy_tonic("quickhands"))
@@ -192,8 +195,6 @@ func _go() -> void:
 	await _wait(0.8)
 
 	# The Lucky Crate (in the yard).
-	_check("the yard is closed", not _h.open_rooms.has("yard"))
-	_check("the Back Yard door", _h.open_door("yard_door") and _h.open_rooms.has("yard"))
 	before = _h.points
 	_check("the crate shuffles", _h.use_crate() and _h._crate_state == "shuffle" and _h.points == before - 950)
 	await _shot("crate", Vector3(1.5, 1.6, 7.0), Vector3(4, 0.8, 7.0))
@@ -260,18 +261,115 @@ func _go() -> void:
 	_h.health = _h._max_health()
 	await _shot("close", Vector3(0.6, 1.6, 1.2), climber["pos"] + Vector3(0, 1.3, 0))
 
-	# Following you through a door into the Trophy Room.
+	# Following you through the door into the Back Yard.
 	_clear_dead()
 	var follower: Dictionary = _h.add_zombie_inside(Vector3(-2.0, 0, 0.0), "hall", 5000.0)
 	follower["speed"] = _h.SPEEDS["run"]
-	_h._move_player_to(Vector3(8.0, 0, 0.0))
+	_h.health = 100000.0
+	_h._move_player_to(Vector3(-2.0, 0, 7.5))
 	Engine.time_scale = 4.0
 	await _wait(8.0)
 	Engine.time_scale = 1.0
-	_check("they follow you through the doors", follower["room"] == "trophy", [follower["room"], follower["pos"]])
+	_check("they follow you through the doors", follower["room"] == "yard", [follower["room"], follower["pos"]])
+	_clear_dead()
+	_h.health = _h._max_health()
+
+	# The Anvil: the gun in your hand comes back forged.
+	_h.points = 20000
+	_h._give_gun("m1911")
+	_check("the M1911 in hand for the Anvil", _h._gun()["id"] == "m1911")
+	_check("the Anvil takes it and 5000", _h.use_anvil() and _h._anvil_state == "working" and _h.points == 15000 and _h._holding("m1911") < 0)
+	await _wait(3.2)
+	_check("then offers it back forged", _h._anvil_state == "offer")
+	await _shot("anvil", Vector3(2.4, 1.6, 6.4), Vector3(2.4, 0.9, 4.4))
+	_check("taking it: Forged M1911, twice the damage, half as much again in the mag",
+		_h.use_anvil() and _h._gun().get("up", false) and _h._spec(_h._gun())["damage"] == 80.0 and _h._gun()["mag"] == 12, _h._gun())
+	_check("the spawn gap shrinks 5% a round", absf(_h.spawn_gap(1) - 2.0) < 0.001 and absf(_h.spawn_gap(2) - 1.9) < 0.001 and _h.spawn_gap(80) == 0.25)
+	_check("a forged gun can't be forged again", not _h.use_anvil())
+
+	# Drops: walk over one to take it.
+	_clear_dead()
+	var at := _you()
+	_h._gun()["reserve"] = 0
+	_h._add_drop("ammo", Vector3(at.x, 0, at.z))
+	await _frames(2)
+	_check("Ammo Cache fills every gun", _h._drops.is_empty() and _h._gun()["reserve"] == _h._spec(_h._gun())["reserve"])
+	_h._add_drop("double_pay", Vector3(at.x, 0, at.z))
+	await _frames(2)
+	var weak: Dictionary = _h.add_zombie_inside(Vector3(0, 0, -3.0), "hall", 10.0)
+	before = _h.points
+	_h._damage(weak, 50.0, false, {"pierce": 1})
+	_check("Double Pay doubles the points", _h.effects.has("double_pay") and _h.points == before + 120, _h.points - before)
+	_h._add_drop("one_shot", Vector3(at.x, 0, at.z))
+	await _frames(2)
+	var big: Dictionary = _h.add_zombie_inside(Vector3(1, 0, -3.0), "hall", 99999.0)
+	_h._damage(big, 1.0, false, {"pierce": 1})
+	_check("One Shot kills anything in one", big["state"] == "dying")
+	_h.effects.clear()
+	var a1: Dictionary = _h.add_zombie_inside(Vector3(-1, 0, -3.0), "hall", 99999.0)
+	var a2: Dictionary = _h.add_zombie_inside(Vector3(2, 0, -2.0), "hall", 99999.0)
+	_h._add_drop("blackout", Vector3(at.x, 0, at.z))
+	await _frames(2)
+	_check("Blackout kills them all", a1["state"] == "dying" and a2["state"] == "dying")
+	_h.planks["w2"] = 0
+	_h._show_planks("w2")
+	_h._add_drop("hammer", Vector3(at.x, 0, at.z))
+	await _frames(2)
+	_check("Hammer & Nails boards every window", _h.planks.values().all(func(n): return n == 5))
+	_h._add_drop("ammo", Vector3(at.x + 3.0, 0, at.z))
+	await _shot("drop", Vector3(at.x, 1.6, at.z + 1.5), Vector3(at.x + 3.0, 0.9, at.z))
+	_check("a drop away from you waits", _h._drops.size() == 1)
+	_h._clear_drops()
+	_h._drops_round = 0
+	var drops_seen := 0
+	for i in 400:
+		var z2: Dictionary = _h.add_zombie_inside(Vector3(0, 0, -3.0), "hall", 1.0)
+		_h._damage(z2, 5.0, false, {"pierce": 1})
+		_clear_dead()
+	var dealt := []
+	_h._drop_deck.clear()
+	for i in 5:
+		dealt.append(_h._deal_drop())
+	_check("drops come from a shuffled deck: every kind before a repeat", dealt.duplicate().filter(func(k): return dealt.count(k) == 1).size() == 5, dealt)
+	_check("scoring past the goal readies a drop", _h.earned >= 2000 and _h._drop_goal > 2000.0)
+	_check("kills leave drops sometimes, at most 4 a round", _h._drops.size() >= 1 and _h._drops.size() <= 4, _h._drops.size())
+	_h._clear_drops()
+	_h.effects.clear()
+
+	# The shield: three parts, the workbench, then it takes hits in front.
+	_check("no parts: no shield", not _h.build_shield())
+	for i in 3:
+		_check("pick up part %d" % (i + 1), _h.pick_part(i))
+	_check("built at the workbench", _h.build_shield() and _h.shield == 6 and ctx["left"].has_node("holdout_shield"))
+	var lefthand := ctx["left"] as Node3D
+	var you2 := _you()
+	lefthand.global_transform = Transform3D(Basis.looking_at(_h._arena.global_transform.basis * Vector3(0, 0, -1), Vector3.UP), _h._arena.to_global(Vector3(you2.x, 1.2, you2.z - 0.3)))
+	var front: Dictionary = _h.add_zombie_inside(Vector3(you2.x, 0, you2.z - 0.8), "hall", 99999.0)
+	var hp_now: float = _h.health
+	_h._struck_by(front)
+	_check("a hit from in front: the shield takes it", _h.health == hp_now and _h.shield == 5)
+	front["pos"] = Vector3(you2.x, 0, you2.z + 0.8)
+	_h._struck_by(front)
+	_check("from behind: you take it", _h.health < hp_now and _h.shield == 5)
+	_clear_dead()
+	_h.health = _h._max_health()
+	await _shot("shield", Vector3(you2.x + 0.6, 1.5, you2.z - 1.0), Vector3(you2.x, 1.2, you2.z - 0.3))
+
+	# Second Wind: down, back up, the tonics gone.
+	_check("Second Wind needs no power", "second_wind" in _h.NO_POWER_TONICS and _h.buy_tonic("second_wind"))
+	var biter: Dictionary = _h.add_zombie_inside(Vector3(you2.x, 0, you2.z + 0.6), "hall", 99999.0)
+	_h.health = 1.0
+	_h._hurt_you(50.0)
+	_check("at no health with Second Wind: down, not out", _h.running and _h.downed and _h.tonics.is_empty())
+	_check("the dead nearby are thrown back", biter["pos"].distance_to(Vector3(you2.x, 0, you2.z)) >= 2.0, biter["pos"])
+	_h._struck_by(biter)
+	_check("no hurt while down", _h.downed and _h.health == 0.0)
+	await _wait(5.3)
+	_check("back up with full health", not _h.downed and _h.health == _h._max_health())
 	_clear_dead()
 
 	# Overrun: the game ends, the round is kept.
+	_h._wear_shield(false)  # or it takes the hit
 	_h._move_player_to(Vector3(0, 0, 0))
 	_h.round_number = 7
 	var killer: Dictionary = _h.add_zombie_inside(Vector3(0, 0, -0.5), "hall", 5000.0)
