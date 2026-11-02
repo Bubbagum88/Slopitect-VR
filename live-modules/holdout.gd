@@ -104,6 +104,8 @@ const MAPS := {
 			{"gun": "mp5", "at": [-3.0, -5.0], "in": [0.0, 1.0]},
 			{"gun": "m14", "at": [5.0, -3.0], "in": [-1.0, 0.0]},
 			{"gun": "ak47", "at": [-3.2, 5.0], "in": [0.0, -1.0]},
+			{"gun": "kar98k", "at": [-5.0, -4.0], "in": [1.0, 0.0]},
+			{"gun": "thompson", "at": [4.35, -5.0], "in": [0.0, 1.0]},
 		],
 		"tonics": [
 			{"tonic": "rattle_rum", "at": [-5.0, 3.6], "in": [1.0, 0.0]},
@@ -150,6 +152,9 @@ const MAPS := {
 			{"gun": "mp5", "at": [4.0, -2.6], "in": [-1.0, 0.0]},
 			{"gun": "m14", "at": [4.0, 2.6], "in": [-1.0, 0.0]},
 			{"gun": "ak47", "at": [-2.4, 4.0], "in": [0.0, 1.0]},
+			{"gun": "kar98k", "at": [0.4, -4.0], "in": [0.0, 1.0]},
+			{"gun": "remington870", "at": [-4.0, -3.3], "in": [1.0, 0.0]},
+			{"gun": "thompson", "at": [4.0, 9.2], "in": [-1.0, 0.0]},
 		],
 		"tonics": [
 			{"tonic": "quickhands", "at": [-2.6, 4.0], "in": [0.0, -1.0]},
@@ -207,9 +212,46 @@ const GUNS := {
 		"auto": false, "cost": 0, "pierce": 1, "chain": 4, "len": 0.34},
 	"frostbite": {"name": "Frostbite", "damage": 150.0, "rate": 0.3, "mag": 15, "reserve": 75, "reload": 2.0, "pellets": 1, "spread": 0.0,
 		"auto": false, "cost": 0, "pierce": 1, "chill": 4.0, "len": 0.36},
+	# More you'll know: on the walls...
+	"kar98k": {"name": "Kar98k", "damage": 150.0, "rate": 1.1, "mag": 5, "reserve": 50, "reload": 2.6, "pellets": 1, "spread": 0.3,
+		"auto": false, "cost": 600, "pierce": 2, "len": 0.62},
+	"thompson": {"name": "Thompson", "damage": 40.0, "rate": 0.085, "mag": 30, "reserve": 160, "reload": 2.2, "pellets": 1, "spread": 2.8,
+		"auto": true, "cost": 1200, "pierce": 1, "len": 0.45},
+	"remington870": {"name": "Remington 870", "damage": 30.0, "rate": 0.55, "mag": 6, "reserve": 48, "reload": 3.0, "pellets": 8, "spread": 5.5,
+		"auto": false, "cost": 900, "pierce": 1, "len": 0.55},
+	# ...and in the crate.
+	"galil": {"name": "Galil", "damage": 55.0, "rate": 0.09, "mag": 35, "reserve": 245, "reload": 2.6, "pellets": 1, "spread": 1.6,
+		"auto": true, "cost": 0, "pierce": 1, "len": 0.5},
+	"spas12": {"name": "SPAS-12", "damage": 32.0, "rate": 0.3, "mag": 8, "reserve": 48, "reload": 3.0, "pellets": 8, "spread": 6.0,
+		"auto": false, "cost": 0, "pierce": 1, "len": 0.55},
+	"deagle": {"name": "Desert Eagle", "damage": 120.0, "rate": 0.3, "mag": 7, "reserve": 49, "reload": 1.6, "pellets": 1, "spread": 0.6,
+		"auto": false, "cost": 0, "pierce": 2, "len": 0.24},
+	"mp40": {"name": "MP40", "damage": 35.0, "rate": 0.11, "mag": 32, "reserve": 192, "reload": 2.0, "pellets": 1, "spread": 2.4,
+		"auto": true, "cost": 0, "pierce": 1, "len": 0.4},
+	# Our own odd ones, crate only, like the Thunderjug and Frostbite.
+	# Emberwick sets the dead alight (it spreads to those next to them);
+	# Gravebell's toll throws back everything in front of you; Rootsnare
+	# holds them where they stand.
+	"emberwick": {"name": "Emberwick", "damage": 120.0, "rate": 0.35, "mag": 10, "reserve": 60, "reload": 2.2, "pellets": 1, "spread": 0.0,
+		"auto": false, "cost": 0, "pierce": 1, "burn": 5.0, "len": 0.4},
+	"gravebell": {"name": "Gravebell", "damage": 220.0, "rate": 0.6, "mag": 4, "reserve": 24, "reload": 2.6, "pellets": 1, "spread": 0.0,
+		"auto": false, "cost": 0, "pierce": 1, "cone": 4.5, "knock": 2.5, "len": 0.42},
+	"rootsnare": {"name": "Rootsnare", "damage": 100.0, "rate": 0.35, "mag": 12, "reserve": 60, "reload": 2.0, "pellets": 1, "spread": 0.0,
+		"auto": false, "cost": 0, "pierce": 2, "snare": 5.0, "len": 0.38},
 }
-# Real guns you'll know, plus two of our own odd ones in the crate.
-const CRATE_GUNS := ["double_barrel", "mp5", "m14", "ak47", "python", "m60", "barrett", "rpg7", "thunderjug", "frostbite"]
+# What each becomes on The Anvil: our own names.
+const FORGED_NAMES := {
+	"m1911": "Ember .45", "double_barrel": "Two-Bit Thunder", "mp5": "Wasp Nest", "m14": "Long Night", "ak47": "Red Harvest",
+	"python": "Copperhead", "m60": "Lead Rain", "barrett": "Last Word", "rpg7": "Housewarmer", "thunderjug": "Stormcellar",
+	"frostbite": "Deep Winter", "kar98k": "Old Faithful", "thompson": "Gangland", "remington870": "Barn Burner", "galil": "Desert Wind",
+	"spas12": "Doorkicker", "deagle": "Hand Cannon", "mp40": "Night Shift", "emberwick": "Wildfire", "gravebell": "Deathknell",
+	"rootsnare": "Old Growth",
+}
+const BURN_DPS := 60.0           # Emberwick's fire, health a second
+const BELL_DEGREES := 35.0       # Gravebell's toll reaches this far each side of where you aim
+# Real guns you'll know, plus our own odd ones in the crate.
+const CRATE_GUNS := ["double_barrel", "mp5", "m14", "ak47", "python", "m60", "barrett", "rpg7", "thunderjug", "frostbite",
+	"kar98k", "thompson", "remington870", "galil", "spas12", "deagle", "mp40", "emberwick", "gravebell", "rootsnare"]
 const CRATE_COST := 950
 const CRATE_SHUFFLE := 2.4       # seconds it shuffles
 const CRATE_OFFER := 8.0         # seconds it offers the gun
@@ -268,6 +310,8 @@ const REGEN_AFTER := 4.0
 const REGEN_RATE := 60.0         # health a second
 const ATTACK_RANGE := 1.1
 const ATTACK_TIME := 1.2         # seconds between one zombie's swipes
+const SWING_TIME := 0.65         # a swipe's wind-up: it rears back, then lunges; step out of reach to dodge it
+const SWING_BACK := 0.3          # seconds it takes to straighten up after
 const REACH := 1.4               # metres from a thing you can use it
 const REPAIR_TIME := 0.7         # seconds a board
 const REPAIR_CAP := 400          # points a round for boards
@@ -1657,7 +1701,7 @@ func _spawn_one() -> bool:
 	if to_window.length() > 0.1:
 		out = -to_window.normalized()
 	var z := {"slot": _free_slots.pop_back(), "state": "rise", "pos": at, "yaw": atan2(-out.x, -out.z), "hp": _round_hp,
-		"speed": _speed_for_round(), "room": wnd["room"], "window": wnd["id"], "t": 0.0, "cd": 0.0, "chill": 0.0,
+		"speed": _speed_for_round(), "room": wnd["room"], "window": wnd["id"], "t": 0.0, "cd": 0.0, "chill": 0.0, "burn": 0.0, "snare": 0.0, "swing": -1.0,
 		"groan": _rng.randf_range(1.0, 6.0), "flash": 0.0, "y": -1.8, "phase": _rng.randf() * TAU, "fall": 0.0}
 	_zombies.append(z)
 	_place_zombie(z)
@@ -1672,7 +1716,7 @@ func add_zombie_inside(spot: Vector3, room := "", hp := -1.0) -> Dictionary:
 	if room.is_empty():
 		room = _room_at(spot) if not _room_at(spot).is_empty() else _map["start"]
 	var z := {"slot": _free_slots.pop_back(), "state": "chase", "pos": spot, "yaw": 0.0, "hp": hp if hp > 0.0 else _round_hp,
-		"speed": SPEEDS["walk"], "room": room, "window": "", "t": 0.0, "cd": ATTACK_TIME, "chill": 0.0, "groan": 5.0,
+		"speed": SPEEDS["walk"], "room": room, "window": "", "t": 0.0, "cd": ATTACK_TIME, "chill": 0.0, "burn": 0.0, "snare": 0.0, "swing": -1.0, "groan": 5.0,
 		"flash": 0.0, "y": 0.0, "phase": 0.0, "fall": 0.0}
 	_zombies.append(z)
 	_place_zombie(z)
@@ -1688,7 +1732,13 @@ func _move_dead(delta: float, you: Vector3) -> void:
 		z["t"] += delta
 		z["flash"] = maxf(0.0, z["flash"] - delta)
 		z["chill"] = maxf(0.0, z["chill"] - delta)
-		var speed: float = z["speed"] * (0.4 if z["chill"] > 0.0 else 1.0)
+		z["snare"] = maxf(0.0, z["snare"] - delta)
+		if z["burn"] > 0.0 and z["state"] != "dying":
+			z["burn"] = maxf(0.0, z["burn"] - delta)
+			z["hp"] -= BURN_DPS * delta
+			if z["hp"] <= 0.0:
+				_kill(z, false, false)
+		var speed: float = z["speed"] * (0.4 if z["chill"] > 0.0 else 1.0) * (0.0 if z["snare"] > 0.0 else 1.0)
 		match z["state"]:
 			"rise":
 				z["y"] = lerpf(-1.8, 0.0, minf(1.0, z["t"] / RISE_TIME))
@@ -1734,7 +1784,9 @@ func _move_dead(delta: float, you: Vector3) -> void:
 				var step := _path_step(_in_field, z["pos"])
 				if step != Vector3.INF:
 					target = step
-				if (z["pos"] as Vector3).distance_to(you_flat) > ATTACK_RANGE * 0.7:
+				if z["swing"] >= 0.0:
+					pass  # stands its ground to swipe
+				elif (z["pos"] as Vector3).distance_to(you_flat) > ATTACK_RANGE * 0.7:
 					_walk_to(z, target, speed, delta)
 				else:
 					var to: Vector3 = you_flat - z["pos"]
@@ -1748,13 +1800,27 @@ func _move_dead(delta: float, you: Vector3) -> void:
 					_free_slots.append(z["slot"])
 					_zombies.erase(z)
 					continue
-		if z["state"] in ["tear", "chase"]:
+		# A swipe: it rears back for SWING_TIME, then lunges; it only lands if
+		# you're still in reach then.
+		if z["state"] in ["tear", "chase"] and z["snare"] <= 0.0:
 			z["cd"] -= delta
-			if (z["pos"] as Vector3).distance_to(you_flat) < ATTACK_RANGE and z["cd"] <= 0.0:
-				z["cd"] = ATTACK_TIME
-				_struck_by(z)
-				if not running:
-					return
+			var reach: float = (z["pos"] as Vector3).distance_to(you_flat)
+			if z["swing"] >= 0.0:
+				var was: float = z["swing"]
+				z["swing"] += delta
+				if was < SWING_TIME and z["swing"] >= SWING_TIME:
+					z["cd"] = ATTACK_TIME
+					if reach < ATTACK_RANGE * 1.1:
+						_struck_by(z)
+						if not running:
+							return
+				if z["swing"] >= SWING_TIME + SWING_BACK:
+					z["swing"] = -1.0
+			elif reach < ATTACK_RANGE and z["cd"] <= 0.0:
+				z["swing"] = 0.0
+				_sound("groan", _arena.to_global(z["pos"] + Vector3(0, 1.5, 0)), 0.5, 1.4)
+		elif z["swing"] >= 0.0:
+			z["swing"] = -1.0  # held by roots, or climbing: the swipe's lost
 		if z["state"] != "dying":
 			z["groan"] -= delta
 			if z["groan"] <= 0.0:
@@ -1980,24 +2046,47 @@ func _walk_to(z: Dictionary, spot: Vector3, speed: float, delta: float) -> bool:
 	return d - step < 0.05
 
 
-# The dead inside push apart a little, so they don't stand in one another.
+# The dead push apart, so they never stand in one another: inside, on the
+# way to a window, and at it. One tearing at a window keeps its place, so
+# the next waits behind it (a queue, not a stack). Nobody is pushed into a
+# wall or out of its room.
 func _spread_out() -> void:
 	for i in _zombies.size():
 		var a: Dictionary = _zombies[i]
-		if a["state"] != "chase":
+		if not a["state"] in ["chase", "approach", "tear"]:
 			continue
 		for j in range(i + 1, _zombies.size()):
 			var b: Dictionary = _zombies[j]
-			if b["state"] != "chase":
+			if not b["state"] in ["chase", "approach", "tear"]:
 				continue
 			var d: Vector3 = b["pos"] - a["pos"]
 			d.y = 0.0
 			var l := d.length()
-			if l < ZOMBIE_GAP and l > 0.001:
-				var push := d / l * (ZOMBIE_GAP - l) * 0.5
-				a["pos"] -= push
-				b["pos"] += push
-		a["pos"] = _inside(a["pos"], a["room"])
+			if l >= ZOMBIE_GAP:
+				continue
+			if l < 0.001:
+				d = Vector3(_rng.randf_range(-1, 1), 0, _rng.randf_range(-1, 1))
+				l = maxf(d.length(), 0.001)
+			var push := d / l * (ZOMBIE_GAP - l)
+			var a_moves: bool = a["state"] != "tear"
+			var b_moves: bool = b["state"] != "tear"
+			if a_moves and b_moves:
+				_nudge(a, -push * 0.5)
+				_nudge(b, push * 0.5)
+			elif a_moves:
+				_nudge(a, -push)
+			elif b_moves:
+				_nudge(b, push)
+
+
+func _nudge(z: Dictionary, by: Vector3) -> void:
+	var to: Vector3 = z["pos"] + by
+	if z["state"] == "chase":
+		z["pos"] = _inside(to, z["room"])
+		return
+	var c := _cell_of(to)
+	if c < 0 or _blocked.is_empty() or (_blocked[c] == 0 and _cell_room[c] == -1):
+		z["pos"] = to
 
 
 # Keeps a point in a room (or in an open doorway out of it).
@@ -2024,7 +2113,16 @@ func _place_zombie(z: Dictionary) -> void:
 	if _zombie_mm == null:
 		return
 	var sway := sin(z["phase"]) * 0.08 if z["state"] in ["chase", "approach"] else 0.0
-	var basis := Basis(Vector3.UP, z["yaw"]) * Basis(Vector3.BACK, sway) * Basis(Vector3.RIGHT, -z["fall"] * PI / 2.0)
+	var lean := 0.0  # the swipe: back as it winds up, forward as it lunges, then up again
+	var sw: float = z.get("swing", -1.0)
+	if sw >= 0.0:
+		if sw < SWING_TIME * 0.75:
+			lean = 0.3 * sw / (SWING_TIME * 0.75)
+		elif sw < SWING_TIME:
+			lean = lerpf(0.3, -0.45, (sw - SWING_TIME * 0.75) / (SWING_TIME * 0.25))
+		else:
+			lean = lerpf(-0.45, 0.0, minf(1.0, (sw - SWING_TIME) / SWING_BACK))
+	var basis := Basis(Vector3.UP, z["yaw"]) * Basis(Vector3.BACK, sway) * Basis(Vector3.RIGHT, lean - z["fall"] * PI / 2.0)
 	var at: Vector3 = z["pos"] + Vector3(0, z["y"] + absf(sway) * 0.3, 0)
 	_zombie_mm.set_instance_transform(z["slot"], Transform3D(basis, at))
 	var tint := Color(1, 1, 1)
@@ -2032,6 +2130,10 @@ func _place_zombie(z: Dictionary) -> void:
 		tint = Color(1.8, 0.7, 0.6)
 	elif z["chill"] > 0.0:
 		tint = Color(0.6, 0.85, 1.6)
+	elif z.get("burn", 0.0) > 0.0:
+		tint = Color(1.8, 0.8, 0.3)
+	elif z.get("snare", 0.0) > 0.0:
+		tint = Color(0.6, 1.3, 0.5)
 	_zombie_mm.set_instance_color(z["slot"], tint)
 
 
@@ -2042,15 +2144,23 @@ func _hide_slot(slot: int) -> void:
 
 # --- Shooting -----------------------------------------------------------------------------
 
-# A held gun's numbers: a forged one hits twice as hard, goes through one
-# more, and holds half as much again (twice the spare ammo).
+# A held gun's numbers: a forged one has its own name, hits twice as hard,
+# goes through one more, holds half as much again (twice the spare ammo),
+# and its oddity (chain, chill, splash, fire, toll, roots) goes further.
 func _spec(g: Dictionary) -> Dictionary:
 	var id: String = g["id"]
 	if not g.get("up", false):
 		return GUNS[id]
 	if not _up_specs.has(id):
 		var s: Dictionary = GUNS[id].duplicate()
-		s["name"] = "Forged " + s["name"]
+		s["name"] = FORGED_NAMES.get(id, "Forged " + s["name"])
+		for k in ["chill", "burn", "snare", "knock", "cone"]:
+			if s.has(k):
+				s[k] = s[k] * 1.5
+		if s.has("chain"):
+			s["chain"] = int(s["chain"]) + 2
+		if s.has("splash"):
+			s["splash"] = s["splash"] + 1.0
 		s["damage"] = s["damage"] * 2.0
 		s["mag"] = int(ceil(s["mag"] * 1.5))
 		s["reserve"] = int(s["reserve"]) * 2
@@ -2103,10 +2213,13 @@ func _fire() -> void:
 	var im := _tracer.mesh as ImmediateMesh
 	im.clear_surfaces()
 	im.surface_begin(Mesh.PRIMITIVE_LINES)
-	for p in int(spec["pellets"]):
+	if spec.has("cone"):
+		_toll(muzzle, ahead, spec)
+	for p in (0 if spec.has("cone") else int(spec["pellets"])):
 		var dir := _spread(ahead, spec["spread"])
 		var end := _shoot_ray(muzzle, dir, spec)
-		im.surface_set_color(Color(1.0, 0.85, 0.4) if not spec.has("chill") else Color(0.6, 0.9, 1.0))
+		im.surface_set_color(Color(0.6, 0.9, 1.0) if spec.has("chill") else Color(1.0, 0.45, 0.1) if spec.has("burn") \
+			else Color(0.45, 0.8, 0.3) if spec.has("snare") else Color(1.0, 0.85, 0.4))
 		im.surface_add_vertex(muzzle)
 		im.surface_add_vertex(end)
 		if spec.has("chain"):
@@ -2232,6 +2345,10 @@ func _damage(z: Dictionary, amount: float, head: bool, spec: Dictionary) -> void
 	z["flash"] = 0.08
 	if spec.has("chill"):
 		z["chill"] = spec["chill"]
+	if spec.has("snare"):
+		z["snare"] = spec["snare"]
+	if spec.has("burn"):
+		_set_alight(z, spec["burn"])
 	if z["hp"] <= 0.0:
 		_kill(z, head, spec.get("knife", false))
 	else:
@@ -2249,7 +2366,54 @@ func _kill(z: Dictionary, head: bool, knife: bool) -> void:
 		_drop_ready = false
 		_add_drop(_deal_drop(), z["pos"])
 	z["chill"] = 0.0
+	z["burn"] = 0.0
+	z["snare"] = 0.0
+	z["swing"] = -1.0
 	_sound("hit", _arena.to_global(z["pos"] + Vector3(0, 1.2, 0)), 0.8, 0.7)
+
+
+# Emberwick: it burns for a while, and those right next to it catch too
+# (for half as long; they don't pass it on).
+func _set_alight(z: Dictionary, seconds: float, spread := true) -> void:
+	z["burn"] = maxf(z["burn"], seconds)
+	if not spread:
+		return
+	for o in _zombies:
+		if o != z and o["state"] != "dying" and o["burn"] <= 0.0 and (o["pos"] as Vector3).distance_to(z["pos"]) < 1.5:
+			_set_alight(o, seconds * 0.5, false)
+
+
+# Gravebell: hurts and throws back every one in front of you (in reach, in
+# BELL_DEGREES of where you aim, no wall between), whether or not it hit.
+func _toll(from: Vector3, ahead: Vector3, spec: Dictionary) -> bool:
+	var reach: float = spec["cone"]
+	var any := false
+	for z in _zombies.duplicate():
+		if z["state"] == "dying":
+			continue
+		var centre: Vector3 = z["pos"] + Vector3(0, 1.1, 0)
+		var to := centre - from
+		var d := to.length()
+		if d > reach or d < 0.01 or rad_to_deg(ahead.angle_to(to)) > BELL_DEGREES or _wall_hit(from, to / d) < d:
+			continue
+		any = true
+		_damage(z, spec["damage"] * (1.0 - 0.5 * d / reach), false, {"pierce": 1})
+		if z["state"] in ["chase", "approach"]:
+			var push := Vector3(to.x, 0, to.z).normalized()
+			var moved := 0.0
+			while moved < float(spec["knock"]):
+				var next: Vector3 = z["pos"] + push * 0.25
+				var c := _cell_of(next)
+				if c < 0 or _blocked[c] == 1 or (z["state"] == "chase" and _room_at(next).is_empty()):
+					break
+				z["pos"] = next
+				moved += 0.25
+	_boom.position = from + ahead * 1.2
+	_boom.scale = Vector3.ONE * 0.6
+	_boom.visible = true
+	_boom_left = 0.12
+	_sound("boom", _arena.to_global(from), 0.8, 1.8)
+	return any
 
 
 func _splash(at: Vector3, spec: Dictionary) -> void:
@@ -3306,6 +3470,63 @@ func _gun_parts(id: String, steel: Color, black: Color, wood: Color, olive: Colo
 			return [[Vector3(0, 0.03, -0.15), Vector3(0.045, 0.055, 0.26), Color(0.75, 0.88, 0.95)],
 				[Vector3(0, 0.04, -0.3), Vector3(0.07, 0.07, 0.06), Color(0.55, 0.85, 1.0)],
 				[Vector3(0, -0.04, 0.0), Vector3(0.03, 0.1, 0.045), steel, -12.0]]
+		"kar98k":
+			return [[Vector3(0, 0.03, -0.45), Vector3(0.016, 0.016, 0.36), steel],
+				[Vector3(0, 0.02, -0.25), Vector3(0.04, 0.04, 0.46), wood],
+				[Vector3(0, 0.045, -0.06), Vector3(0.025, 0.025, 0.12), steel],
+				[Vector3(0.035, 0.045, -0.02), Vector3(0.04, 0.012, 0.012), steel],
+				[Vector3(0, -0.02, 0.14), Vector3(0.04, 0.08, 0.28), wood, -10.0]]
+		"thompson":
+			return [[Vector3(0, 0.03, -0.32), Vector3(0.022, 0.022, 0.16), steel],
+				[Vector3(0, 0.035, -0.14), Vector3(0.045, 0.05, 0.26), steel],
+				[Vector3(0, -0.04, -0.22), Vector3(0.025, 0.08, 0.03), wood],
+				[Vector3(0, -0.06, -0.1), Vector3(0.03, 0.06, 0.14), black],
+				[Vector3(0, -0.04, 0.02), Vector3(0.03, 0.08, 0.04), wood, -12.0],
+				[Vector3(0, 0.0, 0.16), Vector3(0.04, 0.07, 0.22), wood, -8.0]]
+		"remington870":
+			return [[Vector3(0, 0.035, -0.36), Vector3(0.022, 0.022, 0.42), black],
+				[Vector3(0, 0.01, -0.3), Vector3(0.018, 0.018, 0.36), black],
+				[Vector3(0, 0.005, -0.28), Vector3(0.04, 0.04, 0.12), wood],
+				[Vector3(0, 0.025, -0.06), Vector3(0.045, 0.05, 0.14), black],
+				[Vector3(0, -0.01, 0.15), Vector3(0.04, 0.08, 0.26), wood, -10.0]]
+		"galil":
+			return [[Vector3(0, 0.03, -0.4), Vector3(0.018, 0.018, 0.18), black],
+				[Vector3(0, 0.03, -0.24), Vector3(0.045, 0.045, 0.16), black],
+				[Vector3(0, 0.04, -0.06), Vector3(0.045, 0.05, 0.22), black],
+				[Vector3(0, -0.06, -0.1), Vector3(0.028, 0.14, 0.045), black, 15.0],
+				[Vector3(0, -0.04, 0.03), Vector3(0.03, 0.08, 0.04), black, -15.0],
+				[Vector3(0, 0.02, 0.17), Vector3(0.02, 0.05, 0.22), steel]]
+		"spas12":
+			return [[Vector3(0, 0.04, -0.34), Vector3(0.025, 0.025, 0.38), black],
+				[Vector3(0, 0.01, -0.3), Vector3(0.05, 0.035, 0.22), black],
+				[Vector3(0, 0.03, -0.05), Vector3(0.05, 0.06, 0.16), black],
+				[Vector3(0, -0.04, 0.03), Vector3(0.03, 0.08, 0.04), black, -15.0],
+				[Vector3(0, 0.05, 0.14), Vector3(0.012, 0.012, 0.22), steel]]
+		"deagle":
+			return [[Vector3(0, 0.035, -0.09), Vector3(0.035, 0.04, 0.24), steel],
+				[Vector3(0, -0.04, 0.0), Vector3(0.035, 0.11, 0.05), black, -12.0],
+				[Vector3(0, -0.005, -0.04), Vector3(0.008, 0.02, 0.04), steel]]
+		"mp40":
+			return [[Vector3(0, 0.03, -0.3), Vector3(0.018, 0.018, 0.14), black],
+				[Vector3(0, 0.035, -0.12), Vector3(0.04, 0.045, 0.24), black],
+				[Vector3(0, -0.07, -0.13), Vector3(0.024, 0.15, 0.03), black],
+				[Vector3(0, -0.04, 0.0), Vector3(0.03, 0.08, 0.04), black, -12.0],
+				[Vector3(0, 0.03, 0.12), Vector3(0.012, 0.012, 0.18), steel]]
+		"emberwick":
+			return [[Vector3(0, 0.03, -0.18), Vector3(0.05, 0.05, 0.28), Color(0.3, 0.18, 0.1)],
+				[Vector3(0, 0.05, -0.15), Vector3(0.07, 0.09, 0.07), Color(1.0, 0.5, 0.12)],
+				[Vector3(0, 0.03, -0.36), Vector3(0.045, 0.045, 0.06), steel],
+				[Vector3(0, -0.04, 0.0), Vector3(0.03, 0.1, 0.045), wood, -12.0]]
+		"gravebell":
+			return [[Vector3(0, 0.03, -0.18), Vector3(0.04, 0.04, 0.26), Color(0.35, 0.3, 0.22)],
+				[Vector3(0, 0.03, -0.36), Vector3(0.12, 0.12, 0.08), Color(0.7, 0.55, 0.25)],
+				[Vector3(0, 0.03, -0.41), Vector3(0.15, 0.15, 0.02), Color(0.7, 0.55, 0.25)],
+				[Vector3(0, -0.04, 0.0), Vector3(0.03, 0.1, 0.045), wood, -12.0]]
+		"rootsnare":
+			return [[Vector3(0, 0.03, -0.17), Vector3(0.045, 0.05, 0.3), Color(0.32, 0.22, 0.12)],
+				[Vector3(0.025, 0.05, -0.28), Vector3(0.015, 0.015, 0.14), Color(0.35, 0.6, 0.25), 20.0],
+				[Vector3(-0.025, 0.01, -0.3), Vector3(0.015, 0.015, 0.12), Color(0.35, 0.6, 0.25), -20.0],
+				[Vector3(0, -0.04, 0.0), Vector3(0.03, 0.1, 0.045), wood, -12.0]]
 	return [[Vector3(0, 0.02, -0.1), Vector3(0.04, 0.06, 0.2), steel]]
 
 

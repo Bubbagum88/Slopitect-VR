@@ -393,12 +393,15 @@ func _go() -> void:
 	killer["cd"] = 0.0
 	_h.health = 1.0
 	await _frames(3)
+	_check("a swipe winds up first: no hit straight away", _h.running and killer["swing"] >= 0.0 and _h.health < 10.0, [killer["swing"], _h.health])
+	await _shot("swipe", Vector3(0.8, 1.6, 0.6), Vector3(0, 1.1, -0.5))
+	await _wait(0.8)
 	_check("overrun: the game ends", not _h.running and not _h.is_processing())
-	_check("results and the best round kept", _h.results.get("round") == 7 and int(_h.best.get("normal", 0)) == 7, _h.results)
+	_check("results and the best round kept", int(_h.results.get("round", 0)) >= 7 and int(_h.best.get("normal", 0)) == int(_h.results.get("round", 0)), _h.results)
 	_check("the window comes back", _run({"cmd": "ui_get", "id_panel": "holdout"}).get("panel", {}).get("visible", false))
 	_check("the gear is put away", not is_instance_valid(ctx["right"].get_node_or_null("holdout_gun")))
 	var st := _run({"cmd": "holdout_status"})
-	_check("holdout_status", st.get("ok", false) and st.get("results", {}).get("round") == 7)
+	_check("holdout_status", st.get("ok", false) and st.get("results", {}).get("round") == _h.results.get("round"))
 	_check("settings check their values", not _run({"cmd": "holdout_set", "max_zombies": 99}).get("ok", true)
 		and _run({"cmd": "holdout_set", "max_zombies": 8}).get("ok", false) and _h.settings["max_zombies"] == 8)
 
@@ -500,6 +503,9 @@ func _go() -> void:
 	while far["state"] == "approach" and t2 < 40.0:
 		await _wait(0.25)
 		t2 += 0.25
+		for other in _h._zombies.duplicate():  # only this one: no round's dead in the way
+			if other != far and other["state"] != "dying":
+				_h._damage(other, 1e9, false, {"pierce": 1})
 		var c: int = _h._cell_of(far["pos"])
 		if c >= 0 and _h._blocked[c] == 1:
 			hit_wall = true
@@ -511,6 +517,50 @@ func _go() -> void:
 	var sp: Vector3 = _h._spawn_spot(_h._map["windows"][0])
 	_check("new ones come up at the spawns in the wood", _h._room_at(sp).is_empty()
 		and _h._map["spawns"].any(func(q): return Vector3(q[0], 0, q[1]).distance_to(sp) < 1.5), sp)
+
+	# The new guns: more you'll know, our own odd ones, and the Anvil's names.
+	_check("every gun but the start gun can come from the crate", _h.GUNS.keys().filter(func(k): return k != "m1911" and not k in _h.CRATE_GUNS).is_empty())
+	_check("every gun has its own forged name", _h.GUNS.keys().all(func(k): return _h.FORGED_NAMES.has(k))
+		and _h._spec({"id": "ak47", "up": true})["name"] == "Red Harvest" and _h._spec({"id": "emberwick", "up": true})["burn"] == 7.5)
+	_check("Kar98k and Thompson are on the Cabin's walls", _h._uses.any(func(u): return u["id"] == "kar98k") and _h._uses.any(func(u): return u["id"] == "thompson"))
+	await _shot("kar98k", Vector3(-3.4, 1.6, -3.0), Vector3(-5, 1.3, -4.2))
+	_h._move_player_to(Vector3(0, 0, 0))
+	await _frames(2)
+	var me := _you()
+	# Emberwick: alight, and the one next to it catches.
+	var lit: Dictionary = _h.add_zombie_inside(Vector3(me.x, 0, me.z - 3.0), "", 5000.0)
+	var next_to: Dictionary = _h.add_zombie_inside(Vector3(me.x + 0.8, 0, me.z - 3.0), "", 5000.0)
+	_h._give_gun("emberwick")
+	_aim(Vector3(me.x, 1.2, me.z - 0.3), Vector3(me.x, 1.2, me.z - 3.0))
+	await _shoot()
+	_check("Emberwick sets it alight, and the next one catches", lit["burn"] > 0.0 and next_to["burn"] > 0.0 and next_to["burn"] < lit["burn"], [lit["burn"], next_to["burn"]])
+	var hp_lit: float = lit["hp"]
+	await _wait(1.0)
+	_check("fire keeps hurting it", lit["hp"] < hp_lit - 30.0, [hp_lit, lit["hp"]])
+	_clear_dead()
+	# Rootsnare: held where it stands.
+	var held_one: Dictionary = _h.add_zombie_inside(Vector3(me.x, 0, me.z - 3.0), "", 5000.0)
+	_h._give_gun("rootsnare")
+	_aim(Vector3(me.x, 1.2, me.z - 0.3), Vector3(me.x, 1.2, me.z - 3.0))
+	await _shoot()
+	var held_at: Vector3 = held_one["pos"]
+	await _wait(1.0)
+	_check("Rootsnare holds it where it stands", held_one["snare"] > 0.0 and (held_one["pos"] as Vector3).distance_to(held_at) < 0.1, held_one["pos"])
+	_clear_dead()
+	# Gravebell: everything in front is thrown back.
+	var bell1: Dictionary = _h.add_zombie_inside(Vector3(me.x, 0, me.z - 1.5), "", 5000.0)
+	var bell2: Dictionary = _h.add_zombie_inside(Vector3(me.x + 0.6, 0, me.z - 2.0), "", 5000.0)
+	var behind: Dictionary = _h.add_zombie_inside(Vector3(me.x, 0, me.z + 1.5), "", 5000.0)
+	_h._give_gun("gravebell")
+	_aim(Vector3(me.x, 1.2, me.z - 0.3), Vector3(me.x, 1.2, me.z - 3.0))
+	var d1: float = (bell1["pos"] as Vector3).distance_to(me)
+	await _shoot()
+	await _shot("gravebell", Vector3(me.x - 0.6, 1.5, me.z + 0.4), Vector3(me.x, 1.1, me.z - 1.5))
+	_check("Gravebell hurts and throws back all in front", bell1["hp"] < 5000.0 and bell2["hp"] < 5000.0 and (bell1["pos"] as Vector3).distance_to(me) > d1 + 1.0,
+		[bell1["hp"], bell2["hp"], (bell1["pos"] as Vector3).distance_to(me)])
+	_check("but not the one behind you", behind["hp"] == 5000.0)
+	_check("and keeps them in the room", _h._room_at(bell1["pos"]) == "cabin")
+	_clear_dead()
 	_clear_dead()
 	_run({"cmd": "holdout_stop"})
 
