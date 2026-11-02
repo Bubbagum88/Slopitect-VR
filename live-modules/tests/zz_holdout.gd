@@ -418,6 +418,24 @@ func _go() -> void:
 	_check("round 1 cleared: round 2 comes", _h.round_number == 2, [_h.round_number, _h._to_spawn, _h._zombies.size()])
 	_check("kills counted", _h.kills >= _h.round_count(1), _h.kills)
 
+	# Sprint: hold the left grip while you walk; it runs out and comes back.
+	var con = ctx["modules"].module("controls")
+	_check("the left grip is the sprint", _h.on_action("grab_left", true))
+	_h._sprint_frame(0.5, true)
+	_check("sprinting: you walk faster", con.get("_boost") == _h.SPRINT_BOOST and _h._stamina == _h.SPRINT_TIME - 0.5)
+	_h._sprint_frame(0.5, false)
+	_check("standing still: no boost, no stamina used", con.get("_boost") == 1.0 and _h._stamina == _h.SPRINT_TIME - 0.5)
+	_h._sprint_frame(10.0, true)
+	_h._sprint_frame(0.1, true)
+	_check("out of stamina: back to walking", _h._stamina == 0.0 and con.get("_boost") == 1.0)
+	_h.on_action("grab_left", false)
+	_h._sprint_frame(1.0, true)
+	_check("no sprint before a rest", _h._stamina == 0.0)
+	_h._sprint_frame(1.0, false)
+	_h._sprint_frame(1.0, false)
+	_check("after a rest it comes back", _h._stamina > 0.0)
+	_h.on_action("grab_left", true)
+	_h._sprint_frame(0.1, true)
 	# The game's menu: opening the window holds the game; Resume carries on.
 	_clear_dead()
 	_check("a Holdout button on the hand menu", _h.hand_info().get("label") == "Holdout" and _h.hand_info().get("action", {}).get("act") == "toggle")
@@ -428,6 +446,7 @@ func _go() -> void:
 	_check("mid-game the window opens as the game's menu", _run({"cmd": "ui_get", "id_panel": "holdout"}).get("panel", {}).get("visible", false)
 		and "resume" in ids and "stop" in ids and "leave" in ids and not "start" in ids, ids)
 	await _shot_panel("game-menu", "holdout")
+	_check("the menu stops the sprint", con.get("_boost") == 1.0)
 	_check("the game waits while it's open", _h._held and not _h.is_processing() and _run({"cmd": "holdout_status"}).get("held", false))
 	var gap_before: float = _h._spawn_t
 	var round_before: int = _h.round_number

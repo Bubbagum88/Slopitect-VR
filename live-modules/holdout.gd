@@ -70,6 +70,11 @@ const DIFF_LABELS := {"easy": "Easy", "normal": "Normal", "hard": "Hard"}
 const DIFF_HEALTH := {"easy": 0.7, "normal": 1.0, "hard": 1.4}
 const DIFF_HIT := {"easy": 30.0, "normal": 45.0, "hard": 60.0}
 const MAX_ZOMBIES := [6, 20]
+# Sprint: hold the left grip while you walk. It runs out and comes back
+# after a short rest.
+const SPRINT_BOOST := 1.7        # times your walking speed
+const SPRINT_TIME := 4.0         # seconds of it, full
+const SPRINT_REST := 1.5         # seconds of not sprinting before it comes back
 const POOL := 20                 # the most of the dead there can be at once
 
 # --- The maps (metres; x right, z toward you; you start at 0, 0 facing -z) ---
@@ -364,6 +369,10 @@ var _hit_t := 99.0               # seconds since you were last hit
 var _player_room := "cabin"
 var _map: Dictionary = MAPS["cabin"]   # the map being played (settings["map"])
 var _held := false               # the game waits while its window is open
+var _sprint_held := false        # the left grip is held
+var _sprinting := false          # controls.gd's speed_boost is on
+var _stamina := SPRINT_TIME      # seconds of sprint left
+var _rest_t := 0.0               # seconds since the last sprint
 # Pathing (see the Pathing section): the clearing as a grid of CELL squares.
 var _grid_at := Vector2.ZERO     # the grid's corner (lodge space x, z)
 var _gw := 0                     # cells across (x)
@@ -439,6 +448,7 @@ func _controls_here(controls: SlopitectModule) -> void:
 
 func _controls_gone(_old: SlopitectModule) -> void:
 	_controls = null
+	_sprinting = false  # its boost went with it
 
 
 func _audio_here(audio: SlopitectModule) -> void:
@@ -451,6 +461,7 @@ func _audio_gone(_old: SlopitectModule) -> void:
 
 func _exit_tree() -> void:
 	_end_game(false)
+	_sprint(false)
 	_stage_off()
 	ctx["server"].run({"cmd": "ui_remove", "id_panel": PANEL})
 
@@ -522,6 +533,9 @@ func on_action(action: String, down: bool) -> bool:
 			if down:
 				_switch_gun()
 			return true
+		"grab_left":
+			_sprint_held = down
+			return true
 	return false
 
 
@@ -587,6 +601,8 @@ func _panel_shown(id_panel: String, on: bool) -> void:
 
 func _hold(on: bool) -> void:
 	_held = on
+	_sprint_held = false
+	_sprint(false)
 	_trigger = false
 	_use_held = false
 	set_process(running and not on)
@@ -646,7 +662,7 @@ func _build() -> String:
 			"action": {"cmd": "holdout_leave"}})
 		y -= 0.1
 	els.append({"type": "text", "id": "help", "color": "muted", "at": [0.0, y], "width": w,
-		"text": "Trigger: shoot   A: buy, open, hold to board up\nB: reload   Y: switch guns   Swing left hand: knife"})
+		"text": "Trigger: shoot   A: buy, open, hold to board up\nB: reload   Y: switch guns   Hold left grip: sprint\nSwing left hand: knife"})
 	var request := {"id_panel": PANEL, "elements": els}
 	if _run({"cmd": "ui_get", "id_panel": PANEL}).get("ok", false):
 		request["cmd"] = "ui_update"
@@ -842,6 +858,7 @@ func _start(request: Dictionary) -> Dictionary:
 	_stage_on()
 	_reset_lodge()
 	points = START_POINTS
+	_stamina = SPRINT_TIME
 	health = HEALTH
 	kills = 0
 	headshots = 0
@@ -898,6 +915,8 @@ func _end_game(overrun: bool) -> void:
 	var was := running
 	running = false
 	_held = false
+	_sprint_held = false
+	_sprint(false)
 	set_process(false)
 	_trigger = false
 	_use_held = false
@@ -1503,6 +1522,7 @@ func _get_up() -> void:
 
 func _process(delta: float) -> void:
 	if not running or _arena == null or _held:
+		_sprint(false)
 		set_process(false)
 		return
 	_keep_in()
@@ -1520,6 +1540,7 @@ func _process(delta: float) -> void:
 		health = minf(_max_health(), health + REGEN_RATE * (2.0 if "mending_moss" in tonics else 1.0) * delta)
 		_update_hud()
 	_show_hurt()
+	_sprint_frame(delta, _controls != null and (_controls.call("stick", "walk") as Vector2).length() > 0.3)
 	_rounds(delta)
 	_move_dead(delta, here)
 	if not running:
@@ -1743,6 +1764,32 @@ func _move_dead(delta: float, you: Vector3) -> void:
 					_sound("groan", _arena.to_global(z["pos"] + Vector3(0, 1.5, 0)), 0.7, _rng.randf_range(0.85, 1.15))
 		_place_zombie(z)
 	_spread_out()
+
+
+# --- Sprint -----------------------------------------------------------------------------
+
+# Holding the left grip while walking runs (controls.gd's speed_boost),
+# until the stamina's gone; it comes back after SPRINT_REST of not running.
+func _sprint_frame(delta: float, walking: bool) -> void:
+	if _sprint_held and walking and _stamina > 0.0 and not downed:
+		_stamina = maxf(0.0, _stamina - delta)
+		_rest_t = 0.0
+		_sprint(true)
+		if _stamina == 0.0:
+			_pulse("left", 0.4, 0.15)  # out of breath
+		return
+	_sprint(false)
+	_rest_t += delta
+	if _rest_t >= SPRINT_REST:
+		_stamina = minf(SPRINT_TIME, _stamina + delta)
+
+
+func _sprint(on: bool) -> void:
+	if on == _sprinting:
+		return
+	_sprinting = on
+	if _controls and _controls.has_method("speed_boost"):
+		_controls.call("speed_boost", SPRINT_BOOST if on else 1.0)
 
 
 # --- Pathing --------------------------------------------------------------------------
