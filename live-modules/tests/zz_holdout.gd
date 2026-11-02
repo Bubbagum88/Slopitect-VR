@@ -56,6 +56,23 @@ func _shot(tag: String, from: Vector3, at: Vector3) -> void:
 	print("SHOT ", dst)
 
 
+# A picture of a window, from 0.9 m in front of it.
+func _shot_panel(tag: String, id_panel: String) -> void:
+	if OS.get_environment("PICTURE") == "": return
+	var ui: Node = ctx["modules"].module("vrui")
+	var holder: Node3D = ui.find_child("Panel_" + id_panel, true, false) if ui else null
+	if holder == null:
+		return
+	await _wait(0.3)
+	var at := holder.global_position
+	var f := at + holder.global_transform.basis.z * 0.9
+	var look = await _r({"cmd": "view_look", "position": [f.x, f.y, f.z], "look_at": [at.x, at.y, at.z], "image": false, "width": 960})
+	_pic += 1
+	var dst := OS.get_environment("SHOTS") + "/%d-%s.jpg" % [_pic, tag]
+	DirAccess.copy_absolute(look.get("saved", ""), dst)
+	print("SHOT ", dst)
+
+
 func _button(hand: String, button: String, down: bool) -> void:
 	var c := ctx[hand] as XRController3D
 	if down: c.button_pressed.emit(button)
@@ -400,6 +417,42 @@ func _go() -> void:
 	Engine.time_scale = 1.0
 	_check("round 1 cleared: round 2 comes", _h.round_number == 2, [_h.round_number, _h._to_spawn, _h._zombies.size()])
 	_check("kills counted", _h.kills >= _h.round_count(1), _h.kills)
+
+	# The game's menu: opening the window holds the game; Resume carries on.
+	_clear_dead()
+	_check("a Holdout button on the hand menu", _h.hand_info().get("label") == "Holdout" and _h.hand_info().get("action", {}).get("act") == "toggle")
+	await _r({"cmd": "holdout_do", "act": "toggle"})
+	await _frames(2)
+	var menu: Array = _run({"cmd": "ui_get", "id_panel": "holdout"}).get("panel", {}).get("elements", [])
+	var ids := menu.map(func(e): return e.get("id"))
+	_check("mid-game the window opens as the game's menu", _run({"cmd": "ui_get", "id_panel": "holdout"}).get("panel", {}).get("visible", false)
+		and "resume" in ids and "stop" in ids and "leave" in ids and not "start" in ids, ids)
+	await _shot_panel("game-menu", "holdout")
+	_check("the game waits while it's open", _h._held and not _h.is_processing() and _run({"cmd": "holdout_status"}).get("held", false))
+	var gap_before: float = _h._spawn_t
+	var round_before: int = _h.round_number
+	var pts_before: int = _h.points
+	await _wait(1.0)
+	_check("nothing moves on while it waits", _h.round_number == round_before and _h.points == pts_before
+		and _h._spawn_t == gap_before)
+	_check("the buttons go to the window while it waits", not _h.on_action("point", true) and not _h.on_action("right_b", true))
+	await _r({"cmd": "holdout_do", "act": "hide"})
+	await _frames(2)
+	_check("Resume: the game carries on", _h.running and not _h._held and _h.is_processing())
+	_check("and the trigger shoots again", _h.on_action("point", true))
+	_h.on_action("point", false)
+	_run({"cmd": "holdout_stop"})
+	await _frames(2)
+	menu = _run({"cmd": "ui_get", "id_panel": "holdout"}).get("panel", {}).get("elements", [])
+	ids = menu.map(func(e): return e.get("id"))
+	await _shot_panel("lobby", "holdout")
+	_check("after the game: the lobby with the maps and Start", "map_lodge" in ids and "start" in ids and "diff_normal" in ids and not "resume" in ids, ids)
+	_check("maps: a wrong one is refused, the lodge is picked", not _run({"cmd": "holdout_set", "map": "nowhere"}).get("ok", true)
+		and _run({"cmd": "holdout_set", "map": "lodge"}).get("ok", false) and _h.settings["map"] == "lodge")
+	var map_setting: Array = _h.settings_info()["settings"].filter(func(e): return e["id"] == "map")
+	_check("the map is in Settings too", map_setting.size() == 1 and map_setting[0]["options"].size() == _h.MAP_ORDER.size())
+	_check("holdout_start takes a map", (await _r({"cmd": "holdout_start", "map": "lodge"})).get("ok", false) and _h.running
+		and _h.open_rooms.keys() == [_h.MAPS["lodge"]["start"]])
 
 	# Leave: back to where you were; unload: everything back.
 	var left_reply := _run({"cmd": "holdout_leave"})

@@ -61,10 +61,10 @@ signal points_changed(points: int)
 
 const TITLE := "Rotwood Holdout"
 const PANEL := "holdout"
-const PANEL_SIZE := Vector2(0.8, 0.6)
+const PANEL_SIZE := Vector2(0.8, 0.7)
 const WORLD := "holdout"
 const SETTINGS_PATH := "user://holdout.json"
-const DEFAULTS := {"difficulty": "normal", "max_zombies": 12, "sounds": true}
+const DEFAULTS := {"map": "lodge", "difficulty": "normal", "max_zombies": 12, "sounds": true}
 const DIFFICULTIES := ["easy", "normal", "hard"]
 const DIFF_LABELS := {"easy": "Easy", "normal": "Normal", "hard": "Hard"}
 const DIFF_HEALTH := {"easy": 0.7, "normal": 1.0, "hard": 1.4}
@@ -72,46 +72,58 @@ const DIFF_HIT := {"easy": 30.0, "normal": 45.0, "hard": 60.0}
 const MAX_ZOMBIES := [6, 20]
 const POOL := 20                 # the most of the dead there can be at once
 
-# --- The lodge (metres; x right, z toward you; you start at 0, 0 facing -z) ---
-# Rooms are [x, z, width, depth] on the ground.
-const ROOMS := {
-	"hall": [-4.0, -4.0, 8.0, 8.0],
-	"yard": [-4.0, 4.0, 8.0, 6.0],
+# --- The maps (metres; x right, z toward you; you start at 0, 0 facing -z) ---
+# A map is data: rooms are [x, z, width, depth] on the ground ("start" is
+# the room you begin in, "outdoor" rooms get a dirt floor); doors join two
+# rooms; windows sit on a wall with "out" the way out of the room; things on
+# the walls have "in", the way into the room. "lanterns" glow on the walls
+# and "clearing" [x0, z0, x1, z1] is kept free of trees. The Holdout window
+# lists every map in MAP_ORDER; add a map here and it shows up there.
+const MAPS := {
+	"lodge": {
+		"name": "Rotwood Lodge",
+		"about": "The Great Hall and the Back Yard, one barrier between them.",
+		"start": "hall",
+		"outdoor": ["yard"],
+		"rooms": {
+			"hall": [-4.0, -4.0, 8.0, 8.0],
+			"yard": [-4.0, 4.0, 8.0, 6.0],
+		},
+		"room_names": {"hall": "Great Hall", "yard": "Back Yard"},
+		"doors": [
+			{"id": "yard_door", "rooms": ["hall", "yard"], "at": [0.0, 4.0], "cost": 1000},
+		],
+		"windows": [
+			{"id": "w1", "room": "hall", "at": [-2.0, -4.0], "out": [0.0, -1.0]},
+			{"id": "w2", "room": "hall", "at": [-4.0, 1.5], "out": [-1.0, 0.0]},
+			{"id": "w3", "room": "hall", "at": [4.0, 0.3], "out": [1.0, 0.0]},
+			{"id": "w4", "room": "yard", "at": [4.0, 5.2], "out": [1.0, 0.0]},
+			{"id": "w5", "room": "yard", "at": [-4.0, 7.0], "out": [-1.0, 0.0]},
+			{"id": "w6", "room": "yard", "at": [0.0, 10.0], "out": [0.0, 1.0]},
+		],
+		"wall_guns": [
+			{"gun": "double_barrel", "at": [-4.0, -2.0], "in": [1.0, 0.0]},
+			{"gun": "mp5", "at": [4.0, -2.6], "in": [-1.0, 0.0]},
+			{"gun": "m14", "at": [4.0, 2.6], "in": [-1.0, 0.0]},
+			{"gun": "ak47", "at": [-2.4, 4.0], "in": [0.0, 1.0]},
+		],
+		"tonics": [
+			{"tonic": "quickhands", "at": [-2.6, 4.0], "in": [0.0, -1.0]},
+			{"tonic": "rattle_rum", "at": [-4.0, 5.2], "in": [1.0, 0.0]},
+			{"tonic": "mending_moss", "at": [2.4, 10.0], "in": [0.0, -1.0]},
+			{"tonic": "ironbark", "at": [-4.0, 8.8], "in": [1.0, 0.0]},
+		],
+		"second_wind": {"tonic": "second_wind", "at": [2.4, -4.0], "in": [0.0, 1.0]},
+		"crate": {"at": [4.0, 7.4], "in": [-1.0, 0.0]},
+		"generator": {"at": [-2.4, 10.0], "in": [0.0, -1.0]},
+		"anvil": {"at": [2.4, 4.0], "in": [0.0, 1.0]},
+		"bench": {"at": [2.2, 4.0], "in": [0.0, -1.0]},
+		"parts": [[3.3, -3.3], [-3.2, 3.3], [3.2, 9.2]],  # where the shield's three parts lie
+		"lanterns": [[-3.85, 2.2, -2.8], [3.85, 2.2, 1.5], [-3.85, 2.2, 6.2], [0.0, 2.2, -3.85]],
+		"clearing": [-10.0, -10.0, 16.0, 16.0],
+	},
 }
-const ROOM_NAMES := {"hall": "Great Hall", "yard": "Back Yard"}
-# The first map: one barrier. Later maps can add rooms and doors here.
-const DOORS := [
-	{"id": "yard_door", "rooms": ["hall", "yard"], "at": [0.0, 4.0], "cost": 1000},
-]
-# Windows: where on a wall, and "out" (the way out of the room).
-const WINDOWS := [
-	{"id": "w1", "room": "hall", "at": [-2.0, -4.0], "out": [0.0, -1.0]},
-	{"id": "w2", "room": "hall", "at": [-4.0, 1.5], "out": [-1.0, 0.0]},
-	{"id": "w3", "room": "hall", "at": [4.0, 0.3], "out": [1.0, 0.0]},
-	{"id": "w4", "room": "yard", "at": [4.0, 5.2], "out": [1.0, 0.0]},
-	{"id": "w5", "room": "yard", "at": [-4.0, 7.0], "out": [-1.0, 0.0]},
-	{"id": "w6", "room": "yard", "at": [0.0, 10.0], "out": [0.0, 1.0]},
-]
-# Things on the walls: "in" is the way into the room.
-const WALL_GUNS := [
-	{"gun": "double_barrel", "at": [-4.0, -2.0], "in": [1.0, 0.0]},
-	{"gun": "mp5", "at": [4.0, -2.6], "in": [-1.0, 0.0]},
-	{"gun": "m14", "at": [4.0, 2.6], "in": [-1.0, 0.0]},
-	{"gun": "ak47", "at": [-2.4, 4.0], "in": [0.0, 1.0]},
-]
-const TONIC_SPOTS := [
-	{"tonic": "quickhands", "at": [-2.6, 4.0], "in": [0.0, -1.0]},
-	{"tonic": "rattle_rum", "at": [-4.0, 5.2], "in": [1.0, 0.0]},
-	{"tonic": "mending_moss", "at": [2.4, 10.0], "in": [0.0, -1.0]},
-	{"tonic": "ironbark", "at": [-4.0, 8.8], "in": [1.0, 0.0]},
-]
-const CRATE_SPOT := {"at": [4.0, 7.4], "in": [-1.0, 0.0]}
-const GENERATOR_SPOT := {"at": [-2.4, 10.0], "in": [0.0, -1.0]}
-const ANVIL_SPOT := {"at": [2.4, 4.0], "in": [0.0, 1.0]}
-const BENCH_SPOT := {"at": [2.2, 4.0], "in": [0.0, -1.0]}
-const SECOND_WIND_SPOT := {"tonic": "second_wind", "at": [2.4, -4.0], "in": [0.0, 1.0]}
-# Where the shield's three parts lie (on the floor).
-const PART_SPOTS := [[3.3, -3.3], [-3.2, 3.3], [3.2, 9.2]]
+const MAP_ORDER := ["lodge"]
 const WALL_H := 3.0
 const WALL_T := 0.2
 const DOOR_W := 1.6
@@ -246,11 +258,11 @@ var earned := 0
 var guns: Array = []             # [{"id", "mag", "reserve"}]
 var gun_index := 0
 var tonics: Array = []
-var open_rooms := {"hall": true}
+var open_rooms := {"hall": true}    # set from the map at each start
 var planks := {}                 # window id -> boards on it
 var results := {}
 var power := false
-var parts := []                  # the shield's parts found (indexes into PART_SPOTS)
+var parts := []                  # the shield's parts found (indexes into _map["parts"])
 var shield := 0                  # blocks the shield has left (0: none worn)
 var shield_built := false        # built once this game (rebuilt for points after)
 var effects := {}                # "one_shot" / "double_pay" -> seconds left
@@ -309,6 +321,8 @@ var _use_target := {}
 var _use_scan := 0.0
 var _hit_t := 99.0               # seconds since you were last hit
 var _player_room := "hall"
+var _map: Dictionary = MAPS["lodge"]   # the map being played (settings["map"])
+var _held := false               # the game waits while its window is open
 var _knife_prev := Vector3.ZERO
 var _knife_cd := 0.0
 var _groan_cd := 0.0
@@ -334,11 +348,11 @@ var _up_specs := {}
 
 
 func setup() -> String:
-	register("holdout_start", _start, "start a game of Rotwood Holdout (goes to its world first): optional difficulty (easy, normal, hard), round (the round to start on, 1 to 50)")
+	register("holdout_start", _start, "start a game of Rotwood Holdout (goes to its world first): optional map (lodge), difficulty (easy, normal, hard), round (the round to start on, 1 to 50)")
 	register("holdout_stop", _stop, "end the game that's on")
 	register("holdout_status", _status, "the game: round, points, health, guns and ammo, tonics, open rooms, boards on each window, the dead alive and still to come, kills; after a game, its results")
-	register("holdout_set", _set_command, "the game's settings (usable in the headset): any of difficulty (easy, normal, hard), max_zombies (6 to 20 at once), sounds (true/false)")
-	register("holdout_do", _do, "the Holdout window: act = toggle (goes to the Holdout world first), show, start, leave")
+	register("holdout_set", _set_command, "the game's settings (usable in the headset): any of map (lodge; not during a game), difficulty (easy, normal, hard), max_zombies (6 to 20 at once), sounds (true/false)")
+	register("holdout_do", _do, "the Holdout window: act = toggle (goes to the Holdout world first; during a game the game waits while it's open), show, hide (back to the game), start, leave")
 	register("holdout_leave", _leave, "end the game and go back from the Holdout world to the world you came from")
 	_rng.randomize()
 	_make_materials()
@@ -361,6 +375,8 @@ func lib_ready(lib) -> void:
 	lib.watch(self, "controls", _controls_here, _controls_gone)
 	lib.watch(self, "audio", _audio_here, _audio_gone)
 	lib.follow(self, "projects", "project_changed", _on_world_changed)
+	for ui_name in ["vrui", "ui"]:
+		lib.follow(self, ui_name, "panel_shown", _panel_shown)
 	if _projects() != null and in_world():  # loaded while already in the Holdout world
 		_stage_on()
 	lib.touch(self)
@@ -394,11 +410,22 @@ func menu_info() -> Dictionary:
 	return {"id": "holdout", "label": "Holdout", "order": 61, "action": {"cmd": "holdout_do", "act": "toggle"}}
 
 
+# The hand menu's way in and out: opens the Holdout window (taking you to
+# its world first); during a game it's the game's menu, and the game waits.
+func hand_info() -> Dictionary:
+	return {"id": "holdout", "label": "Holdout", "order": 61, "action": {"cmd": "holdout_do", "act": "toggle"}}
+
+
 func settings_info() -> Dictionary:
+	var maps := []
+	for m in MAP_ORDER:
+		maps.append({"label": MAPS[m]["name"], "value": m})
 	var diffs := []
 	for d in DIFFICULTIES:
 		diffs.append({"label": DIFF_LABELS[d], "value": d})
 	return {"title": TITLE, "order": 46, "settings": [
+		{"id": "map", "type": "choice", "label": "Map", "value": settings["map"], "options": maps, "columns": 2,
+			"set": {"cmd": "holdout_set", "map": "{value}"}},
 		{"id": "difficulty", "type": "choice", "label": "Difficulty", "value": settings["difficulty"], "options": diffs, "columns": 3,
 			"set": {"cmd": "holdout_set", "difficulty": "{value}"}},
 		{"id": "max_zombies", "type": "slider", "label": "Most of the dead at once", "min": MAX_ZOMBIES[0], "max": MAX_ZOMBIES[1], "step": 1.0,
@@ -420,8 +447,8 @@ func action_order() -> int:
 
 
 func on_action(action: String, down: bool) -> bool:
-	if not running:
-		return false
+	if not running or _held:
+		return false  # the window has the buttons while the game waits
 	match action:
 		"point":
 			if down and _pointing_at_window():
@@ -472,11 +499,14 @@ func _do(request: Dictionary) -> Dictionary:
 			return _show_window()
 		"show":
 			return _show_window()
+		"hide":
+			_hide_window()
+			return {"ok": true, "shown": false}
 		"start":
 			return _start({})
 		"leave":
 			return _leave({})
-	return {"ok": false, "error": "\"act\" must be toggle, show, start or leave"}
+	return {"ok": false, "error": "\"act\" must be toggle, show, hide, start or leave"}
 
 
 func _shown() -> bool:
@@ -496,6 +526,23 @@ func _show_window() -> Dictionary:
 	return {"ok": true, "shown": true}
 
 
+# The window is the game's menu: while it's open during a game, the game
+# waits (the dead stand still, nothing counts down) and the buttons go to
+# the window; closing it (Resume, its X, the hand menu) carries on.
+func _panel_shown(id_panel: String, on: bool) -> void:
+	if id_panel == PANEL:
+		_hold(on and running)
+
+
+func _hold(on: bool) -> void:
+	_held = on
+	_trigger = false
+	_use_held = false
+	set_process(running and not on)
+	if running:
+		_update_hud()
+
+
 # The window opens with the world, unless a game started on the way in.
 func _show_if_idle() -> void:
 	if not running and is_inside_tree():
@@ -513,20 +560,40 @@ func _build() -> String:
 	var els := []
 	var w := PANEL_SIZE.x - 0.08
 	var y := PANEL_SIZE.y / 2.0 - 0.07
-	els.append({"type": "text", "id": "status", "text": _window_text(), "at": [0.0, y - 0.05], "width": w})
-	y -= 0.2
-	for i in DIFFICULTIES.size():
-		var d: String = DIFFICULTIES[i]
-		els.append({"type": "button", "id": "diff_" + d, "label": DIFF_LABELS[d], "at": [(i - 1) * w / 3.0, y], "size": [w / 3.0 - 0.02, 0.055],
-			"color": "accent" if settings["difficulty"] == d else "button", "action": {"cmd": "holdout_set", "difficulty": d}})
-	y -= 0.08
-	els.append({"type": "button", "id": "start", "label": "Play again" if not results.is_empty() else "Start", "at": [-w / 3.0, y],
-		"size": [w / 3.0 - 0.02, 0.06], "color": "ok", "action": {"cmd": "holdout_start"}})
-	els.append({"type": "button", "id": "stop", "label": "End game", "at": [0.0, y], "size": [w / 3.0 - 0.02, 0.06],
-		"color": "notice" if running else "button", "action": {"cmd": "holdout_stop"}})
-	els.append({"type": "button", "id": "leave", "label": "Leave", "at": [w / 3.0, y], "size": [w / 3.0 - 0.02, 0.06],
-		"color": "button", "action": {"cmd": "holdout_leave"}})
-	y -= 0.1
+	var third := [w / 3.0 - 0.02, 0.06]
+	els.append({"type": "text", "id": "status", "text": _window_text(), "at": [0.0, y - 0.04], "width": w})
+	y -= 0.19
+	if running:
+		# The game's menu: it waits until you go back.
+		els.append({"type": "button", "id": "resume", "label": "Resume", "at": [-w / 3.0, y], "size": third, "color": "ok",
+			"action": {"cmd": "holdout_do", "act": "hide"}})
+		els.append({"type": "button", "id": "stop", "label": "End game", "at": [0.0, y], "size": third, "color": "notice",
+			"action": {"cmd": "holdout_stop"}})
+		els.append({"type": "button", "id": "leave", "label": "Leave", "at": [w / 3.0, y], "size": third, "color": "button",
+			"action": {"cmd": "holdout_leave"}})
+		y -= 0.12
+	else:
+		# The lobby: pick a map and how hard, then Start.
+		els.append({"type": "text", "id": "map_head", "text": "Map", "color": "muted", "at": [0.0, y + 0.065], "width": w})
+		for i in MAP_ORDER.size():
+			var m: String = MAP_ORDER[i]
+			var col := i % 3
+			var row := i / 3
+			els.append({"type": "button", "id": "map_" + m, "label": MAPS[m]["name"], "at": [(col - 1) * w / 3.0, y - row * 0.07],
+				"size": third, "color": "accent" if settings["map"] == m else "button", "action": {"cmd": "holdout_set", "map": m}})
+		y -= 0.07 * ceili(MAP_ORDER.size() / 3.0)
+		els.append({"type": "text", "id": "map_about", "text": MAPS[settings["map"]]["about"], "color": "muted", "at": [0.0, y + 0.02], "width": w})
+		y -= 0.08
+		for i in DIFFICULTIES.size():
+			var d: String = DIFFICULTIES[i]
+			els.append({"type": "button", "id": "diff_" + d, "label": DIFF_LABELS[d], "at": [(i - 1) * w / 3.0, y], "size": [w / 3.0 - 0.02, 0.055],
+				"color": "accent" if settings["difficulty"] == d else "button", "action": {"cmd": "holdout_set", "difficulty": d}})
+		y -= 0.08
+		els.append({"type": "button", "id": "start", "label": "Play again" if not results.is_empty() else "Start", "at": [-w / 6.0, y],
+			"size": third, "color": "ok", "action": {"cmd": "holdout_start"}})
+		els.append({"type": "button", "id": "leave", "label": "Leave", "at": [w / 6.0, y], "size": third, "color": "button",
+			"action": {"cmd": "holdout_leave"}})
+		y -= 0.1
 	els.append({"type": "text", "id": "help", "color": "muted", "at": [0.0, y], "width": w,
 		"text": "Trigger: shoot   A: buy, open, hold to board up\nB: reload   Y: switch guns   Swing left hand: knife"})
 	var request := {"id_panel": PANEL, "elements": els}
@@ -542,17 +609,35 @@ func _window_text() -> String:
 	var diff: String = settings["difficulty"]
 	var record := "Best on %s: round %d" % [DIFF_LABELS[diff], int(best.get(diff, 0))] if best.has(diff) else "No rounds held on %s yet" % DIFF_LABELS[diff]
 	if running:
-		return "Round %d, %d points.\n%s" % [round_number, points, record]
+		return "%s, round %d, %d points. The game waits while this is open.\n%s" % [_map["name"], round_number, points, record]
 	if not results.is_empty():
 		return "Overrun on round %d. %d kills (%d to the head), %d points earned.\n%s" % [
 			results["round"], results["kills"], results["headshots"], results["earned"], record]
-	return "Hold the old lodge against the dead, round after round.\n%s" % record
+	return "Hold out against the dead, round after round.\n%s" % record
+
+
+# Switches the map; the buildings are put up again if you're in the world.
+func _use_map(id: String) -> void:
+	if settings["map"] == id:
+		return
+	settings["map"] = id
+	_map = MAPS[id]
+	if _arena != null:
+		_stage_off()
+		_stage_on()
 
 
 # --- Settings ----------------------------------------------------------------------
 
 func _set_command(request: Dictionary) -> Dictionary:
 	var changed := []
+	if request.has("map"):
+		if not request["map"] in MAPS:
+			return {"ok": false, "error": "\"map\" must be one of %s" % ", ".join(MAP_ORDER)}
+		if running and request["map"] != settings["map"]:
+			return {"ok": false, "error": "end the game first to change the map"}
+		_use_map(request["map"])
+		changed.append("map")
 	if request.has("difficulty"):
 		if not request["difficulty"] in DIFFICULTIES:
 			return {"ok": false, "error": "\"difficulty\" must be easy, normal or hard"}
@@ -575,7 +660,7 @@ func _set_command(request: Dictionary) -> Dictionary:
 		settings["sounds"] = on
 		changed.append("sounds")
 	if changed.is_empty():
-		return {"ok": false, "error": "give difficulty, max_zombies or sounds"}
+		return {"ok": false, "error": "give map, difficulty, max_zombies or sounds"}
 	_save_settings()
 	if _lib:
 		_lib.touch(self)
@@ -592,6 +677,8 @@ func _load_settings() -> void:
 		return
 	var saved = got.get("settings", {})
 	if typeof(saved) == TYPE_DICTIONARY:
+		if saved.get("map") in MAPS:
+			_use_map(saved["map"])
 		if saved.get("difficulty") in DIFFICULTIES:
 			settings["difficulty"] = saved["difficulty"]
 		if typeof(saved.get("max_zombies")) in [TYPE_INT, TYPE_FLOAT]:
@@ -677,6 +764,15 @@ func _on_world_changed(project: String, _folder: String) -> void:
 # --- Starting and ending -------------------------------------------------------------
 
 func _start(request: Dictionary) -> Dictionary:
+	if request.has("map"):
+		if not request["map"] in MAPS:
+			return {"ok": false, "error": "\"map\" must be one of %s" % ", ".join(MAP_ORDER)}
+		if not running:
+			_use_map(request["map"])
+		elif request["map"] != settings["map"]:
+			_end_game(false)
+			_use_map(request["map"])
+		_save_settings()
 	if request.has("difficulty"):
 		if not request["difficulty"] in DIFFICULTIES:
 			return {"ok": false, "error": "\"difficulty\" must be easy, normal or hard"}
@@ -720,7 +816,7 @@ func _start(request: Dictionary) -> Dictionary:
 	_trigger = false
 	_use_held = false
 	_hit_t = 99.0
-	_player_room = "hall"
+	_player_room = _map["start"]
 	_move_player_to(Vector3.ZERO)
 	_hold_gear(true)
 	_wear_shield(false)
@@ -750,6 +846,7 @@ func _stop(_request: Dictionary) -> Dictionary:
 func _end_game(overrun: bool) -> void:
 	var was := running
 	running = false
+	_held = false
 	set_process(false)
 	_trigger = false
 	_use_held = false
@@ -797,7 +894,7 @@ func _status(_request: Dictionary) -> Dictionary:
 	var held := []
 	for g in guns:
 		held.append({"gun": g["id"], "name": _spec(g)["name"], "forged": g.get("up", false), "mag": g["mag"], "reserve": g["reserve"]})
-	return {"ok": true, "running": running, "round": round_number, "points": points, "health": health, "max_health": _max_health(),
+	return {"ok": true, "running": running, "held": _held, "map": settings["map"], "round": round_number, "points": points, "health": health, "max_health": _max_health(),
 		"guns": held, "in_hand": guns[gun_index]["id"] if gun_index < guns.size() else "", "tonics": tonics.duplicate(), "power": power, "parts": parts.size(), "shield": shield,
 		"effects": effects.duplicate(), "downed": downed, "drops": _drops.map(func(d): return d["kind"]), "anvil": _anvil_state,
 		"open_rooms": open_rooms.keys(), "boards": planks.duplicate(), "alive": _zombies.size(), "to_come": _to_spawn,
@@ -895,13 +992,13 @@ func _place_arena() -> void:
 func _build_lodge() -> void:
 	# Ground, and each room's floorboards.
 	_box(_arena, Vector3(90.0, 0.02, 90.0), Vector3(0.0, -0.02, 0.0), _mats["ground"])
-	for room in ROOMS:
-		var r: Array = ROOMS[room]
-		_box(_arena, Vector3(r[2], 0.02, r[3]), Vector3(r[0] + r[2] / 2.0, 0.0, r[1] + r[3] / 2.0), _mats["boards"] if room != "yard" else _mats["dirt"])
+	for room in _map["rooms"]:
+		var r: Array = _map["rooms"][room]
+		_box(_arena, Vector3(r[2], 0.02, r[3]), Vector3(r[0] + r[2] / 2.0, 0.0, r[1] + r[3] / 2.0), _mats["dirt"] if room in _map["outdoor"] else _mats["boards"])
 	# Walls, with gaps for the doors and windows: one MultiMesh.
 	var parts := []  # [size, centre]
-	for room in ROOMS:
-		var r: Array = ROOMS[room]
+	for room in _map["rooms"]:
+		var r: Array = _map["rooms"][room]
 		var x0: float = r[0]
 		var z0: float = r[1]
 		var x1: float = r[0] + r[2]
@@ -928,8 +1025,8 @@ func _build_lodge() -> void:
 	walls.material_override = _mats["wall"]
 	_arena.add_child(walls)
 	# Lanterns: glowing, no real light.
-	for at in [Vector3(-3.85, 2.2, -2.8), Vector3(3.85, 2.2, 1.5), Vector3(-3.85, 2.2, 6.2), Vector3(0.0, 2.2, -3.85)]:
-		_box(_arena, Vector3(0.12, 0.2, 0.12), at, _mats["lantern"])
+	for at in _map["lanterns"]:
+		_box(_arena, Vector3(0.12, 0.2, 0.12), Vector3(at[0], at[1], at[2]), _mats["lantern"])
 	_build_trees()
 	_build_windows()
 	_build_doors()
@@ -984,12 +1081,12 @@ func _wall_line(parts: Array, a: Vector3, b: Vector3) -> void:
 	var along := (b - a).normalized()
 	var length := a.distance_to(b)
 	var gaps := []  # [from, to, kind]
-	for d in DOORS:
+	for d in _map["doors"]:
 		var at := Vector3(d["at"][0], 0, d["at"][1])
 		var s := (at - a).dot(along)
 		if (at - (a + along * s)).length() < 0.01 and s > 0.0 and s < length:
 			gaps.append([s - DOOR_W / 2.0, s + DOOR_W / 2.0, "door"])
-	for wnd in WINDOWS:
+	for wnd in _map["windows"]:
 		var at := Vector3(wnd["at"][0], 0, wnd["at"][1])
 		var s := (at - a).dot(along)
 		if (at - (a + along * s)).length() < 0.01 and s > 0.0 and s < length:
@@ -1022,8 +1119,9 @@ func _build_trees() -> void:
 	var spots := []
 	while spots.size() < 46:
 		var at := Vector3(rng.randf_range(-28.0, 28.0), 0, rng.randf_range(-28.0, 28.0))
-		if at.x > -10.0 and at.x < 16.0 and at.z > -10.0 and at.z < 16.0:
-			continue  # the clearing round the lodge
+		var c: Array = _map["clearing"]
+		if at.x > c[0] and at.x < c[2] and at.z > c[1] and at.z < c[3]:
+			continue  # the clearing round the buildings
 		spots.append([at, rng.randf_range(0.8, 1.5)])
 	var trunk := CylinderMesh.new()
 	trunk.top_radius = 0.12
@@ -1060,7 +1158,7 @@ func _build_windows() -> void:
 	_plank_nodes.clear()
 	var board := BoxMesh.new()
 	board.size = Vector3(WINDOW_W + 0.2, 0.13, 0.05)
-	for wnd in WINDOWS:
+	for wnd in _map["windows"]:
 		var at := Vector3(wnd["at"][0], 0, wnd["at"][1])
 		var out := Vector3(wnd["out"][0], 0, wnd["out"][1])
 		var yaw := atan2(out.x, out.z)
@@ -1079,7 +1177,7 @@ func _build_windows() -> void:
 
 func _build_doors() -> void:
 	_debris.clear()
-	for d in DOORS:
+	for d in _map["doors"]:
 		var at := Vector3(d["at"][0], 0, d["at"][1])
 		var pile := Node3D.new()
 		_arena.add_child(pile)
@@ -1098,7 +1196,7 @@ func _build_doors() -> void:
 			var label := _label(_arena, "", 46, Color(1.0, 0.9, 0.7))
 			label.position = at + inward * 0.55 + Vector3(0, 1.75, 0)
 			label.rotation.y = atan2(inward.x, inward.z)
-			label.text = "Clear the debris\n%s  %d" % [ROOM_NAMES[d["rooms"][1]], d["cost"]]
+			label.text = "Clear the debris\n%s  %d" % [_map["room_names"][d["rooms"][1]], d["cost"]]
 			pile.set_meta("label_" + room, label)
 			_uses.append({"kind": "door", "id": d["id"], "at": at + inward * 0.7, "label": label})
 		_debris[d["id"]] = pile
@@ -1106,14 +1204,14 @@ func _build_doors() -> void:
 
 # The way from a point on a room's wall into that room.
 func _into_room(at: Vector3, room: String) -> Vector3:
-	var r: Array = ROOMS[room]
+	var r: Array = _map["rooms"][room]
 	var mid := Vector3(r[0] + r[2] / 2.0, 0, r[1] + r[3] / 2.0)
 	var d := mid - at
 	return Vector3(signf(d.x), 0, 0) if absf(d.x) * r[3] > absf(d.z) * r[2] else Vector3(0, 0, signf(d.z))
 
 
 func _build_wall_things() -> void:
-	for spot in WALL_GUNS:
+	for spot in _map["wall_guns"]:
 		var g: Dictionary = GUNS[spot["gun"]]
 		var at := Vector3(spot["at"][0], 0, spot["at"][1])
 		var inward := Vector3(spot["in"][0], 0, spot["in"][1])
@@ -1131,7 +1229,7 @@ func _build_wall_things() -> void:
 		label.position = at + inward * (WALL_T / 2.0 + 0.05) + Vector3(0, 1.08, 0)
 		label.rotation.y = yaw
 		_uses.append({"kind": "gun", "id": spot["gun"], "at": at + inward * 0.7, "label": label})
-	for spot in TONIC_SPOTS + [SECOND_WIND_SPOT]:
+	for spot in _map["tonics"] + [_map["second_wind"]]:
 		var t: Dictionary = TONICS[spot["tonic"]]
 		var at := Vector3(spot["at"][0], 0, spot["at"][1])
 		var inward := Vector3(spot["in"][0], 0, spot["in"][1])
@@ -1144,8 +1242,8 @@ func _build_wall_things() -> void:
 		label.position = at + inward * (WALL_T / 2.0 + 0.5) + Vector3(0, 0.75, 0)
 		label.rotation.y = yaw
 		_uses.append({"kind": "tonic", "id": spot["tonic"], "at": at + inward * 0.9, "label": label})
-	var c_at := Vector3(CRATE_SPOT["at"][0], 0, CRATE_SPOT["at"][1])
-	var c_in := Vector3(CRATE_SPOT["in"][0], 0, CRATE_SPOT["in"][1])
+	var c_at := Vector3(_map["crate"]["at"][0], 0, _map["crate"]["at"][1])
+	var c_in := Vector3(_map["crate"]["in"][0], 0, _map["crate"]["in"][1])
 	var c_yaw := atan2(c_in.x, c_in.z)
 	var chest := _box(_arena, Vector3(1.2, 0.6, 0.6), c_at + c_in * (WALL_T / 2.0 + 0.35) + Vector3(0, 0.3, 0), _mats["crate"])
 	chest.rotation.y = c_yaw
@@ -1167,14 +1265,14 @@ func _build_wall_things() -> void:
 
 # Puts the boards and debris back for a new game.
 func _reset_lodge() -> void:
-	open_rooms = {"hall": true}
-	for wnd in WINDOWS:
+	open_rooms = {_map["start"]: true}
+	for wnd in _map["windows"]:
 		planks[wnd["id"]] = PLANKS
 		_show_planks(wnd["id"])
 	for id in _debris:
 		if is_instance_valid(_debris[id]):
 			_debris[id].visible = true
-			for room in ROOMS:
+			for room in _map["rooms"]:
 				if _debris[id].has_meta("label_" + room):
 					_debris[id].get_meta("label_" + room).visible = true
 	_crate_state = "idle"
@@ -1230,9 +1328,9 @@ func _max_health() -> float:
 func _allowed_boxes() -> Array:
 	var boxes := []
 	for room in open_rooms:
-		var r: Array = ROOMS[room]
+		var r: Array = _map["rooms"][room]
 		boxes.append(Rect2(r[0] + MARGIN, r[1] + MARGIN, r[2] - 2.0 * MARGIN, r[3] - 2.0 * MARGIN))
-	for d in DOORS:
+	for d in _map["doors"]:
 		if open_rooms.has(d["rooms"][0]) and open_rooms.has(d["rooms"][1]):
 			var w := DOOR_W / 2.0 - MARGIN
 			boxes.append(Rect2(d["at"][0] - w, d["at"][1] - w, 2.0 * w, 2.0 * w).grow(MARGIN * 1.5))
@@ -1257,8 +1355,8 @@ func _keep_in() -> void:
 
 
 func _room_at(p: Vector3) -> String:
-	for room in ROOMS:
-		var r: Array = ROOMS[room]
+	for room in _map["rooms"]:
+		var r: Array = _map["rooms"][room]
 		if p.x >= r[0] and p.x <= r[0] + r[2] and p.z >= r[1] and p.z <= r[1] + r[3]:
 			return room
 	return ""
@@ -1344,7 +1442,7 @@ func _get_up() -> void:
 # --- Each frame ----------------------------------------------------------------------
 
 func _process(delta: float) -> void:
-	if not running or _arena == null:
+	if not running or _arena == null or _held:
 		set_process(false)
 		return
 	_keep_in()
@@ -1462,7 +1560,7 @@ func _speed_for_round() -> float:
 # (more often your own room's). Whether one did.
 func _spawn_one() -> bool:
 	var choices := []
-	for wnd in WINDOWS:
+	for wnd in _map["windows"]:
 		if open_rooms.has(wnd["room"]):
 			for i in (3 if wnd["room"] == _player_room else 1):
 				choices.append(wnd)
@@ -1592,7 +1690,7 @@ func _stuck(z: Dictionary, delta: float) -> bool:
 	z["still"] += delta
 	if z["still"] < STUCK_TIME or pos.distance_to(Vector3(_cam_local().x, 0, _cam_local().z)) < ATTACK_RANGE * 1.5:
 		return false
-	var choices := WINDOWS.filter(func(w): return w["room"] == _player_room)
+	var choices: Array = _map["windows"].filter(func(w): return w["room"] == _player_room)
 	if choices.is_empty():
 		return false
 	var wnd: Dictionary = choices[_rng.randi() % choices.size()]
@@ -1647,11 +1745,11 @@ func _spread_out() -> void:
 
 # Keeps a point in a room (or in an open doorway out of it).
 func _inside(p: Vector3, room: String) -> Vector3:
-	var r: Array = ROOMS[room]
+	var r: Array = _map["rooms"][room]
 	var m := 0.25
 	if p.x >= r[0] + m and p.x <= r[0] + r[2] - m and p.z >= r[1] + m and p.z <= r[1] + r[3] - m:
 		return p
-	for d in DOORS:
+	for d in _map["doors"]:
 		if room in d["rooms"] and open_rooms.has(d["rooms"][0]) and open_rooms.has(d["rooms"][1]):
 			if absf(p.x - d["at"][0]) < DOOR_W / 2.0 and absf(p.z - d["at"][1]) < DOOR_W / 2.0:
 				return p
@@ -1659,10 +1757,10 @@ func _inside(p: Vector3, room: String) -> Vector3:
 
 
 func _window(id: String) -> Dictionary:
-	for wnd in WINDOWS:
+	for wnd in _map["windows"]:
 		if wnd["id"] == id:
 			return wnd
-	return WINDOWS[0]
+	return _map["windows"][0]
 
 
 # The open door to go through first from one room toward another ({} if none).
@@ -1673,7 +1771,7 @@ func _door_toward(from: String, to: String) -> Dictionary:
 	var queue := [from]
 	while not queue.is_empty():
 		var room: String = queue.pop_front()
-		for d in DOORS:
+		for d in _map["doors"]:
 			if not (room in d["rooms"]) or not (open_rooms.has(d["rooms"][0]) and open_rooms.has(d["rooms"][1])):
 				continue
 			var other: String = d["rooms"][1] if d["rooms"][0] == room else d["rooms"][0]
@@ -2111,8 +2209,8 @@ func _prompt_text(u: Dictionary) -> String:
 		"bench":
 			if shield > 0:
 				return ""
-			if parts.size() < PART_SPOTS.size():
-				return "Shield parts: %d of %d" % [parts.size(), PART_SPOTS.size()]
+			if parts.size() < _map["parts"].size():
+				return "Shield parts: %d of %d" % [parts.size(), _map["parts"].size()]
 			return "A: build the Barn-Door Shield" if not shield_built else "A: rebuild the shield  %d" % SHIELD_REBUILD
 	return ""
 
@@ -2232,7 +2330,7 @@ func buy_tonic(id: String) -> bool:
 
 
 func _door(id: String) -> Dictionary:
-	for d in DOORS:
+	for d in _map["doors"]:
 		if d["id"] == id:
 			return d
 	return {}
@@ -2245,7 +2343,7 @@ func open_door(id: String) -> bool:
 	if not _spend(d["cost"]):
 		return false
 	_debris[id].visible = false
-	for room in ROOMS:
+	for room in _map["rooms"]:
 		if _debris[id].has_meta("label_" + room):
 			_debris[id].get_meta("label_" + room).visible = false
 	for room in d["rooms"]:
@@ -2281,7 +2379,7 @@ func use_crate() -> bool:
 			_crate_gun = pool[_rng.randi() % pool.size()]
 			_crate_state = "shuffle"
 			_crate_t = CRATE_SHUFFLE
-			_sound("crate", _arena.to_global(Vector3(CRATE_SPOT["at"][0], 1.0, CRATE_SPOT["at"][1])), 0.9)
+			_sound("crate", _arena.to_global(Vector3(_map["crate"]["at"][0], 1.0, _map["crate"]["at"][1])), 0.9)
 			return true
 		"offer":
 			_give_gun(_crate_gun)
@@ -2324,8 +2422,8 @@ func _crate_frame(delta: float) -> void:
 func _build_power_things() -> void:
 	_power_lamps.clear()
 	# The generator: a squat engine on the yard's back wall.
-	var g_at := Vector3(GENERATOR_SPOT["at"][0], 0, GENERATOR_SPOT["at"][1])
-	var g_in := Vector3(GENERATOR_SPOT["in"][0], 0, GENERATOR_SPOT["in"][1])
+	var g_at := Vector3(_map["generator"]["at"][0], 0, _map["generator"]["at"][1])
+	var g_in := Vector3(_map["generator"]["in"][0], 0, _map["generator"]["in"][1])
 	var g_yaw := atan2(g_in.x, g_in.z)
 	var engine := _box(_arena, Vector3(1.0, 0.8, 0.6), g_at + g_in * (WALL_T / 2.0 + 0.32) + Vector3(0, 0.4, 0), _mats["machine"])
 	engine.rotation.y = g_yaw
@@ -2339,8 +2437,8 @@ func _build_power_things() -> void:
 	_generator_label.rotation.y = g_yaw
 	_uses.append({"kind": "generator", "id": "generator", "at": g_at + g_in * 1.0, "label": _generator_label})
 	# The Anvil: an anvil on a stump, glowing once the power's on.
-	var a_at := Vector3(ANVIL_SPOT["at"][0], 0, ANVIL_SPOT["at"][1])
-	var a_in := Vector3(ANVIL_SPOT["in"][0], 0, ANVIL_SPOT["in"][1])
+	var a_at := Vector3(_map["anvil"]["at"][0], 0, _map["anvil"]["at"][1])
+	var a_in := Vector3(_map["anvil"]["in"][0], 0, _map["anvil"]["in"][1])
 	var a_yaw := atan2(a_in.x, a_in.z)
 	var spot := a_at + a_in * (WALL_T / 2.0 + 0.45)
 	_box(_arena, Vector3(0.5, 0.6, 0.5), spot + Vector3(0, 0.3, 0), _mats["trunk"]).rotation.y = a_yaw
@@ -2361,8 +2459,8 @@ func _build_power_things() -> void:
 	_arena.add_child(_anvil_show)
 	_uses.append({"kind": "anvil", "id": "anvil", "at": a_at + a_in * 1.1, "label": _anvil_label})
 	# The workbench, and the shield's parts lying about.
-	var b_at := Vector3(BENCH_SPOT["at"][0], 0, BENCH_SPOT["at"][1])
-	var b_in := Vector3(BENCH_SPOT["in"][0], 0, BENCH_SPOT["in"][1])
+	var b_at := Vector3(_map["bench"]["at"][0], 0, _map["bench"]["at"][1])
+	var b_in := Vector3(_map["bench"]["in"][0], 0, _map["bench"]["in"][1])
 	var b_yaw := atan2(b_in.x, b_in.z)
 	_box(_arena, Vector3(1.2, 0.08, 0.6), b_at + b_in * (WALL_T / 2.0 + 0.32) + Vector3(0, 0.85, 0), _mats["plank"]).rotation.y = b_yaw
 	for side in [-0.5, 0.5]:
@@ -2373,8 +2471,8 @@ func _build_power_things() -> void:
 	b_label.rotation.y = b_yaw
 	_uses.append({"kind": "bench", "id": "bench", "at": b_at + b_in * 0.95, "label": b_label})
 	_part_nodes.clear()
-	for i in PART_SPOTS.size():
-		var at := Vector3(PART_SPOTS[i][0], 0, PART_SPOTS[i][1])
+	for i in _map["parts"].size():
+		var at := Vector3(_map["parts"][i][0], 0, _map["parts"][i][1])
 		var bundle := Node3D.new()
 		_arena.add_child(bundle)
 		bundle.position = at
@@ -2407,7 +2505,7 @@ func power_on() -> bool:
 			lamp.material_override = _mats["lamp_on"]
 	if _generator_label:
 		_generator_label.text = "Generator\nrunning"
-	_sound("boom", _arena.to_global(Vector3(GENERATOR_SPOT["at"][0], 1.0, GENERATOR_SPOT["at"][1])), 0.7, 1.6)
+	_sound("boom", _arena.to_global(Vector3(_map["generator"]["at"][0], 1.0, _map["generator"]["at"][1])), 0.7, 1.6)
 	_sound("bell", null, 0.5, 1.5)
 	return true
 
@@ -2481,7 +2579,7 @@ func _anvil_done() -> void:
 
 
 func pick_part(index) -> bool:
-	if typeof(index) != TYPE_INT or index < 0 or index >= PART_SPOTS.size() or index in parts:
+	if typeof(index) != TYPE_INT or index < 0 or index >= _map["parts"].size() or index in parts:
 		return false
 	parts.append(index)
 	if index < _part_nodes.size() and is_instance_valid(_part_nodes[index]):
@@ -2492,8 +2590,8 @@ func pick_part(index) -> bool:
 
 
 func build_shield() -> bool:
-	if shield > 0 or parts.size() < PART_SPOTS.size():
-		if parts.size() < PART_SPOTS.size():
+	if shield > 0 or parts.size() < _map["parts"].size():
+		if parts.size() < _map["parts"].size():
 			_sound("deny", null, 0.6)
 		return false
 	if shield_built and not _spend(SHIELD_REBUILD):
@@ -2603,7 +2701,7 @@ func _take_drop(kind: String) -> void:
 					kills += 1
 			_add_points(400)
 		"hammer":
-			for wnd in WINDOWS:
+			for wnd in _map["windows"]:
 				planks[wnd["id"]] = PLANKS
 				_show_planks(wnd["id"])
 			_add_points(200)
