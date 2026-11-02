@@ -24,6 +24,7 @@ The modules each test loads, in order (the order matters: some load lib last on 
 | `zz_gaps.gd` | `lib controls vrui tools inspect shapes physics grab multi doors textures joints save projects prefabs zz_gaps` (FRESH=1 after an APK change: it checks objects.gd) |
 | `zz_grab.gd` | `lib tools grab zz_grab` |
 | `zz_hands.gd` | `hands lib controls zz_hands` |
+| `zz_holdout.gd` | `lib controls vrui save projects audio holdout zz_holdout` |
 | `zz_holster.gd` | `controls vrui tools pause avatar holster lib zz_holster` |
 | `zz_inspect.gd` | `lib tools inspect zz_inspect` |
 | `zz_jelly.gd` | `avatar jelly lib zz_jelly` |
