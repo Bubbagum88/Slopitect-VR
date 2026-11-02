@@ -119,7 +119,7 @@ func _go() -> void:
 	var sky_env = ctx["world"].get_parent().get_node("WorldEnvironment").environment
 
 	# Start: its own world, the lodge, the gear.
-	var started = await _r({"cmd": "holdout_start", "difficulty": "normal"})
+	var started = await _r({"cmd": "holdout_start", "map": "lodge", "difficulty": "normal"})
 	_check("holdout_start", started.get("ok", false), started)
 	_check("in the Holdout world", _run({"cmd": "projects_current"}).get("name") == "holdout")
 	_check("the night and the lodge are up", _h._arena != null and floor_node != null and not floor_node.visible
@@ -453,6 +453,47 @@ func _go() -> void:
 	_check("the map is in Settings too", map_setting.size() == 1 and map_setting[0]["options"].size() == _h.MAP_ORDER.size())
 	_check("holdout_start takes a map", (await _r({"cmd": "holdout_start", "map": "lodge"})).get("ok", false) and _h.running
 		and _h.open_rooms.keys() == [_h.MAPS["lodge"]["start"]])
+
+	# The one-barrier map: one room, one window, and the dead find their way to it.
+	_run({"cmd": "holdout_stop"})
+	var cab = await _r({"cmd": "holdout_start", "map": "cabin"})
+	_check("the Cabin starts", cab.get("ok", false) and _h.settings["map"] == "cabin" and _h._arena != null, cab)
+	_check("one room, one window, no doors", _h._map["rooms"].size() == 1 and _h._map["windows"].size() == 1 and _h._map["doors"].is_empty()
+		and _h.planks.size() == 1)
+	_check("everything is in the room: guns, tonics, crate, power, Anvil, bench, parts",
+		_h._uses.filter(func(u): return _h._room_at(u["at"]) != "cabin").map(func(u): return u["id"]) == [], 
+		_h._uses.filter(func(u): return _h._room_at(u["at"]) != "cabin").map(func(u): return u["id"]))
+	_check("the only cells into the room are through the window", _h._out_fields["w1"][_h._cell_of(Vector3(0, 0, 0))] == -1
+		and _h._in_field.size() > 0 and _h._in_field[_h._cell_of(Vector3(-7, 0, 0))] == -1)
+	_h.health = 100000.0
+	_clear_dead()
+	_h._to_spawn = 0
+	await _shot("cabin", Vector3(0, 9.0, 9.0), Vector3(-3, 0, -1))
+	# One from the far side (north-east), behind the fence: it must walk round.
+	var far: Dictionary = _h.add_zombie_inside(Vector3(9.0, 0, -11.0), "", 99999.0)
+	far["state"] = "approach"
+	far["window"] = "w1"
+	far["room"] = "cabin"
+	var went_through := false
+	var hit_wall := false
+	Engine.time_scale = 4.0
+	var t2 := 0.0
+	while far["state"] == "approach" and t2 < 40.0:
+		await _wait(0.25)
+		t2 += 0.25
+		var c: int = _h._cell_of(far["pos"])
+		if c >= 0 and _h._blocked[c] == 1:
+			hit_wall = true
+		if _h._room_at(far["pos"]) == "cabin":
+			went_through = true
+	Engine.time_scale = 1.0
+	_check("from the far side it walks round to the window", far["state"] == "tear", [far["state"], far["pos"], t2])
+	_check("never through a wall, the fence or the woodpile", not hit_wall and not went_through)
+	var sp: Vector3 = _h._spawn_spot(_h._map["windows"][0])
+	_check("new ones come up at the spawns in the wood", _h._room_at(sp).is_empty()
+		and _h._map["spawns"].any(func(q): return Vector3(q[0], 0, q[1]).distance_to(sp) < 1.5), sp)
+	_clear_dead()
+	_run({"cmd": "holdout_stop"})
 
 	# Leave: back to where you were; unload: everything back.
 	var left_reply := _run({"cmd": "holdout_leave"})

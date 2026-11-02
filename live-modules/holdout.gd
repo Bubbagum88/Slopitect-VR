@@ -64,7 +64,7 @@ const PANEL := "holdout"
 const PANEL_SIZE := Vector2(0.8, 0.7)
 const WORLD := "holdout"
 const SETTINGS_PATH := "user://holdout.json"
-const DEFAULTS := {"map": "lodge", "difficulty": "normal", "max_zombies": 12, "sounds": true}
+const DEFAULTS := {"map": "cabin", "difficulty": "normal", "max_zombies": 12, "sounds": true}
 const DIFFICULTIES := ["easy", "normal", "hard"]
 const DIFF_LABELS := {"easy": "Easy", "normal": "Normal", "hard": "Hard"}
 const DIFF_HEALTH := {"easy": 0.7, "normal": 1.0, "hard": 1.4}
@@ -77,9 +77,48 @@ const POOL := 20                 # the most of the dead there can be at once
 # the room you begin in, "outdoor" rooms get a dirt floor); doors join two
 # rooms; windows sit on a wall with "out" the way out of the room; things on
 # the walls have "in", the way into the room. "lanterns" glow on the walls
-# and "clearing" [x0, z0, x1, z1] is kept free of trees. The Holdout window
-# lists every map in MAP_ORDER; add a map here and it shows up there.
+# and "clearing" [x0, z0, x1, z1] is kept free of trees; the dead find
+# their way across it (see Pathing). They rise at the "spawns" and walk
+# round the "obstacles" [x, z, width, depth, height] to a window. The
+# Holdout window lists every map in MAP_ORDER; add a map here and it shows
+# up there.
 const MAPS := {
+	"cabin": {
+		"name": "Rotwood Cabin",
+		"about": "One room, one window: everything is inside with you.",
+		"start": "cabin",
+		"outdoor": [],
+		"rooms": {"cabin": [-5.0, -5.0, 10.0, 10.0]},
+		"room_names": {"cabin": "Cabin"},
+		"doors": [],
+		"windows": [
+			{"id": "w1", "room": "cabin", "at": [-5.0, -2.0], "out": [-1.0, 0.0]},
+		],
+		"wall_guns": [
+			{"gun": "double_barrel", "at": [-5.0, 1.5], "in": [1.0, 0.0]},
+			{"gun": "mp5", "at": [-3.0, -5.0], "in": [0.0, 1.0]},
+			{"gun": "m14", "at": [5.0, -3.0], "in": [-1.0, 0.0]},
+			{"gun": "ak47", "at": [-3.2, 5.0], "in": [0.0, -1.0]},
+		],
+		"tonics": [
+			{"tonic": "rattle_rum", "at": [-5.0, 3.6], "in": [1.0, 0.0]},
+			{"tonic": "quickhands", "at": [5.0, -0.9], "in": [-1.0, 0.0]},
+			{"tonic": "mending_moss", "at": [5.0, 1.3], "in": [-1.0, 0.0]},
+			{"tonic": "ironbark", "at": [5.0, 3.5], "in": [-1.0, 0.0]},
+		],
+		"second_wind": {"tonic": "second_wind", "at": [-0.8, -5.0], "in": [0.0, 1.0]},
+		"crate": {"at": [2.6, -5.0], "in": [0.0, 1.0]},
+		"generator": {"at": [-0.8, 5.0], "in": [0.0, -1.0]},
+		"anvil": {"at": [1.5, 5.0], "in": [0.0, -1.0]},
+		"bench": {"at": [3.6, 5.0], "in": [0.0, -1.0]},
+		"parts": [[3.9, -3.9], [-3.9, 3.9], [0.6, 1.8]],
+		"lanterns": [[-4.85, 2.2, -3.6], [4.85, 2.2, 2.4], [0.0, 2.2, -4.85], [0.0, 2.2, 4.85]],
+		"clearing": [-13.0, -13.0, 13.0, 13.0],
+		# Round the back and the sides: those from the far side walk round.
+		"spawns": [[-11.5, -9.0], [-11.5, 5.0], [-4.0, -11.5], [-3.0, 11.5], [9.0, -11.0], [11.0, 9.0]],
+		# A woodpile and a cart by the window, a fence along the north side.
+		"obstacles": [[-8.2, -4.4, 1.0, 2.4, 1.1], [-7.8, 1.4, 1.4, 1.0, 1.0], [0.5, -8.0, 7.0, 0.15, 1.1]],
+	},
 	"lodge": {
 		"name": "Rotwood Lodge",
 		"about": "The Great Hall and the Back Yard, one barrier between them.",
@@ -120,10 +159,12 @@ const MAPS := {
 		"bench": {"at": [2.2, 4.0], "in": [0.0, -1.0]},
 		"parts": [[3.3, -3.3], [-3.2, 3.3], [3.2, 9.2]],  # where the shield's three parts lie
 		"lanterns": [[-3.85, 2.2, -2.8], [3.85, 2.2, 1.5], [-3.85, 2.2, 6.2], [0.0, 2.2, -3.85]],
-		"clearing": [-10.0, -10.0, 16.0, 16.0],
+		"clearing": [-11.0, -11.0, 15.0, 16.0],
+		"spawns": [[-8.0, -9.0], [6.0, -9.0], [-9.5, 1.0], [10.0, 0.0], [-9.5, 9.0], [10.0, 7.0], [-2.0, 14.0], [6.0, 14.0]],
+		"obstacles": [[-7.0, -4.0, 1.0, 2.2, 1.1], [7.5, 4.5, 1.4, 1.0, 1.0]],
 	},
 }
-const MAP_ORDER := ["lodge"]
+const MAP_ORDER := ["cabin", "lodge"]
 const WALL_H := 3.0
 const WALL_T := 0.2
 const DOOR_W := 1.6
@@ -258,7 +299,7 @@ var earned := 0
 var guns: Array = []             # [{"id", "mag", "reserve"}]
 var gun_index := 0
 var tonics: Array = []
-var open_rooms := {"hall": true}    # set from the map at each start
+var open_rooms := {"cabin": true}   # set from the map at each start
 var planks := {}                 # window id -> boards on it
 var results := {}
 var power := false
@@ -320,9 +361,19 @@ var _repair_t := 0.0
 var _use_target := {}
 var _use_scan := 0.0
 var _hit_t := 99.0               # seconds since you were last hit
-var _player_room := "hall"
-var _map: Dictionary = MAPS["lodge"]   # the map being played (settings["map"])
+var _player_room := "cabin"
+var _map: Dictionary = MAPS["cabin"]   # the map being played (settings["map"])
 var _held := false               # the game waits while its window is open
+# Pathing (see the Pathing section): the clearing as a grid of CELL squares.
+var _grid_at := Vector2.ZERO     # the grid's corner (lodge space x, z)
+var _gw := 0                     # cells across (x)
+var _gh := 0                     # cells deep (z)
+var _blocked := PackedByteArray()  # 1: a wall, sill or obstacle is here
+var _cell_room := PackedInt32Array()  # the room a cell is in (index in rooms), -1 outside
+var _out_fields := {}            # window id -> steps to that window from each outside cell
+var _in_field := PackedInt32Array()  # steps to you from each cell of the open rooms
+var _in_from := -2               # the cell _in_field leads to
+var _in_dirty := true            # a door opened: make _in_field again
 var _knife_prev := Vector3.ZERO
 var _knife_cd := 0.0
 var _groan_cd := 0.0
@@ -1024,6 +1075,12 @@ func _build_lodge() -> void:
 	walls.multimesh = mm
 	walls.material_override = _mats["wall"]
 	_arena.add_child(walls)
+	# Obstacles outside: they stop shots and the dead walk round them.
+	for o in _map.get("obstacles", []):
+		var size := Vector3(o[2], o[4], o[3])
+		var at := Vector3(o[0], o[4] / 2.0, o[1])
+		_box(_arena, size, at, _mats["trunk"])
+		_walls.append(AABB(at - size / 2.0, size))
 	# Lanterns: glowing, no real light.
 	for at in _map["lanterns"]:
 		_box(_arena, Vector3(0.12, 0.2, 0.12), Vector3(at[0], at[1], at[2]), _mats["lantern"])
@@ -1073,6 +1130,7 @@ func _build_lodge() -> void:
 	_boom.material_override = _mats["boom"]
 	_boom.visible = false
 	_arena.add_child(_boom)
+	_build_grid()
 	_reset_lodge()
 
 
@@ -1266,6 +1324,8 @@ func _build_wall_things() -> void:
 # Puts the boards and debris back for a new game.
 func _reset_lodge() -> void:
 	open_rooms = {_map["start"]: true}
+	_in_dirty = true
+	planks.clear()
 	for wnd in _map["windows"]:
 		planks[wnd["id"]] = PLANKS
 		_show_planks(wnd["id"])
@@ -1450,6 +1510,9 @@ func _process(delta: float) -> void:
 	var room := _room_at(here)
 	if not room.is_empty() and open_rooms.has(room):
 		_player_room = room
+	var cell := _cell_of(here)
+	if _in_dirty or cell != _in_from:
+		_make_in_field(cell)
 	# Health comes back.
 	_hit_t += delta
 	var wait := REGEN_AFTER * (0.5 if "mending_moss" in tonics else 1.0)
@@ -1568,8 +1631,10 @@ func _spawn_one() -> bool:
 		return false
 	var wnd: Dictionary = choices[_rng.randi() % choices.size()]
 	var out := Vector3(wnd["out"][0], 0, wnd["out"][1])
-	var side := Vector3(-out.z, 0, out.x)
-	var at := Vector3(wnd["at"][0], 0, wnd["at"][1]) + out * _rng.randf_range(3.0, 5.0) + side * _rng.randf_range(-2.0, 2.0)
+	var at := _spawn_spot(wnd)
+	var to_window := Vector3(wnd["at"][0], 0, wnd["at"][1]) - at
+	if to_window.length() > 0.1:
+		out = -to_window.normalized()
 	var z := {"slot": _free_slots.pop_back(), "state": "rise", "pos": at, "yaw": atan2(-out.x, -out.z), "hp": _round_hp,
 		"speed": _speed_for_round(), "room": wnd["room"], "window": wnd["id"], "t": 0.0, "cd": 0.0, "chill": 0.0,
 		"groan": _rng.randf_range(1.0, 6.0), "flash": 0.0, "y": -1.8, "phase": _rng.randf() * TAU, "fall": 0.0}
@@ -1580,9 +1645,11 @@ func _spawn_one() -> bool:
 
 # Puts one in the game now (tests, and a later debug command): at a spot
 # in a room, already inside.
-func add_zombie_inside(spot: Vector3, room := "hall", hp := -1.0) -> Dictionary:
+func add_zombie_inside(spot: Vector3, room := "", hp := -1.0) -> Dictionary:
 	if _free_slots.is_empty():
 		return {}
+	if room.is_empty():
+		room = _room_at(spot) if not _room_at(spot).is_empty() else _map["start"]
 	var z := {"slot": _free_slots.pop_back(), "state": "chase", "pos": spot, "yaw": 0.0, "hp": hp if hp > 0.0 else _round_hp,
 		"speed": SPEEDS["walk"], "room": room, "window": "", "t": 0.0, "cd": ATTACK_TIME, "chill": 0.0, "groan": 5.0,
 		"flash": 0.0, "y": 0.0, "phase": 0.0, "fall": 0.0}
@@ -1610,7 +1677,10 @@ func _move_dead(delta: float, you: Vector3) -> void:
 				var wnd := _window(z["window"])
 				var out := Vector3(wnd["out"][0], 0, wnd["out"][1])
 				var spot := Vector3(wnd["at"][0], 0, wnd["at"][1]) + out * 0.55
-				if _walk_to(z, spot, speed, delta):
+				var step := _path_step(_out_fields.get(z["window"], PackedInt32Array()), z["pos"])
+				if step != Vector3.INF:
+					_walk_to(z, step, speed, delta)
+				elif _walk_to(z, spot, speed, delta):
 					_set_state(z, "tear")
 			"tear":
 				var wnd := _window(z["window"])
@@ -1636,13 +1706,13 @@ func _move_dead(delta: float, you: Vector3) -> void:
 			"chase":
 				if _stuck(z, delta):
 					continue
+				var now_in := _room_at(z["pos"])
+				if not now_in.is_empty() and open_rooms.has(now_in):
+					z["room"] = now_in
 				var target := you_flat
-				if z["room"] != _player_room:
-					var door := _door_toward(z["room"], _player_room)
-					if not door.is_empty():
-						target = Vector3(door["at"][0], 0, door["at"][1])
-						if (z["pos"] as Vector3).distance_to(target) < 0.4:
-							z["room"] = door["rooms"][1] if door["rooms"][0] == z["room"] else door["rooms"][0]
+				var step := _path_step(_in_field, z["pos"])
+				if step != Vector3.INF:
+					target = step
 				if (z["pos"] as Vector3).distance_to(you_flat) > ATTACK_RANGE * 0.7:
 					_walk_to(z, target, speed, delta)
 				else:
@@ -1673,6 +1743,146 @@ func _move_dead(delta: float, you: Vector3) -> void:
 					_sound("groan", _arena.to_global(z["pos"] + Vector3(0, 1.5, 0)), 0.7, _rng.randf_range(0.85, 1.15))
 		_place_zombie(z)
 	_spread_out()
+
+
+# --- Pathing --------------------------------------------------------------------------
+# The clearing is a grid of CELL-metre squares. Walls that reach the ground
+# (window sills too) and the obstacles block the cells round them (by a
+# body's width). Outside, each window has a field made once when the
+# buildings go up: how many steps each cell is from that window. Inside,
+# one field leads to you, made again only when you step into another cell
+# or a door opens. A zombie steps to the neighbouring cell nearest its goal
+# (diagonals only past free corners), so it walks round whatever's in the
+# way; next to its goal it walks straight there.
+
+const CELL := 0.5
+const BODY := 0.25               # how far a zombie's middle keeps off a wall
+
+
+func _build_grid() -> void:
+	var c: Array = _map["clearing"]
+	_grid_at = Vector2(c[0], c[1])
+	_gw = int(ceil((c[2] - c[0]) / CELL))
+	_gh = int(ceil((c[3] - c[1]) / CELL))
+	_blocked = PackedByteArray()
+	_blocked.resize(_gw * _gh)
+	_cell_room = PackedInt32Array()
+	_cell_room.resize(_gw * _gh)
+	_cell_room.fill(-1)
+	var rooms: Array = _map["rooms"].keys()
+	for ri in rooms.size():
+		var r: Array = _map["rooms"][rooms[ri]]
+		_mark(Rect2(r[0], r[1], r[2], r[3]), _cell_room, ri)
+	for box: AABB in _walls:
+		if box.position.y < 0.3:  # reaches the ground
+			_mark(Rect2(box.position.x, box.position.z, box.size.x, box.size.z).grow(BODY), _blocked, 1)
+	_out_fields.clear()
+	for wnd in _map["windows"]:
+		var out := Vector3(wnd["out"][0], 0, wnd["out"][1])
+		var seed := _cell_of(Vector3(wnd["at"][0], 0, wnd["at"][1]) + out * 0.55)
+		_out_fields[wnd["id"]] = _field(seed, func(i): return _cell_room[i] == -1)
+	_in_from = -2
+	_in_dirty = true
+
+
+# Sets every cell whose middle is in rect.
+func _mark(rect: Rect2, cells, value: int) -> void:
+	var x0 := maxi(0, int(ceil((rect.position.x - _grid_at.x) / CELL - 0.5)))
+	var x1 := mini(_gw - 1, int(floor((rect.end.x - _grid_at.x) / CELL - 0.5)))
+	var z0 := maxi(0, int(ceil((rect.position.y - _grid_at.y) / CELL - 0.5)))
+	var z1 := mini(_gh - 1, int(floor((rect.end.y - _grid_at.y) / CELL - 0.5)))
+	for z in range(z0, z1 + 1):
+		for x in range(x0, x1 + 1):
+			cells[z * _gw + x] = value
+
+
+func _cell_of(p: Vector3) -> int:
+	var x := int(floor((p.x - _grid_at.x) / CELL))
+	var z := int(floor((p.z - _grid_at.y) / CELL))
+	if x < 0 or z < 0 or x >= _gw or z >= _gh:
+		return -1
+	return z * _gw + x
+
+
+func _cell_middle(i: int) -> Vector3:
+	return Vector3(_grid_at.x + (i % _gw + 0.5) * CELL, 0.0, _grid_at.y + (i / _gw + 0.5) * CELL)
+
+
+# Steps from seed to each free cell where may(i) is true (-1: can't get there).
+func _field(seed: int, may: Callable) -> PackedInt32Array:
+	var dist := PackedInt32Array()
+	dist.resize(_gw * _gh)
+	dist.fill(-1)
+	if seed < 0:
+		return dist
+	dist[seed] = 0
+	var queue := PackedInt32Array([seed])
+	var head := 0
+	while head < queue.size():
+		var i := queue[head]
+		head += 1
+		var x := i % _gw
+		for n in [i - 1 if x > 0 else -1, i + 1 if x < _gw - 1 else -1, i - _gw, i + _gw]:
+			if n < 0 or n >= dist.size() or dist[n] != -1 or _blocked[n] == 1 or not may.call(n):
+				continue
+			dist[n] = dist[i] + 1
+			queue.append(n)
+	return dist
+
+
+func _make_in_field(cell: int) -> void:
+	_in_from = cell
+	_in_dirty = false
+	var rooms: Array = _map["rooms"].keys()
+	var open := []
+	for ri in rooms.size():
+		open.append(open_rooms.has(rooms[ri]))
+	_in_field = _field(cell, func(i): return _cell_room[i] >= 0 and open[_cell_room[i]])
+
+
+# Where to walk next on a field: the middle of the neighbouring cell nearest
+# the goal, or Vector3.INF when off the field or a cell or two from the goal
+# (then walk straight to it).
+func _path_step(field: PackedInt32Array, from: Vector3) -> Vector3:
+	var i := _cell_of(from)
+	if field.is_empty() or i < 0 or field[i] <= 1:
+		return Vector3.INF
+	var x := i % _gw
+	var z := i / _gw
+	var best := i
+	for dz in [-1, 0, 1]:
+		for dx in [-1, 0, 1]:
+			var nx: int = x + dx
+			var nz: int = z + dz
+			if (dx == 0 and dz == 0) or nx < 0 or nz < 0 or nx >= _gw or nz >= _gh:
+				continue
+			var n: int = nz * _gw + nx
+			if field[n] < 0:
+				continue
+			if dx != 0 and dz != 0 and (field[z * _gw + nx] < 0 or field[nz * _gw + x] < 0):
+				continue  # no cutting a corner
+			if field[n] < field[best] or (field[n] == field[best] and dx != 0 and dz != 0):
+				best = n
+	return _cell_middle(best) if best != i else Vector3.INF
+
+
+# Where one bound for this window comes up: one of the two spawns nearest
+# it (by walking), a little to one side.
+func _spawn_spot(wnd: Dictionary) -> Vector3:
+	var field: PackedInt32Array = _out_fields.get(wnd["id"], PackedInt32Array())
+	var near := []
+	for sp in _map.get("spawns", []):
+		var i := _cell_of(Vector3(sp[0], 0, sp[1]))
+		if not field.is_empty() and i >= 0 and field[i] >= 0:
+			near.append([field[i], Vector3(sp[0], 0, sp[1])])
+	if near.is_empty():  # no spawns that reach it: just outside, as before
+		var out := Vector3(wnd["out"][0], 0, wnd["out"][1])
+		return Vector3(wnd["at"][0], 0, wnd["at"][1]) + out * _rng.randf_range(3.0, 5.0)
+	near.sort_custom(func(a, b): return a[0] < b[0])
+	var at: Vector3 = near[_rng.randi() % mini(2, near.size())][1]
+	var nudged := at + Vector3(_rng.randf_range(-1.0, 1.0), 0, _rng.randf_range(-1.0, 1.0))
+	var ni := _cell_of(nudged)
+	return nudged if ni >= 0 and field[ni] >= 0 else at
 
 
 # --- Fixes ---------------------------------------------------------------------------------
@@ -1761,30 +1971,6 @@ func _window(id: String) -> Dictionary:
 		if wnd["id"] == id:
 			return wnd
 	return _map["windows"][0]
-
-
-# The open door to go through first from one room toward another ({} if none).
-func _door_toward(from: String, to: String) -> Dictionary:
-	if from == to:
-		return {}
-	var came := {from: {}}
-	var queue := [from]
-	while not queue.is_empty():
-		var room: String = queue.pop_front()
-		for d in _map["doors"]:
-			if not (room in d["rooms"]) or not (open_rooms.has(d["rooms"][0]) and open_rooms.has(d["rooms"][1])):
-				continue
-			var other: String = d["rooms"][1] if d["rooms"][0] == room else d["rooms"][0]
-			if came.has(other):
-				continue
-			came[other] = {"door": d, "from": room}
-			if other == to:
-				var step: Dictionary = came[other]
-				while step["from"] != from:
-					step = came[step["from"]]
-				return step["door"]
-			queue.append(other)
-	return {}
 
 
 func _place_zombie(z: Dictionary) -> void:
@@ -2348,6 +2534,7 @@ func open_door(id: String) -> bool:
 			_debris[id].get_meta("label_" + room).visible = false
 	for room in d["rooms"]:
 		open_rooms[room] = true
+		_in_dirty = true
 	_sound("rip", _arena.to_global(Vector3(d["at"][0], 1.0, d["at"][1])), 1.0, 0.7)
 	return true
 
