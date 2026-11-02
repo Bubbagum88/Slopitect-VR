@@ -61,57 +61,120 @@ signal points_changed(points: int)
 
 const TITLE := "Rotwood Holdout"
 const PANEL := "holdout"
-const PANEL_SIZE := Vector2(0.8, 0.6)
+const PANEL_SIZE := Vector2(0.8, 0.7)
 const WORLD := "holdout"
 const SETTINGS_PATH := "user://holdout.json"
-const DEFAULTS := {"difficulty": "normal", "max_zombies": 12, "sounds": true}
+const DEFAULTS := {"map": "cabin", "difficulty": "normal", "max_zombies": 12, "sounds": true}
 const DIFFICULTIES := ["easy", "normal", "hard"]
 const DIFF_LABELS := {"easy": "Easy", "normal": "Normal", "hard": "Hard"}
 const DIFF_HEALTH := {"easy": 0.7, "normal": 1.0, "hard": 1.4}
 const DIFF_HIT := {"easy": 30.0, "normal": 45.0, "hard": 60.0}
 const MAX_ZOMBIES := [6, 20]
+# Sprint: hold the left grip while you walk. It runs out and comes back
+# after a short rest.
+const SPRINT_BOOST := 1.7        # times your walking speed
+const SPRINT_TIME := 4.0         # seconds of it, full
+const SPRINT_REST := 1.5         # seconds of not sprinting before it comes back
 const POOL := 20                 # the most of the dead there can be at once
 
-# --- The lodge (metres; x right, z toward you; you start at 0, 0 facing -z) ---
-# Rooms are [x, z, width, depth] on the ground.
-const ROOMS := {
-	"hall": [-4.0, -4.0, 8.0, 8.0],
-	"yard": [-4.0, 4.0, 8.0, 6.0],
+# --- The maps (metres; x right, z toward you; you start at 0, 0 facing -z) ---
+# A map is data: rooms are [x, z, width, depth] on the ground ("start" is
+# the room you begin in, "outdoor" rooms get a dirt floor); doors join two
+# rooms; windows sit on a wall with "out" the way out of the room; things on
+# the walls have "in", the way into the room. "lanterns" glow on the walls
+# and "clearing" [x0, z0, x1, z1] is kept free of trees; the dead find
+# their way across it (see Pathing). They rise at the "spawns" and walk
+# round the "obstacles" [x, z, width, depth, height] to a window. The
+# Holdout window lists every map in MAP_ORDER; add a map here and it shows
+# up there.
+const MAPS := {
+	"cabin": {
+		"name": "Rotwood Cabin",
+		"about": "One room, one window: everything is inside with you.",
+		"start": "cabin",
+		"outdoor": [],
+		"rooms": {"cabin": [-5.0, -5.0, 10.0, 10.0]},
+		"room_names": {"cabin": "Cabin"},
+		"doors": [],
+		"windows": [
+			{"id": "w1", "room": "cabin", "at": [-5.0, -2.0], "out": [-1.0, 0.0]},
+		],
+		"wall_guns": [
+			{"gun": "double_barrel", "at": [-5.0, 1.5], "in": [1.0, 0.0]},
+			{"gun": "mp5", "at": [-3.0, -5.0], "in": [0.0, 1.0]},
+			{"gun": "m14", "at": [5.0, -3.0], "in": [-1.0, 0.0]},
+			{"gun": "ak47", "at": [-3.2, 5.0], "in": [0.0, -1.0]},
+			{"gun": "kar98k", "at": [-5.0, -4.0], "in": [1.0, 0.0]},
+			{"gun": "thompson", "at": [4.35, -5.0], "in": [0.0, 1.0]},
+		],
+		"tonics": [
+			{"tonic": "rattle_rum", "at": [-5.0, 3.6], "in": [1.0, 0.0]},
+			{"tonic": "quickhands", "at": [5.0, -0.9], "in": [-1.0, 0.0]},
+			{"tonic": "mending_moss", "at": [5.0, 1.3], "in": [-1.0, 0.0]},
+			{"tonic": "ironbark", "at": [5.0, 3.5], "in": [-1.0, 0.0]},
+		],
+		"second_wind": {"tonic": "second_wind", "at": [-0.8, -5.0], "in": [0.0, 1.0]},
+		"crate": {"at": [2.6, -5.0], "in": [0.0, 1.0]},
+		"generator": {"at": [-0.8, 5.0], "in": [0.0, -1.0]},
+		"anvil": {"at": [1.5, 5.0], "in": [0.0, -1.0]},
+		"bench": {"at": [3.6, 5.0], "in": [0.0, -1.0]},
+		"parts": [[3.9, -3.9], [-3.9, 3.9], [0.6, 1.8]],
+		"lanterns": [[-4.85, 2.2, -3.6], [4.85, 2.2, 2.4], [0.0, 2.2, -4.85], [0.0, 2.2, 4.85]],
+		"clearing": [-13.0, -13.0, 13.0, 13.0],
+		# Round the back and the sides: those from the far side walk round.
+		"spawns": [[-11.5, -9.0], [-11.5, 5.0], [-4.0, -11.5], [-3.0, 11.5], [9.0, -11.0], [11.0, 9.0]],
+		# A woodpile and a cart by the window, a fence along the north side.
+		"obstacles": [[-8.2, -4.4, 1.0, 2.4, 1.1], [-7.8, 1.4, 1.4, 1.0, 1.0], [0.5, -8.0, 7.0, 0.15, 1.1]],
+	},
+	"lodge": {
+		"name": "Rotwood Lodge",
+		"about": "The Great Hall and the Back Yard, one barrier between them.",
+		"start": "hall",
+		"outdoor": ["yard"],
+		"rooms": {
+			"hall": [-4.0, -4.0, 8.0, 8.0],
+			"yard": [-4.0, 4.0, 8.0, 6.0],
+		},
+		"room_names": {"hall": "Great Hall", "yard": "Back Yard"},
+		"doors": [
+			{"id": "yard_door", "rooms": ["hall", "yard"], "at": [0.0, 4.0], "cost": 1000},
+		],
+		"windows": [
+			{"id": "w1", "room": "hall", "at": [-2.0, -4.0], "out": [0.0, -1.0]},
+			{"id": "w2", "room": "hall", "at": [-4.0, 1.5], "out": [-1.0, 0.0]},
+			{"id": "w3", "room": "hall", "at": [4.0, 0.3], "out": [1.0, 0.0]},
+			{"id": "w4", "room": "yard", "at": [4.0, 5.2], "out": [1.0, 0.0]},
+			{"id": "w5", "room": "yard", "at": [-4.0, 7.0], "out": [-1.0, 0.0]},
+			{"id": "w6", "room": "yard", "at": [0.0, 10.0], "out": [0.0, 1.0]},
+		],
+		"wall_guns": [
+			{"gun": "double_barrel", "at": [-4.0, -2.0], "in": [1.0, 0.0]},
+			{"gun": "mp5", "at": [4.0, -2.6], "in": [-1.0, 0.0]},
+			{"gun": "m14", "at": [4.0, 2.6], "in": [-1.0, 0.0]},
+			{"gun": "ak47", "at": [-2.4, 4.0], "in": [0.0, 1.0]},
+			{"gun": "kar98k", "at": [0.4, -4.0], "in": [0.0, 1.0]},
+			{"gun": "remington870", "at": [-4.0, -3.3], "in": [1.0, 0.0]},
+			{"gun": "thompson", "at": [4.0, 9.2], "in": [-1.0, 0.0]},
+		],
+		"tonics": [
+			{"tonic": "quickhands", "at": [-2.6, 4.0], "in": [0.0, -1.0]},
+			{"tonic": "rattle_rum", "at": [-4.0, 5.2], "in": [1.0, 0.0]},
+			{"tonic": "mending_moss", "at": [2.4, 10.0], "in": [0.0, -1.0]},
+			{"tonic": "ironbark", "at": [-4.0, 8.8], "in": [1.0, 0.0]},
+		],
+		"second_wind": {"tonic": "second_wind", "at": [2.4, -4.0], "in": [0.0, 1.0]},
+		"crate": {"at": [4.0, 7.4], "in": [-1.0, 0.0]},
+		"generator": {"at": [-2.4, 10.0], "in": [0.0, -1.0]},
+		"anvil": {"at": [2.4, 4.0], "in": [0.0, 1.0]},
+		"bench": {"at": [2.2, 4.0], "in": [0.0, -1.0]},
+		"parts": [[3.3, -3.3], [-3.2, 3.3], [3.2, 9.2]],  # where the shield's three parts lie
+		"lanterns": [[-3.85, 2.2, -2.8], [3.85, 2.2, 1.5], [-3.85, 2.2, 6.2], [0.0, 2.2, -3.85]],
+		"clearing": [-11.0, -11.0, 15.0, 16.0],
+		"spawns": [[-8.0, -9.0], [6.0, -9.0], [-9.5, 1.0], [10.0, 0.0], [-9.5, 9.0], [10.0, 7.0], [-2.0, 14.0], [6.0, 14.0]],
+		"obstacles": [[-7.0, -4.0, 1.0, 2.2, 1.1], [7.5, 4.5, 1.4, 1.0, 1.0]],
+	},
 }
-const ROOM_NAMES := {"hall": "Great Hall", "yard": "Back Yard"}
-# The first map: one barrier. Later maps can add rooms and doors here.
-const DOORS := [
-	{"id": "yard_door", "rooms": ["hall", "yard"], "at": [0.0, 4.0], "cost": 1000},
-]
-# Windows: where on a wall, and "out" (the way out of the room).
-const WINDOWS := [
-	{"id": "w1", "room": "hall", "at": [-2.0, -4.0], "out": [0.0, -1.0]},
-	{"id": "w2", "room": "hall", "at": [-4.0, 1.5], "out": [-1.0, 0.0]},
-	{"id": "w3", "room": "hall", "at": [4.0, 0.3], "out": [1.0, 0.0]},
-	{"id": "w4", "room": "yard", "at": [4.0, 5.2], "out": [1.0, 0.0]},
-	{"id": "w5", "room": "yard", "at": [-4.0, 7.0], "out": [-1.0, 0.0]},
-	{"id": "w6", "room": "yard", "at": [0.0, 10.0], "out": [0.0, 1.0]},
-]
-# Things on the walls: "in" is the way into the room.
-const WALL_GUNS := [
-	{"gun": "double_barrel", "at": [-4.0, -2.0], "in": [1.0, 0.0]},
-	{"gun": "mp5", "at": [4.0, -2.6], "in": [-1.0, 0.0]},
-	{"gun": "m14", "at": [4.0, 2.6], "in": [-1.0, 0.0]},
-	{"gun": "ak47", "at": [-2.4, 4.0], "in": [0.0, 1.0]},
-]
-const TONIC_SPOTS := [
-	{"tonic": "quickhands", "at": [-2.6, 4.0], "in": [0.0, -1.0]},
-	{"tonic": "rattle_rum", "at": [-4.0, 5.2], "in": [1.0, 0.0]},
-	{"tonic": "mending_moss", "at": [2.4, 10.0], "in": [0.0, -1.0]},
-	{"tonic": "ironbark", "at": [-4.0, 8.8], "in": [1.0, 0.0]},
-]
-const CRATE_SPOT := {"at": [4.0, 7.4], "in": [-1.0, 0.0]}
-const GENERATOR_SPOT := {"at": [-2.4, 10.0], "in": [0.0, -1.0]}
-const ANVIL_SPOT := {"at": [2.4, 4.0], "in": [0.0, 1.0]}
-const BENCH_SPOT := {"at": [2.2, 4.0], "in": [0.0, -1.0]}
-const SECOND_WIND_SPOT := {"tonic": "second_wind", "at": [2.4, -4.0], "in": [0.0, 1.0]}
-# Where the shield's three parts lie (on the floor).
-const PART_SPOTS := [[3.3, -3.3], [-3.2, 3.3], [3.2, 9.2]]
+const MAP_ORDER := ["cabin", "lodge"]
 const WALL_H := 3.0
 const WALL_T := 0.2
 const DOOR_W := 1.6
@@ -149,9 +212,46 @@ const GUNS := {
 		"auto": false, "cost": 0, "pierce": 1, "chain": 4, "len": 0.34},
 	"frostbite": {"name": "Frostbite", "damage": 150.0, "rate": 0.3, "mag": 15, "reserve": 75, "reload": 2.0, "pellets": 1, "spread": 0.0,
 		"auto": false, "cost": 0, "pierce": 1, "chill": 4.0, "len": 0.36},
+	# More you'll know: on the walls...
+	"kar98k": {"name": "Kar98k", "damage": 150.0, "rate": 1.1, "mag": 5, "reserve": 50, "reload": 2.6, "pellets": 1, "spread": 0.3,
+		"auto": false, "cost": 600, "pierce": 2, "len": 0.62},
+	"thompson": {"name": "Thompson", "damage": 40.0, "rate": 0.085, "mag": 30, "reserve": 160, "reload": 2.2, "pellets": 1, "spread": 2.8,
+		"auto": true, "cost": 1200, "pierce": 1, "len": 0.45},
+	"remington870": {"name": "Remington 870", "damage": 30.0, "rate": 0.55, "mag": 6, "reserve": 48, "reload": 3.0, "pellets": 8, "spread": 5.5,
+		"auto": false, "cost": 900, "pierce": 1, "len": 0.55},
+	# ...and in the crate.
+	"galil": {"name": "Galil", "damage": 55.0, "rate": 0.09, "mag": 35, "reserve": 245, "reload": 2.6, "pellets": 1, "spread": 1.6,
+		"auto": true, "cost": 0, "pierce": 1, "len": 0.5},
+	"spas12": {"name": "SPAS-12", "damage": 32.0, "rate": 0.3, "mag": 8, "reserve": 48, "reload": 3.0, "pellets": 8, "spread": 6.0,
+		"auto": false, "cost": 0, "pierce": 1, "len": 0.55},
+	"deagle": {"name": "Desert Eagle", "damage": 120.0, "rate": 0.3, "mag": 7, "reserve": 49, "reload": 1.6, "pellets": 1, "spread": 0.6,
+		"auto": false, "cost": 0, "pierce": 2, "len": 0.24},
+	"mp40": {"name": "MP40", "damage": 35.0, "rate": 0.11, "mag": 32, "reserve": 192, "reload": 2.0, "pellets": 1, "spread": 2.4,
+		"auto": true, "cost": 0, "pierce": 1, "len": 0.4},
+	# Our own odd ones, crate only, like the Thunderjug and Frostbite.
+	# Emberwick sets the dead alight (it spreads to those next to them);
+	# Gravebell's toll throws back everything in front of you; Rootsnare
+	# holds them where they stand.
+	"emberwick": {"name": "Emberwick", "damage": 120.0, "rate": 0.35, "mag": 10, "reserve": 60, "reload": 2.2, "pellets": 1, "spread": 0.0,
+		"auto": false, "cost": 0, "pierce": 1, "burn": 5.0, "len": 0.4},
+	"gravebell": {"name": "Gravebell", "damage": 220.0, "rate": 0.6, "mag": 4, "reserve": 24, "reload": 2.6, "pellets": 1, "spread": 0.0,
+		"auto": false, "cost": 0, "pierce": 1, "cone": 4.5, "knock": 2.5, "len": 0.42},
+	"rootsnare": {"name": "Rootsnare", "damage": 100.0, "rate": 0.35, "mag": 12, "reserve": 60, "reload": 2.0, "pellets": 1, "spread": 0.0,
+		"auto": false, "cost": 0, "pierce": 2, "snare": 5.0, "len": 0.38},
 }
-# Real guns you'll know, plus two of our own odd ones in the crate.
-const CRATE_GUNS := ["double_barrel", "mp5", "m14", "ak47", "python", "m60", "barrett", "rpg7", "thunderjug", "frostbite"]
+# What each becomes on The Anvil: our own names.
+const FORGED_NAMES := {
+	"m1911": "Ember .45", "double_barrel": "Two-Bit Thunder", "mp5": "Wasp Nest", "m14": "Long Night", "ak47": "Red Harvest",
+	"python": "Copperhead", "m60": "Lead Rain", "barrett": "Last Word", "rpg7": "Housewarmer", "thunderjug": "Stormcellar",
+	"frostbite": "Deep Winter", "kar98k": "Old Faithful", "thompson": "Gangland", "remington870": "Barn Burner", "galil": "Desert Wind",
+	"spas12": "Doorkicker", "deagle": "Hand Cannon", "mp40": "Night Shift", "emberwick": "Wildfire", "gravebell": "Deathknell",
+	"rootsnare": "Old Growth",
+}
+const BURN_DPS := 60.0           # Emberwick's fire, health a second
+const BELL_DEGREES := 35.0       # Gravebell's toll reaches this far each side of where you aim
+# Real guns you'll know, plus our own odd ones in the crate.
+const CRATE_GUNS := ["double_barrel", "mp5", "m14", "ak47", "python", "m60", "barrett", "rpg7", "thunderjug", "frostbite",
+	"kar98k", "thompson", "remington870", "galil", "spas12", "deagle", "mp40", "emberwick", "gravebell", "rootsnare"]
 const CRATE_COST := 950
 const CRATE_SHUFFLE := 2.4       # seconds it shuffles
 const CRATE_OFFER := 8.0         # seconds it offers the gun
@@ -210,6 +310,8 @@ const REGEN_AFTER := 4.0
 const REGEN_RATE := 60.0         # health a second
 const ATTACK_RANGE := 1.1
 const ATTACK_TIME := 1.2         # seconds between one zombie's swipes
+const SWING_TIME := 0.65         # a swipe's wind-up: it rears back, then lunges; step out of reach to dodge it
+const SWING_BACK := 0.3          # seconds it takes to straighten up after
 const REACH := 1.4               # metres from a thing you can use it
 const REPAIR_TIME := 0.7         # seconds a board
 const REPAIR_CAP := 400          # points a round for boards
@@ -246,11 +348,11 @@ var earned := 0
 var guns: Array = []             # [{"id", "mag", "reserve"}]
 var gun_index := 0
 var tonics: Array = []
-var open_rooms := {"hall": true}
+var open_rooms := {"cabin": true}   # set from the map at each start
 var planks := {}                 # window id -> boards on it
 var results := {}
 var power := false
-var parts := []                  # the shield's parts found (indexes into PART_SPOTS)
+var parts := []                  # the shield's parts found (indexes into _map["parts"])
 var shield := 0                  # blocks the shield has left (0: none worn)
 var shield_built := false        # built once this game (rebuilt for points after)
 var effects := {}                # "one_shot" / "double_pay" -> seconds left
@@ -308,7 +410,23 @@ var _repair_t := 0.0
 var _use_target := {}
 var _use_scan := 0.0
 var _hit_t := 99.0               # seconds since you were last hit
-var _player_room := "hall"
+var _player_room := "cabin"
+var _map: Dictionary = MAPS["cabin"]   # the map being played (settings["map"])
+var _held := false               # the game waits while its window is open
+var _sprint_held := false        # the left grip is held
+var _sprinting := false          # controls.gd's speed_boost is on
+var _stamina := SPRINT_TIME      # seconds of sprint left
+var _rest_t := 0.0               # seconds since the last sprint
+# Pathing (see the Pathing section): the clearing as a grid of CELL squares.
+var _grid_at := Vector2.ZERO     # the grid's corner (lodge space x, z)
+var _gw := 0                     # cells across (x)
+var _gh := 0                     # cells deep (z)
+var _blocked := PackedByteArray()  # 1: a wall, sill or obstacle is here
+var _cell_room := PackedInt32Array()  # the room a cell is in (index in rooms), -1 outside
+var _out_fields := {}            # window id -> steps to that window from each outside cell
+var _in_field := PackedInt32Array()  # steps to you from each cell of the open rooms
+var _in_from := -2               # the cell _in_field leads to
+var _in_dirty := true            # a door opened: make _in_field again
 var _knife_prev := Vector3.ZERO
 var _knife_cd := 0.0
 var _groan_cd := 0.0
@@ -334,11 +452,11 @@ var _up_specs := {}
 
 
 func setup() -> String:
-	register("holdout_start", _start, "start a game of Rotwood Holdout (goes to its world first): optional difficulty (easy, normal, hard), round (the round to start on, 1 to 50)")
+	register("holdout_start", _start, "start a game of Rotwood Holdout (goes to its world first): optional map (lodge), difficulty (easy, normal, hard), round (the round to start on, 1 to 50)")
 	register("holdout_stop", _stop, "end the game that's on")
 	register("holdout_status", _status, "the game: round, points, health, guns and ammo, tonics, open rooms, boards on each window, the dead alive and still to come, kills; after a game, its results")
-	register("holdout_set", _set_command, "the game's settings (usable in the headset): any of difficulty (easy, normal, hard), max_zombies (6 to 20 at once), sounds (true/false)")
-	register("holdout_do", _do, "the Holdout window: act = toggle (goes to the Holdout world first), show, start, leave")
+	register("holdout_set", _set_command, "the game's settings (usable in the headset): any of map (lodge; not during a game), difficulty (easy, normal, hard), max_zombies (6 to 20 at once), sounds (true/false)")
+	register("holdout_do", _do, "the Holdout window: act = toggle (goes to the Holdout world first; during a game the game waits while it's open), show, hide (back to the game), start, leave")
 	register("holdout_leave", _leave, "end the game and go back from the Holdout world to the world you came from")
 	_rng.randomize()
 	_make_materials()
@@ -361,6 +479,8 @@ func lib_ready(lib) -> void:
 	lib.watch(self, "controls", _controls_here, _controls_gone)
 	lib.watch(self, "audio", _audio_here, _audio_gone)
 	lib.follow(self, "projects", "project_changed", _on_world_changed)
+	for ui_name in ["vrui", "ui"]:
+		lib.follow(self, ui_name, "panel_shown", _panel_shown)
 	if _projects() != null and in_world():  # loaded while already in the Holdout world
 		_stage_on()
 	lib.touch(self)
@@ -372,6 +492,7 @@ func _controls_here(controls: SlopitectModule) -> void:
 
 func _controls_gone(_old: SlopitectModule) -> void:
 	_controls = null
+	_sprinting = false  # its boost went with it
 
 
 func _audio_here(audio: SlopitectModule) -> void:
@@ -384,6 +505,7 @@ func _audio_gone(_old: SlopitectModule) -> void:
 
 func _exit_tree() -> void:
 	_end_game(false)
+	_sprint(false)
 	_stage_off()
 	ctx["server"].run({"cmd": "ui_remove", "id_panel": PANEL})
 
@@ -394,11 +516,22 @@ func menu_info() -> Dictionary:
 	return {"id": "holdout", "label": "Holdout", "order": 61, "action": {"cmd": "holdout_do", "act": "toggle"}}
 
 
+# The hand menu's way in and out: opens the Holdout window (taking you to
+# its world first); during a game it's the game's menu, and the game waits.
+func hand_info() -> Dictionary:
+	return {"id": "holdout", "label": "Holdout", "order": 61, "action": {"cmd": "holdout_do", "act": "toggle"}}
+
+
 func settings_info() -> Dictionary:
+	var maps := []
+	for m in MAP_ORDER:
+		maps.append({"label": MAPS[m]["name"], "value": m})
 	var diffs := []
 	for d in DIFFICULTIES:
 		diffs.append({"label": DIFF_LABELS[d], "value": d})
 	return {"title": TITLE, "order": 46, "settings": [
+		{"id": "map", "type": "choice", "label": "Map", "value": settings["map"], "options": maps, "columns": 2,
+			"set": {"cmd": "holdout_set", "map": "{value}"}},
 		{"id": "difficulty", "type": "choice", "label": "Difficulty", "value": settings["difficulty"], "options": diffs, "columns": 3,
 			"set": {"cmd": "holdout_set", "difficulty": "{value}"}},
 		{"id": "max_zombies", "type": "slider", "label": "Most of the dead at once", "min": MAX_ZOMBIES[0], "max": MAX_ZOMBIES[1], "step": 1.0,
@@ -420,8 +553,8 @@ func action_order() -> int:
 
 
 func on_action(action: String, down: bool) -> bool:
-	if not running:
-		return false
+	if not running or _held:
+		return false  # the window has the buttons while the game waits
 	match action:
 		"point":
 			if down and _pointing_at_window():
@@ -443,6 +576,9 @@ func on_action(action: String, down: bool) -> bool:
 		"left_y":
 			if down:
 				_switch_gun()
+			return true
+		"grab_left":
+			_sprint_held = down
 			return true
 	return false
 
@@ -472,11 +608,14 @@ func _do(request: Dictionary) -> Dictionary:
 			return _show_window()
 		"show":
 			return _show_window()
+		"hide":
+			_hide_window()
+			return {"ok": true, "shown": false}
 		"start":
 			return _start({})
 		"leave":
 			return _leave({})
-	return {"ok": false, "error": "\"act\" must be toggle, show, start or leave"}
+	return {"ok": false, "error": "\"act\" must be toggle, show, hide, start or leave"}
 
 
 func _shown() -> bool:
@@ -496,6 +635,25 @@ func _show_window() -> Dictionary:
 	return {"ok": true, "shown": true}
 
 
+# The window is the game's menu: while it's open during a game, the game
+# waits (the dead stand still, nothing counts down) and the buttons go to
+# the window; closing it (Resume, its X, the hand menu) carries on.
+func _panel_shown(id_panel: String, on: bool) -> void:
+	if id_panel == PANEL:
+		_hold(on and running)
+
+
+func _hold(on: bool) -> void:
+	_held = on
+	_sprint_held = false
+	_sprint(false)
+	_trigger = false
+	_use_held = false
+	set_process(running and not on)
+	if running:
+		_update_hud()
+
+
 # The window opens with the world, unless a game started on the way in.
 func _show_if_idle() -> void:
 	if not running and is_inside_tree():
@@ -513,22 +671,42 @@ func _build() -> String:
 	var els := []
 	var w := PANEL_SIZE.x - 0.08
 	var y := PANEL_SIZE.y / 2.0 - 0.07
-	els.append({"type": "text", "id": "status", "text": _window_text(), "at": [0.0, y - 0.05], "width": w})
-	y -= 0.2
-	for i in DIFFICULTIES.size():
-		var d: String = DIFFICULTIES[i]
-		els.append({"type": "button", "id": "diff_" + d, "label": DIFF_LABELS[d], "at": [(i - 1) * w / 3.0, y], "size": [w / 3.0 - 0.02, 0.055],
-			"color": "accent" if settings["difficulty"] == d else "button", "action": {"cmd": "holdout_set", "difficulty": d}})
-	y -= 0.08
-	els.append({"type": "button", "id": "start", "label": "Play again" if not results.is_empty() else "Start", "at": [-w / 3.0, y],
-		"size": [w / 3.0 - 0.02, 0.06], "color": "ok", "action": {"cmd": "holdout_start"}})
-	els.append({"type": "button", "id": "stop", "label": "End game", "at": [0.0, y], "size": [w / 3.0 - 0.02, 0.06],
-		"color": "notice" if running else "button", "action": {"cmd": "holdout_stop"}})
-	els.append({"type": "button", "id": "leave", "label": "Leave", "at": [w / 3.0, y], "size": [w / 3.0 - 0.02, 0.06],
-		"color": "button", "action": {"cmd": "holdout_leave"}})
-	y -= 0.1
+	var third := [w / 3.0 - 0.02, 0.06]
+	els.append({"type": "text", "id": "status", "text": _window_text(), "at": [0.0, y - 0.04], "width": w})
+	y -= 0.19
+	if running:
+		# The game's menu: it waits until you go back.
+		els.append({"type": "button", "id": "resume", "label": "Resume", "at": [-w / 3.0, y], "size": third, "color": "ok",
+			"action": {"cmd": "holdout_do", "act": "hide"}})
+		els.append({"type": "button", "id": "stop", "label": "End game", "at": [0.0, y], "size": third, "color": "notice",
+			"action": {"cmd": "holdout_stop"}})
+		els.append({"type": "button", "id": "leave", "label": "Leave", "at": [w / 3.0, y], "size": third, "color": "button",
+			"action": {"cmd": "holdout_leave"}})
+		y -= 0.12
+	else:
+		# The lobby: pick a map and how hard, then Start.
+		els.append({"type": "text", "id": "map_head", "text": "Map", "color": "muted", "at": [0.0, y + 0.065], "width": w})
+		for i in MAP_ORDER.size():
+			var m: String = MAP_ORDER[i]
+			var col := i % 3
+			var row := i / 3
+			els.append({"type": "button", "id": "map_" + m, "label": MAPS[m]["name"], "at": [(col - 1) * w / 3.0, y - row * 0.07],
+				"size": third, "color": "accent" if settings["map"] == m else "button", "action": {"cmd": "holdout_set", "map": m}})
+		y -= 0.07 * ceili(MAP_ORDER.size() / 3.0)
+		els.append({"type": "text", "id": "map_about", "text": MAPS[settings["map"]]["about"], "color": "muted", "at": [0.0, y + 0.02], "width": w})
+		y -= 0.08
+		for i in DIFFICULTIES.size():
+			var d: String = DIFFICULTIES[i]
+			els.append({"type": "button", "id": "diff_" + d, "label": DIFF_LABELS[d], "at": [(i - 1) * w / 3.0, y], "size": [w / 3.0 - 0.02, 0.055],
+				"color": "accent" if settings["difficulty"] == d else "button", "action": {"cmd": "holdout_set", "difficulty": d}})
+		y -= 0.08
+		els.append({"type": "button", "id": "start", "label": "Play again" if not results.is_empty() else "Start", "at": [-w / 6.0, y],
+			"size": third, "color": "ok", "action": {"cmd": "holdout_start"}})
+		els.append({"type": "button", "id": "leave", "label": "Leave", "at": [w / 6.0, y], "size": third, "color": "button",
+			"action": {"cmd": "holdout_leave"}})
+		y -= 0.1
 	els.append({"type": "text", "id": "help", "color": "muted", "at": [0.0, y], "width": w,
-		"text": "Trigger: shoot   A: buy, open, hold to board up\nB: reload   Y: switch guns   Swing left hand: knife"})
+		"text": "Trigger: shoot   A: buy, open, hold to board up\nB: reload   Y: switch guns   Hold left grip: sprint\nSwing left hand: knife"})
 	var request := {"id_panel": PANEL, "elements": els}
 	if _run({"cmd": "ui_get", "id_panel": PANEL}).get("ok", false):
 		request["cmd"] = "ui_update"
@@ -542,17 +720,35 @@ func _window_text() -> String:
 	var diff: String = settings["difficulty"]
 	var record := "Best on %s: round %d" % [DIFF_LABELS[diff], int(best.get(diff, 0))] if best.has(diff) else "No rounds held on %s yet" % DIFF_LABELS[diff]
 	if running:
-		return "Round %d, %d points.\n%s" % [round_number, points, record]
+		return "%s, round %d, %d points. The game waits while this is open.\n%s" % [_map["name"], round_number, points, record]
 	if not results.is_empty():
 		return "Overrun on round %d. %d kills (%d to the head), %d points earned.\n%s" % [
 			results["round"], results["kills"], results["headshots"], results["earned"], record]
-	return "Hold the old lodge against the dead, round after round.\n%s" % record
+	return "Hold out against the dead, round after round.\n%s" % record
+
+
+# Switches the map; the buildings are put up again if you're in the world.
+func _use_map(id: String) -> void:
+	if settings["map"] == id:
+		return
+	settings["map"] = id
+	_map = MAPS[id]
+	if _arena != null:
+		_stage_off()
+		_stage_on()
 
 
 # --- Settings ----------------------------------------------------------------------
 
 func _set_command(request: Dictionary) -> Dictionary:
 	var changed := []
+	if request.has("map"):
+		if not request["map"] in MAPS:
+			return {"ok": false, "error": "\"map\" must be one of %s" % ", ".join(MAP_ORDER)}
+		if running and request["map"] != settings["map"]:
+			return {"ok": false, "error": "end the game first to change the map"}
+		_use_map(request["map"])
+		changed.append("map")
 	if request.has("difficulty"):
 		if not request["difficulty"] in DIFFICULTIES:
 			return {"ok": false, "error": "\"difficulty\" must be easy, normal or hard"}
@@ -575,7 +771,7 @@ func _set_command(request: Dictionary) -> Dictionary:
 		settings["sounds"] = on
 		changed.append("sounds")
 	if changed.is_empty():
-		return {"ok": false, "error": "give difficulty, max_zombies or sounds"}
+		return {"ok": false, "error": "give map, difficulty, max_zombies or sounds"}
 	_save_settings()
 	if _lib:
 		_lib.touch(self)
@@ -592,6 +788,8 @@ func _load_settings() -> void:
 		return
 	var saved = got.get("settings", {})
 	if typeof(saved) == TYPE_DICTIONARY:
+		if saved.get("map") in MAPS:
+			_use_map(saved["map"])
 		if saved.get("difficulty") in DIFFICULTIES:
 			settings["difficulty"] = saved["difficulty"]
 		if typeof(saved.get("max_zombies")) in [TYPE_INT, TYPE_FLOAT]:
@@ -677,6 +875,15 @@ func _on_world_changed(project: String, _folder: String) -> void:
 # --- Starting and ending -------------------------------------------------------------
 
 func _start(request: Dictionary) -> Dictionary:
+	if request.has("map"):
+		if not request["map"] in MAPS:
+			return {"ok": false, "error": "\"map\" must be one of %s" % ", ".join(MAP_ORDER)}
+		if not running:
+			_use_map(request["map"])
+		elif request["map"] != settings["map"]:
+			_end_game(false)
+			_use_map(request["map"])
+		_save_settings()
 	if request.has("difficulty"):
 		if not request["difficulty"] in DIFFICULTIES:
 			return {"ok": false, "error": "\"difficulty\" must be easy, normal or hard"}
@@ -695,6 +902,7 @@ func _start(request: Dictionary) -> Dictionary:
 	_stage_on()
 	_reset_lodge()
 	points = START_POINTS
+	_stamina = SPRINT_TIME
 	health = HEALTH
 	kills = 0
 	headshots = 0
@@ -720,7 +928,7 @@ func _start(request: Dictionary) -> Dictionary:
 	_trigger = false
 	_use_held = false
 	_hit_t = 99.0
-	_player_room = "hall"
+	_player_room = _map["start"]
 	_move_player_to(Vector3.ZERO)
 	_hold_gear(true)
 	_wear_shield(false)
@@ -750,6 +958,9 @@ func _stop(_request: Dictionary) -> Dictionary:
 func _end_game(overrun: bool) -> void:
 	var was := running
 	running = false
+	_held = false
+	_sprint_held = false
+	_sprint(false)
 	set_process(false)
 	_trigger = false
 	_use_held = false
@@ -797,7 +1008,7 @@ func _status(_request: Dictionary) -> Dictionary:
 	var held := []
 	for g in guns:
 		held.append({"gun": g["id"], "name": _spec(g)["name"], "forged": g.get("up", false), "mag": g["mag"], "reserve": g["reserve"]})
-	return {"ok": true, "running": running, "round": round_number, "points": points, "health": health, "max_health": _max_health(),
+	return {"ok": true, "running": running, "held": _held, "map": settings["map"], "round": round_number, "points": points, "health": health, "max_health": _max_health(),
 		"guns": held, "in_hand": guns[gun_index]["id"] if gun_index < guns.size() else "", "tonics": tonics.duplicate(), "power": power, "parts": parts.size(), "shield": shield,
 		"effects": effects.duplicate(), "downed": downed, "drops": _drops.map(func(d): return d["kind"]), "anvil": _anvil_state,
 		"open_rooms": open_rooms.keys(), "boards": planks.duplicate(), "alive": _zombies.size(), "to_come": _to_spawn,
@@ -840,6 +1051,8 @@ func _stage_on() -> void:
 	add_child(_arena)  # its own, not World's: nothing to save or select
 	_place_arena()
 	_build_lodge()
+	if _lib and _lib.has_method("add_app_things"):
+		_lib.call("add_app_things", self)
 
 
 func _stage_off() -> void:
@@ -853,6 +1066,10 @@ func _stage_off() -> void:
 	_swapped.clear()
 	_hold_gear(false)
 	if _arena != null and is_instance_valid(_arena):
+		# Out of the tree now, not at the end of the frame: a new map's pieces
+		# are built straight after, with the same names.
+		if _arena.get_parent():
+			_arena.get_parent().remove_child(_arena)
 		_arena.queue_free()
 	_arena = null
 	_zombie_mm = null
@@ -894,14 +1111,14 @@ func _place_arena() -> void:
 
 func _build_lodge() -> void:
 	# Ground, and each room's floorboards.
-	_box(_arena, Vector3(90.0, 0.02, 90.0), Vector3(0.0, -0.02, 0.0), _mats["ground"])
-	for room in ROOMS:
-		var r: Array = ROOMS[room]
-		_box(_arena, Vector3(r[2], 0.02, r[3]), Vector3(r[0] + r[2] / 2.0, 0.0, r[1] + r[3] / 2.0), _mats["boards"] if room != "yard" else _mats["dirt"])
+	_tag(_box(_arena, Vector3(90.0, 0.02, 90.0), Vector3(0.0, -0.02, 0.0), _mats["ground"]), "ground")
+	for room in _map["rooms"]:
+		var r: Array = _map["rooms"][room]
+		_tag(_box(_arena, Vector3(r[2], 0.02, r[3]), Vector3(r[0] + r[2] / 2.0, 0.0, r[1] + r[3] / 2.0), _mats["dirt"] if room in _map["outdoor"] else _mats["boards"]), "floor_" + room)
 	# Walls, with gaps for the doors and windows: one MultiMesh.
 	var parts := []  # [size, centre]
-	for room in ROOMS:
-		var r: Array = ROOMS[room]
+	for room in _map["rooms"]:
+		var r: Array = _map["rooms"][room]
 		var x0: float = r[0]
 		var z0: float = r[1]
 		var x1: float = r[0] + r[2]
@@ -924,12 +1141,23 @@ func _build_lodge() -> void:
 		_walls.append(AABB(at - size / 2.0, size))
 	var walls := MultiMeshInstance3D.new()
 	walls.name = "walls"
+	_tag(walls, "walls")
 	walls.multimesh = mm
 	walls.material_override = _mats["wall"]
 	_arena.add_child(walls)
+	# Obstacles outside: they stop shots and the dead walk round them.
+	var obstacles: Array = _map.get("obstacles", [])
+	for oi in obstacles.size():
+		var o: Array = obstacles[oi]
+		var size := Vector3(o[2], o[4], o[3])
+		var at := Vector3(o[0], o[4] / 2.0, o[1])
+		_tag(_box(_arena, size, at, _mats["trunk"]), "obstacle_%d" % oi)
+		_walls.append(AABB(at - size / 2.0, size))
 	# Lanterns: glowing, no real light.
-	for at in [Vector3(-3.85, 2.2, -2.8), Vector3(3.85, 2.2, 1.5), Vector3(-3.85, 2.2, 6.2), Vector3(0.0, 2.2, -3.85)]:
-		_box(_arena, Vector3(0.12, 0.2, 0.12), at, _mats["lantern"])
+	var lanterns: Array = _map["lanterns"]
+	for li in lanterns.size():
+		var at: Array = lanterns[li]
+		_tag(_box(_arena, Vector3(0.12, 0.2, 0.12), Vector3(at[0], at[1], at[2]), _mats["lantern"]), "lantern_%d" % li)
 	_build_trees()
 	_build_windows()
 	_build_doors()
@@ -943,6 +1171,7 @@ func _build_lodge() -> void:
 	_zombie_mm.instance_count = POOL
 	var dead := MultiMeshInstance3D.new()
 	dead.name = "dead"
+	_tag(dead, "dead")  # texturing it skins every one of them
 	dead.multimesh = _zombie_mm
 	dead.material_override = _mats["zombie"]
 	dead.custom_aabb = AABB(Vector3(-60, -5, -60), Vector3(120, 15, 120))  # never culled: they move
@@ -976,6 +1205,7 @@ func _build_lodge() -> void:
 	_boom.material_override = _mats["boom"]
 	_boom.visible = false
 	_arena.add_child(_boom)
+	_build_grid()
 	_reset_lodge()
 
 
@@ -984,12 +1214,12 @@ func _wall_line(parts: Array, a: Vector3, b: Vector3) -> void:
 	var along := (b - a).normalized()
 	var length := a.distance_to(b)
 	var gaps := []  # [from, to, kind]
-	for d in DOORS:
+	for d in _map["doors"]:
 		var at := Vector3(d["at"][0], 0, d["at"][1])
 		var s := (at - a).dot(along)
 		if (at - (a + along * s)).length() < 0.01 and s > 0.0 and s < length:
 			gaps.append([s - DOOR_W / 2.0, s + DOOR_W / 2.0, "door"])
-	for wnd in WINDOWS:
+	for wnd in _map["windows"]:
 		var at := Vector3(wnd["at"][0], 0, wnd["at"][1])
 		var s := (at - a).dot(along)
 		if (at - (a + along * s)).length() < 0.01 and s > 0.0 and s < length:
@@ -1022,8 +1252,9 @@ func _build_trees() -> void:
 	var spots := []
 	while spots.size() < 46:
 		var at := Vector3(rng.randf_range(-28.0, 28.0), 0, rng.randf_range(-28.0, 28.0))
-		if at.x > -10.0 and at.x < 16.0 and at.z > -10.0 and at.z < 16.0:
-			continue  # the clearing round the lodge
+		var c: Array = _map["clearing"]
+		if at.x > c[0] and at.x < c[2] and at.z > c[1] and at.z < c[3]:
+			continue  # the clearing round the buildings
 		spots.append([at, rng.randf_range(0.8, 1.5)])
 	var trunk := CylinderMesh.new()
 	trunk.top_radius = 0.12
@@ -1050,6 +1281,7 @@ func _build_trees() -> void:
 			else:
 				mm.set_instance_transform(i, Transform3D(Basis.from_scale(Vector3(1.6 * s, 5.0 * s, 1.6 * s)), at + Vector3(0, 4.5 * s, 0)))
 		var node := MultiMeshInstance3D.new()
+		_tag(node, "trunks" if part[0] == trunk else "crowns")
 		node.multimesh = mm
 		node.material_override = part[1]
 		node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
@@ -1060,13 +1292,14 @@ func _build_windows() -> void:
 	_plank_nodes.clear()
 	var board := BoxMesh.new()
 	board.size = Vector3(WINDOW_W + 0.2, 0.13, 0.05)
-	for wnd in WINDOWS:
+	for wnd in _map["windows"]:
 		var at := Vector3(wnd["at"][0], 0, wnd["at"][1])
 		var out := Vector3(wnd["out"][0], 0, wnd["out"][1])
 		var yaw := atan2(out.x, out.z)
 		var list := []
 		for i in PLANKS:
 			var p := MeshInstance3D.new()
+			_tag(p, "plank_%s_%d" % [wnd["id"], i])
 			p.mesh = board
 			p.material_override = _mats["plank"]
 			_arena.add_child(p)
@@ -1079,9 +1312,10 @@ func _build_windows() -> void:
 
 func _build_doors() -> void:
 	_debris.clear()
-	for d in DOORS:
+	for d in _map["doors"]:
 		var at := Vector3(d["at"][0], 0, d["at"][1])
 		var pile := Node3D.new()
+		_tag(pile, "debris_" + d["id"])
 		_arena.add_child(pile)
 		pile.position = at
 		var inward0 := _into_room(at, d["rooms"][0])
@@ -1098,7 +1332,7 @@ func _build_doors() -> void:
 			var label := _label(_arena, "", 46, Color(1.0, 0.9, 0.7))
 			label.position = at + inward * 0.55 + Vector3(0, 1.75, 0)
 			label.rotation.y = atan2(inward.x, inward.z)
-			label.text = "Clear the debris\n%s  %d" % [ROOM_NAMES[d["rooms"][1]], d["cost"]]
+			label.text = "Clear the debris\n%s  %d" % [_map["room_names"][d["rooms"][1]], d["cost"]]
 			pile.set_meta("label_" + room, label)
 			_uses.append({"kind": "door", "id": d["id"], "at": at + inward * 0.7, "label": label})
 		_debris[d["id"]] = pile
@@ -1106,24 +1340,26 @@ func _build_doors() -> void:
 
 # The way from a point on a room's wall into that room.
 func _into_room(at: Vector3, room: String) -> Vector3:
-	var r: Array = ROOMS[room]
+	var r: Array = _map["rooms"][room]
 	var mid := Vector3(r[0] + r[2] / 2.0, 0, r[1] + r[3] / 2.0)
 	var d := mid - at
 	return Vector3(signf(d.x), 0, 0) if absf(d.x) * r[3] > absf(d.z) * r[2] else Vector3(0, 0, signf(d.z))
 
 
 func _build_wall_things() -> void:
-	for spot in WALL_GUNS:
+	for spot in _map["wall_guns"]:
 		var g: Dictionary = GUNS[spot["gun"]]
 		var at := Vector3(spot["at"][0], 0, spot["at"][1])
 		var inward := Vector3(spot["in"][0], 0, spot["in"][1])
 		var yaw := atan2(inward.x, inward.z)
 		var board := _box(_arena, Vector3(0.9, 0.5, 0.03), at + inward * (WALL_T / 2.0 + 0.02) + Vector3(0, 1.45, 0), _mats["chalkboard"])
+		_tag(board, "board_" + spot["gun"])
 		board.rotation.y = yaw
 		# The gun's outline in chalk: its own shape, flat and pale.
 		var outline := MeshInstance3D.new()
 		outline.mesh = _gun_mesh_for(spot["gun"])
 		outline.material_override = _mats["chalk"]
+		_tag(outline, "outline_" + spot["gun"])
 		_arena.add_child(outline)
 		outline.transform = Transform3D(Basis(Vector3.UP, yaw + PI / 2.0) * Basis.from_scale(Vector3(1.2, 1.2, 1.2) * minf(1.0, 0.36 / g["len"])),
 			at + inward * (WALL_T / 2.0 + 0.06) + Vector3(0, 1.5, 0))
@@ -1131,25 +1367,29 @@ func _build_wall_things() -> void:
 		label.position = at + inward * (WALL_T / 2.0 + 0.05) + Vector3(0, 1.08, 0)
 		label.rotation.y = yaw
 		_uses.append({"kind": "gun", "id": spot["gun"], "at": at + inward * 0.7, "label": label})
-	for spot in TONIC_SPOTS + [SECOND_WIND_SPOT]:
+	for spot in _map["tonics"] + [_map["second_wind"]]:
 		var t: Dictionary = TONICS[spot["tonic"]]
 		var at := Vector3(spot["at"][0], 0, spot["at"][1])
 		var inward := Vector3(spot["in"][0], 0, spot["in"][1])
 		var yaw := atan2(inward.x, inward.z)
 		var body := _box(_arena, Vector3(0.7, 1.8, 0.45), at + inward * (WALL_T / 2.0 + 0.24) + Vector3(0, 0.9, 0), _mats["machine"])
+		_tag(body, "machine_" + spot["tonic"])
 		body.rotation.y = yaw
 		var glow := _box(_arena, Vector3(0.5, 0.55, 0.02), at + inward * (WALL_T / 2.0 + 0.47) + Vector3(0, 1.3, 0), _flat_glow(t["color"]))
+		_tag(glow, "glow_" + spot["tonic"])
 		glow.rotation.y = yaw
 		var label := _label(_arena, "%s  %d\n%s" % [t["name"], t["cost"], t["does"]], 40, t["color"].lightened(0.4))
 		label.position = at + inward * (WALL_T / 2.0 + 0.5) + Vector3(0, 0.75, 0)
 		label.rotation.y = yaw
 		_uses.append({"kind": "tonic", "id": spot["tonic"], "at": at + inward * 0.9, "label": label})
-	var c_at := Vector3(CRATE_SPOT["at"][0], 0, CRATE_SPOT["at"][1])
-	var c_in := Vector3(CRATE_SPOT["in"][0], 0, CRATE_SPOT["in"][1])
+	var c_at := Vector3(_map["crate"]["at"][0], 0, _map["crate"]["at"][1])
+	var c_in := Vector3(_map["crate"]["in"][0], 0, _map["crate"]["in"][1])
 	var c_yaw := atan2(c_in.x, c_in.z)
 	var chest := _box(_arena, Vector3(1.2, 0.6, 0.6), c_at + c_in * (WALL_T / 2.0 + 0.35) + Vector3(0, 0.3, 0), _mats["crate"])
+	_tag(chest, "crate")
 	chest.rotation.y = c_yaw
 	var rim := _box(_arena, Vector3(1.24, 0.04, 0.64), c_at + c_in * (WALL_T / 2.0 + 0.35) + Vector3(0, 0.6, 0), _flat_glow(Color(0.95, 0.75, 0.2)))
+	_tag(rim, "crate_rim")
 	rim.rotation.y = c_yaw
 	_crate_label = _label(_arena, "Lucky Crate\n%d" % CRATE_COST, 52, Color(1.0, 0.85, 0.35))
 	_crate_label.position = c_at + c_in * (WALL_T / 2.0 + 0.35) + Vector3(0, 1.05, 0)
@@ -1167,14 +1407,16 @@ func _build_wall_things() -> void:
 
 # Puts the boards and debris back for a new game.
 func _reset_lodge() -> void:
-	open_rooms = {"hall": true}
-	for wnd in WINDOWS:
+	open_rooms = {_map["start"]: true}
+	_in_dirty = true
+	planks.clear()
+	for wnd in _map["windows"]:
 		planks[wnd["id"]] = PLANKS
 		_show_planks(wnd["id"])
 	for id in _debris:
 		if is_instance_valid(_debris[id]):
 			_debris[id].visible = true
-			for room in ROOMS:
+			for room in _map["rooms"]:
 				if _debris[id].has_meta("label_" + room):
 					_debris[id].get_meta("label_" + room).visible = true
 	_crate_state = "idle"
@@ -1230,9 +1472,9 @@ func _max_health() -> float:
 func _allowed_boxes() -> Array:
 	var boxes := []
 	for room in open_rooms:
-		var r: Array = ROOMS[room]
+		var r: Array = _map["rooms"][room]
 		boxes.append(Rect2(r[0] + MARGIN, r[1] + MARGIN, r[2] - 2.0 * MARGIN, r[3] - 2.0 * MARGIN))
-	for d in DOORS:
+	for d in _map["doors"]:
 		if open_rooms.has(d["rooms"][0]) and open_rooms.has(d["rooms"][1]):
 			var w := DOOR_W / 2.0 - MARGIN
 			boxes.append(Rect2(d["at"][0] - w, d["at"][1] - w, 2.0 * w, 2.0 * w).grow(MARGIN * 1.5))
@@ -1257,8 +1499,8 @@ func _keep_in() -> void:
 
 
 func _room_at(p: Vector3) -> String:
-	for room in ROOMS:
-		var r: Array = ROOMS[room]
+	for room in _map["rooms"]:
+		var r: Array = _map["rooms"][room]
 		if p.x >= r[0] and p.x <= r[0] + r[2] and p.z >= r[1] and p.z <= r[1] + r[3]:
 			return room
 	return ""
@@ -1344,7 +1586,8 @@ func _get_up() -> void:
 # --- Each frame ----------------------------------------------------------------------
 
 func _process(delta: float) -> void:
-	if not running or _arena == null:
+	if not running or _arena == null or _held:
+		_sprint(false)
 		set_process(false)
 		return
 	_keep_in()
@@ -1352,6 +1595,9 @@ func _process(delta: float) -> void:
 	var room := _room_at(here)
 	if not room.is_empty() and open_rooms.has(room):
 		_player_room = room
+	var cell := _cell_of(here)
+	if _in_dirty or cell != _in_from:
+		_make_in_field(cell)
 	# Health comes back.
 	_hit_t += delta
 	var wait := REGEN_AFTER * (0.5 if "mending_moss" in tonics else 1.0)
@@ -1359,6 +1605,7 @@ func _process(delta: float) -> void:
 		health = minf(_max_health(), health + REGEN_RATE * (2.0 if "mending_moss" in tonics else 1.0) * delta)
 		_update_hud()
 	_show_hurt()
+	_sprint_frame(delta, _controls != null and (_controls.call("stick", "walk") as Vector2).length() > 0.3)
 	_rounds(delta)
 	_move_dead(delta, here)
 	if not running:
@@ -1462,7 +1709,7 @@ func _speed_for_round() -> float:
 # (more often your own room's). Whether one did.
 func _spawn_one() -> bool:
 	var choices := []
-	for wnd in WINDOWS:
+	for wnd in _map["windows"]:
 		if open_rooms.has(wnd["room"]):
 			for i in (3 if wnd["room"] == _player_room else 1):
 				choices.append(wnd)
@@ -1470,10 +1717,12 @@ func _spawn_one() -> bool:
 		return false
 	var wnd: Dictionary = choices[_rng.randi() % choices.size()]
 	var out := Vector3(wnd["out"][0], 0, wnd["out"][1])
-	var side := Vector3(-out.z, 0, out.x)
-	var at := Vector3(wnd["at"][0], 0, wnd["at"][1]) + out * _rng.randf_range(3.0, 5.0) + side * _rng.randf_range(-2.0, 2.0)
+	var at := _spawn_spot(wnd)
+	var to_window := Vector3(wnd["at"][0], 0, wnd["at"][1]) - at
+	if to_window.length() > 0.1:
+		out = -to_window.normalized()
 	var z := {"slot": _free_slots.pop_back(), "state": "rise", "pos": at, "yaw": atan2(-out.x, -out.z), "hp": _round_hp,
-		"speed": _speed_for_round(), "room": wnd["room"], "window": wnd["id"], "t": 0.0, "cd": 0.0, "chill": 0.0,
+		"speed": _speed_for_round(), "room": wnd["room"], "window": wnd["id"], "t": 0.0, "cd": 0.0, "chill": 0.0, "burn": 0.0, "snare": 0.0, "swing": -1.0,
 		"groan": _rng.randf_range(1.0, 6.0), "flash": 0.0, "y": -1.8, "phase": _rng.randf() * TAU, "fall": 0.0}
 	_zombies.append(z)
 	_place_zombie(z)
@@ -1482,11 +1731,13 @@ func _spawn_one() -> bool:
 
 # Puts one in the game now (tests, and a later debug command): at a spot
 # in a room, already inside.
-func add_zombie_inside(spot: Vector3, room := "hall", hp := -1.0) -> Dictionary:
+func add_zombie_inside(spot: Vector3, room := "", hp := -1.0) -> Dictionary:
 	if _free_slots.is_empty():
 		return {}
+	if room.is_empty():
+		room = _room_at(spot) if not _room_at(spot).is_empty() else _map["start"]
 	var z := {"slot": _free_slots.pop_back(), "state": "chase", "pos": spot, "yaw": 0.0, "hp": hp if hp > 0.0 else _round_hp,
-		"speed": SPEEDS["walk"], "room": room, "window": "", "t": 0.0, "cd": ATTACK_TIME, "chill": 0.0, "groan": 5.0,
+		"speed": SPEEDS["walk"], "room": room, "window": "", "t": 0.0, "cd": ATTACK_TIME, "chill": 0.0, "burn": 0.0, "snare": 0.0, "swing": -1.0, "groan": 5.0,
 		"flash": 0.0, "y": 0.0, "phase": 0.0, "fall": 0.0}
 	_zombies.append(z)
 	_place_zombie(z)
@@ -1502,7 +1753,13 @@ func _move_dead(delta: float, you: Vector3) -> void:
 		z["t"] += delta
 		z["flash"] = maxf(0.0, z["flash"] - delta)
 		z["chill"] = maxf(0.0, z["chill"] - delta)
-		var speed: float = z["speed"] * (0.4 if z["chill"] > 0.0 else 1.0)
+		z["snare"] = maxf(0.0, z["snare"] - delta)
+		if z["burn"] > 0.0 and z["state"] != "dying":
+			z["burn"] = maxf(0.0, z["burn"] - delta)
+			z["hp"] -= BURN_DPS * delta
+			if z["hp"] <= 0.0:
+				_kill(z, false, false)
+		var speed: float = z["speed"] * (0.4 if z["chill"] > 0.0 else 1.0) * (0.0 if z["snare"] > 0.0 else 1.0)
 		match z["state"]:
 			"rise":
 				z["y"] = lerpf(-1.8, 0.0, minf(1.0, z["t"] / RISE_TIME))
@@ -1512,7 +1769,10 @@ func _move_dead(delta: float, you: Vector3) -> void:
 				var wnd := _window(z["window"])
 				var out := Vector3(wnd["out"][0], 0, wnd["out"][1])
 				var spot := Vector3(wnd["at"][0], 0, wnd["at"][1]) + out * 0.55
-				if _walk_to(z, spot, speed, delta):
+				var step := _path_step(_out_fields.get(z["window"], PackedInt32Array()), z["pos"])
+				if step != Vector3.INF:
+					_walk_to(z, step, speed, delta)
+				elif _walk_to(z, spot, speed, delta):
 					_set_state(z, "tear")
 			"tear":
 				var wnd := _window(z["window"])
@@ -1538,14 +1798,16 @@ func _move_dead(delta: float, you: Vector3) -> void:
 			"chase":
 				if _stuck(z, delta):
 					continue
+				var now_in := _room_at(z["pos"])
+				if not now_in.is_empty() and open_rooms.has(now_in):
+					z["room"] = now_in
 				var target := you_flat
-				if z["room"] != _player_room:
-					var door := _door_toward(z["room"], _player_room)
-					if not door.is_empty():
-						target = Vector3(door["at"][0], 0, door["at"][1])
-						if (z["pos"] as Vector3).distance_to(target) < 0.4:
-							z["room"] = door["rooms"][1] if door["rooms"][0] == z["room"] else door["rooms"][0]
-				if (z["pos"] as Vector3).distance_to(you_flat) > ATTACK_RANGE * 0.7:
+				var step := _path_step(_in_field, z["pos"])
+				if step != Vector3.INF:
+					target = step
+				if z["swing"] >= 0.0:
+					pass  # stands its ground to swipe
+				elif (z["pos"] as Vector3).distance_to(you_flat) > ATTACK_RANGE * 0.7:
 					_walk_to(z, target, speed, delta)
 				else:
 					var to: Vector3 = you_flat - z["pos"]
@@ -1559,13 +1821,27 @@ func _move_dead(delta: float, you: Vector3) -> void:
 					_free_slots.append(z["slot"])
 					_zombies.erase(z)
 					continue
-		if z["state"] in ["tear", "chase"]:
+		# A swipe: it rears back for SWING_TIME, then lunges; it only lands if
+		# you're still in reach then.
+		if z["state"] in ["tear", "chase"] and z["snare"] <= 0.0:
 			z["cd"] -= delta
-			if (z["pos"] as Vector3).distance_to(you_flat) < ATTACK_RANGE and z["cd"] <= 0.0:
-				z["cd"] = ATTACK_TIME
-				_struck_by(z)
-				if not running:
-					return
+			var reach: float = (z["pos"] as Vector3).distance_to(you_flat)
+			if z["swing"] >= 0.0:
+				var was: float = z["swing"]
+				z["swing"] += delta
+				if was < SWING_TIME and z["swing"] >= SWING_TIME:
+					z["cd"] = ATTACK_TIME
+					if reach < ATTACK_RANGE * 1.1:
+						_struck_by(z)
+						if not running:
+							return
+				if z["swing"] >= SWING_TIME + SWING_BACK:
+					z["swing"] = -1.0
+			elif reach < ATTACK_RANGE and z["cd"] <= 0.0:
+				z["swing"] = 0.0
+				_sound("groan", _arena.to_global(z["pos"] + Vector3(0, 1.5, 0)), 0.5, 1.4)
+		elif z["swing"] >= 0.0:
+			z["swing"] = -1.0  # held by roots, or climbing: the swipe's lost
 		if z["state"] != "dying":
 			z["groan"] -= delta
 			if z["groan"] <= 0.0:
@@ -1575,6 +1851,172 @@ func _move_dead(delta: float, you: Vector3) -> void:
 					_sound("groan", _arena.to_global(z["pos"] + Vector3(0, 1.5, 0)), 0.7, _rng.randf_range(0.85, 1.15))
 		_place_zombie(z)
 	_spread_out()
+
+
+# --- Sprint -----------------------------------------------------------------------------
+
+# Holding the left grip while walking runs (controls.gd's speed_boost),
+# until the stamina's gone; it comes back after SPRINT_REST of not running.
+func _sprint_frame(delta: float, walking: bool) -> void:
+	if _sprint_held and walking and _stamina > 0.0 and not downed:
+		_stamina = maxf(0.0, _stamina - delta)
+		_rest_t = 0.0
+		_sprint(true)
+		if _stamina == 0.0:
+			_pulse("left", 0.4, 0.15)  # out of breath
+		return
+	_sprint(false)
+	_rest_t += delta
+	if _rest_t >= SPRINT_REST:
+		_stamina = minf(SPRINT_TIME, _stamina + delta)
+
+
+func _sprint(on: bool) -> void:
+	if on == _sprinting:
+		return
+	_sprinting = on
+	if _controls and _controls.has_method("speed_boost"):
+		_controls.call("speed_boost", SPRINT_BOOST if on else 1.0)
+
+
+# --- Pathing --------------------------------------------------------------------------
+# The clearing is a grid of CELL-metre squares. Walls that reach the ground
+# (window sills too) and the obstacles block the cells round them (by a
+# body's width). Outside, each window has a field made once when the
+# buildings go up: how many steps each cell is from that window. Inside,
+# one field leads to you, made again only when you step into another cell
+# or a door opens. A zombie steps to the neighbouring cell nearest its goal
+# (diagonals only past free corners), so it walks round whatever's in the
+# way; next to its goal it walks straight there.
+
+const CELL := 0.5
+const BODY := 0.25               # how far a zombie's middle keeps off a wall
+
+
+func _build_grid() -> void:
+	var c: Array = _map["clearing"]
+	_grid_at = Vector2(c[0], c[1])
+	_gw = int(ceil((c[2] - c[0]) / CELL))
+	_gh = int(ceil((c[3] - c[1]) / CELL))
+	_blocked = PackedByteArray()
+	_blocked.resize(_gw * _gh)
+	_cell_room = PackedInt32Array()
+	_cell_room.resize(_gw * _gh)
+	_cell_room.fill(-1)
+	var rooms: Array = _map["rooms"].keys()
+	for ri in rooms.size():
+		var r: Array = _map["rooms"][rooms[ri]]
+		_mark(Rect2(r[0], r[1], r[2], r[3]), _cell_room, ri)
+	for box: AABB in _walls:
+		if box.position.y < 0.3:  # reaches the ground
+			_mark(Rect2(box.position.x, box.position.z, box.size.x, box.size.z).grow(BODY), _blocked, 1)
+	_out_fields.clear()
+	for wnd in _map["windows"]:
+		var out := Vector3(wnd["out"][0], 0, wnd["out"][1])
+		var seed := _cell_of(Vector3(wnd["at"][0], 0, wnd["at"][1]) + out * 0.55)
+		_out_fields[wnd["id"]] = _field(seed, func(i): return _cell_room[i] == -1)
+	_in_from = -2
+	_in_dirty = true
+
+
+# Sets every cell whose middle is in rect.
+func _mark(rect: Rect2, cells, value: int) -> void:
+	var x0 := maxi(0, int(ceil((rect.position.x - _grid_at.x) / CELL - 0.5)))
+	var x1 := mini(_gw - 1, int(floor((rect.end.x - _grid_at.x) / CELL - 0.5)))
+	var z0 := maxi(0, int(ceil((rect.position.y - _grid_at.y) / CELL - 0.5)))
+	var z1 := mini(_gh - 1, int(floor((rect.end.y - _grid_at.y) / CELL - 0.5)))
+	for z in range(z0, z1 + 1):
+		for x in range(x0, x1 + 1):
+			cells[z * _gw + x] = value
+
+
+func _cell_of(p: Vector3) -> int:
+	var x := int(floor((p.x - _grid_at.x) / CELL))
+	var z := int(floor((p.z - _grid_at.y) / CELL))
+	if x < 0 or z < 0 or x >= _gw or z >= _gh:
+		return -1
+	return z * _gw + x
+
+
+func _cell_middle(i: int) -> Vector3:
+	return Vector3(_grid_at.x + (i % _gw + 0.5) * CELL, 0.0, _grid_at.y + (i / _gw + 0.5) * CELL)
+
+
+# Steps from seed to each free cell where may(i) is true (-1: can't get there).
+func _field(seed: int, may: Callable) -> PackedInt32Array:
+	var dist := PackedInt32Array()
+	dist.resize(_gw * _gh)
+	dist.fill(-1)
+	if seed < 0:
+		return dist
+	dist[seed] = 0
+	var queue := PackedInt32Array([seed])
+	var head := 0
+	while head < queue.size():
+		var i := queue[head]
+		head += 1
+		var x := i % _gw
+		for n in [i - 1 if x > 0 else -1, i + 1 if x < _gw - 1 else -1, i - _gw, i + _gw]:
+			if n < 0 or n >= dist.size() or dist[n] != -1 or _blocked[n] == 1 or not may.call(n):
+				continue
+			dist[n] = dist[i] + 1
+			queue.append(n)
+	return dist
+
+
+func _make_in_field(cell: int) -> void:
+	_in_from = cell
+	_in_dirty = false
+	var rooms: Array = _map["rooms"].keys()
+	var open := []
+	for ri in rooms.size():
+		open.append(open_rooms.has(rooms[ri]))
+	_in_field = _field(cell, func(i): return _cell_room[i] >= 0 and open[_cell_room[i]])
+
+
+# Where to walk next on a field: the middle of the neighbouring cell nearest
+# the goal, or Vector3.INF when off the field or a cell or two from the goal
+# (then walk straight to it).
+func _path_step(field: PackedInt32Array, from: Vector3) -> Vector3:
+	var i := _cell_of(from)
+	if field.is_empty() or i < 0 or field[i] <= 1:
+		return Vector3.INF
+	var x := i % _gw
+	var z := i / _gw
+	var best := i
+	for dz in [-1, 0, 1]:
+		for dx in [-1, 0, 1]:
+			var nx: int = x + dx
+			var nz: int = z + dz
+			if (dx == 0 and dz == 0) or nx < 0 or nz < 0 or nx >= _gw or nz >= _gh:
+				continue
+			var n: int = nz * _gw + nx
+			if field[n] < 0:
+				continue
+			if dx != 0 and dz != 0 and (field[z * _gw + nx] < 0 or field[nz * _gw + x] < 0):
+				continue  # no cutting a corner
+			if field[n] < field[best] or (field[n] == field[best] and dx != 0 and dz != 0):
+				best = n
+	return _cell_middle(best) if best != i else Vector3.INF
+
+
+# Where one bound for this window comes up: one of the two spawns nearest
+# it (by walking), a little to one side.
+func _spawn_spot(wnd: Dictionary) -> Vector3:
+	var field: PackedInt32Array = _out_fields.get(wnd["id"], PackedInt32Array())
+	var near := []
+	for sp in _map.get("spawns", []):
+		var i := _cell_of(Vector3(sp[0], 0, sp[1]))
+		if not field.is_empty() and i >= 0 and field[i] >= 0:
+			near.append([field[i], Vector3(sp[0], 0, sp[1])])
+	if near.is_empty():  # no spawns that reach it: just outside, as before
+		var out := Vector3(wnd["out"][0], 0, wnd["out"][1])
+		return Vector3(wnd["at"][0], 0, wnd["at"][1]) + out * _rng.randf_range(3.0, 5.0)
+	near.sort_custom(func(a, b): return a[0] < b[0])
+	var at: Vector3 = near[_rng.randi() % mini(2, near.size())][1]
+	var nudged := at + Vector3(_rng.randf_range(-1.0, 1.0), 0, _rng.randf_range(-1.0, 1.0))
+	var ni := _cell_of(nudged)
+	return nudged if ni >= 0 and field[ni] >= 0 else at
 
 
 # --- Fixes ---------------------------------------------------------------------------------
@@ -1592,7 +2034,7 @@ func _stuck(z: Dictionary, delta: float) -> bool:
 	z["still"] += delta
 	if z["still"] < STUCK_TIME or pos.distance_to(Vector3(_cam_local().x, 0, _cam_local().z)) < ATTACK_RANGE * 1.5:
 		return false
-	var choices := WINDOWS.filter(func(w): return w["room"] == _player_room)
+	var choices: Array = _map["windows"].filter(func(w): return w["room"] == _player_room)
 	if choices.is_empty():
 		return false
 	var wnd: Dictionary = choices[_rng.randi() % choices.size()]
@@ -1625,33 +2067,56 @@ func _walk_to(z: Dictionary, spot: Vector3, speed: float, delta: float) -> bool:
 	return d - step < 0.05
 
 
-# The dead inside push apart a little, so they don't stand in one another.
+# The dead push apart, so they never stand in one another: inside, on the
+# way to a window, and at it. One tearing at a window keeps its place, so
+# the next waits behind it (a queue, not a stack). Nobody is pushed into a
+# wall or out of its room.
 func _spread_out() -> void:
 	for i in _zombies.size():
 		var a: Dictionary = _zombies[i]
-		if a["state"] != "chase":
+		if not a["state"] in ["chase", "approach", "tear"]:
 			continue
 		for j in range(i + 1, _zombies.size()):
 			var b: Dictionary = _zombies[j]
-			if b["state"] != "chase":
+			if not b["state"] in ["chase", "approach", "tear"]:
 				continue
 			var d: Vector3 = b["pos"] - a["pos"]
 			d.y = 0.0
 			var l := d.length()
-			if l < ZOMBIE_GAP and l > 0.001:
-				var push := d / l * (ZOMBIE_GAP - l) * 0.5
-				a["pos"] -= push
-				b["pos"] += push
-		a["pos"] = _inside(a["pos"], a["room"])
+			if l >= ZOMBIE_GAP:
+				continue
+			if l < 0.001:
+				d = Vector3(_rng.randf_range(-1, 1), 0, _rng.randf_range(-1, 1))
+				l = maxf(d.length(), 0.001)
+			var push := d / l * (ZOMBIE_GAP - l)
+			var a_moves: bool = a["state"] != "tear"
+			var b_moves: bool = b["state"] != "tear"
+			if a_moves and b_moves:
+				_nudge(a, -push * 0.5)
+				_nudge(b, push * 0.5)
+			elif a_moves:
+				_nudge(a, -push)
+			elif b_moves:
+				_nudge(b, push)
+
+
+func _nudge(z: Dictionary, by: Vector3) -> void:
+	var to: Vector3 = z["pos"] + by
+	if z["state"] == "chase":
+		z["pos"] = _inside(to, z["room"])
+		return
+	var c := _cell_of(to)
+	if c < 0 or _blocked.is_empty() or (_blocked[c] == 0 and _cell_room[c] == -1):
+		z["pos"] = to
 
 
 # Keeps a point in a room (or in an open doorway out of it).
 func _inside(p: Vector3, room: String) -> Vector3:
-	var r: Array = ROOMS[room]
+	var r: Array = _map["rooms"][room]
 	var m := 0.25
 	if p.x >= r[0] + m and p.x <= r[0] + r[2] - m and p.z >= r[1] + m and p.z <= r[1] + r[3] - m:
 		return p
-	for d in DOORS:
+	for d in _map["doors"]:
 		if room in d["rooms"] and open_rooms.has(d["rooms"][0]) and open_rooms.has(d["rooms"][1]):
 			if absf(p.x - d["at"][0]) < DOOR_W / 2.0 and absf(p.z - d["at"][1]) < DOOR_W / 2.0:
 				return p
@@ -1659,41 +2124,26 @@ func _inside(p: Vector3, room: String) -> Vector3:
 
 
 func _window(id: String) -> Dictionary:
-	for wnd in WINDOWS:
+	for wnd in _map["windows"]:
 		if wnd["id"] == id:
 			return wnd
-	return WINDOWS[0]
-
-
-# The open door to go through first from one room toward another ({} if none).
-func _door_toward(from: String, to: String) -> Dictionary:
-	if from == to:
-		return {}
-	var came := {from: {}}
-	var queue := [from]
-	while not queue.is_empty():
-		var room: String = queue.pop_front()
-		for d in DOORS:
-			if not (room in d["rooms"]) or not (open_rooms.has(d["rooms"][0]) and open_rooms.has(d["rooms"][1])):
-				continue
-			var other: String = d["rooms"][1] if d["rooms"][0] == room else d["rooms"][0]
-			if came.has(other):
-				continue
-			came[other] = {"door": d, "from": room}
-			if other == to:
-				var step: Dictionary = came[other]
-				while step["from"] != from:
-					step = came[step["from"]]
-				return step["door"]
-			queue.append(other)
-	return {}
+	return _map["windows"][0]
 
 
 func _place_zombie(z: Dictionary) -> void:
 	if _zombie_mm == null:
 		return
 	var sway := sin(z["phase"]) * 0.08 if z["state"] in ["chase", "approach"] else 0.0
-	var basis := Basis(Vector3.UP, z["yaw"]) * Basis(Vector3.BACK, sway) * Basis(Vector3.RIGHT, -z["fall"] * PI / 2.0)
+	var lean := 0.0  # the swipe: back as it winds up, forward as it lunges, then up again
+	var sw: float = z.get("swing", -1.0)
+	if sw >= 0.0:
+		if sw < SWING_TIME * 0.75:
+			lean = 0.3 * sw / (SWING_TIME * 0.75)
+		elif sw < SWING_TIME:
+			lean = lerpf(0.3, -0.45, (sw - SWING_TIME * 0.75) / (SWING_TIME * 0.25))
+		else:
+			lean = lerpf(-0.45, 0.0, minf(1.0, (sw - SWING_TIME) / SWING_BACK))
+	var basis := Basis(Vector3.UP, z["yaw"]) * Basis(Vector3.BACK, sway) * Basis(Vector3.RIGHT, lean - z["fall"] * PI / 2.0)
 	var at: Vector3 = z["pos"] + Vector3(0, z["y"] + absf(sway) * 0.3, 0)
 	_zombie_mm.set_instance_transform(z["slot"], Transform3D(basis, at))
 	var tint := Color(1, 1, 1)
@@ -1701,6 +2151,10 @@ func _place_zombie(z: Dictionary) -> void:
 		tint = Color(1.8, 0.7, 0.6)
 	elif z["chill"] > 0.0:
 		tint = Color(0.6, 0.85, 1.6)
+	elif z.get("burn", 0.0) > 0.0:
+		tint = Color(1.8, 0.8, 0.3)
+	elif z.get("snare", 0.0) > 0.0:
+		tint = Color(0.6, 1.3, 0.5)
 	_zombie_mm.set_instance_color(z["slot"], tint)
 
 
@@ -1711,15 +2165,23 @@ func _hide_slot(slot: int) -> void:
 
 # --- Shooting -----------------------------------------------------------------------------
 
-# A held gun's numbers: a forged one hits twice as hard, goes through one
-# more, and holds half as much again (twice the spare ammo).
+# A held gun's numbers: a forged one has its own name, hits twice as hard,
+# goes through one more, holds half as much again (twice the spare ammo),
+# and its oddity (chain, chill, splash, fire, toll, roots) goes further.
 func _spec(g: Dictionary) -> Dictionary:
 	var id: String = g["id"]
 	if not g.get("up", false):
 		return GUNS[id]
 	if not _up_specs.has(id):
 		var s: Dictionary = GUNS[id].duplicate()
-		s["name"] = "Forged " + s["name"]
+		s["name"] = FORGED_NAMES.get(id, "Forged " + s["name"])
+		for k in ["chill", "burn", "snare", "knock", "cone"]:
+			if s.has(k):
+				s[k] = s[k] * 1.5
+		if s.has("chain"):
+			s["chain"] = int(s["chain"]) + 2
+		if s.has("splash"):
+			s["splash"] = s["splash"] + 1.0
 		s["damage"] = s["damage"] * 2.0
 		s["mag"] = int(ceil(s["mag"] * 1.5))
 		s["reserve"] = int(s["reserve"]) * 2
@@ -1772,10 +2234,13 @@ func _fire() -> void:
 	var im := _tracer.mesh as ImmediateMesh
 	im.clear_surfaces()
 	im.surface_begin(Mesh.PRIMITIVE_LINES)
-	for p in int(spec["pellets"]):
+	if spec.has("cone"):
+		_toll(muzzle, ahead, spec)
+	for p in (0 if spec.has("cone") else int(spec["pellets"])):
 		var dir := _spread(ahead, spec["spread"])
 		var end := _shoot_ray(muzzle, dir, spec)
-		im.surface_set_color(Color(1.0, 0.85, 0.4) if not spec.has("chill") else Color(0.6, 0.9, 1.0))
+		im.surface_set_color(Color(0.6, 0.9, 1.0) if spec.has("chill") else Color(1.0, 0.45, 0.1) if spec.has("burn") \
+			else Color(0.45, 0.8, 0.3) if spec.has("snare") else Color(1.0, 0.85, 0.4))
 		im.surface_add_vertex(muzzle)
 		im.surface_add_vertex(end)
 		if spec.has("chain"):
@@ -1901,6 +2366,10 @@ func _damage(z: Dictionary, amount: float, head: bool, spec: Dictionary) -> void
 	z["flash"] = 0.08
 	if spec.has("chill"):
 		z["chill"] = spec["chill"]
+	if spec.has("snare"):
+		z["snare"] = spec["snare"]
+	if spec.has("burn"):
+		_set_alight(z, spec["burn"])
 	if z["hp"] <= 0.0:
 		_kill(z, head, spec.get("knife", false))
 	else:
@@ -1918,7 +2387,54 @@ func _kill(z: Dictionary, head: bool, knife: bool) -> void:
 		_drop_ready = false
 		_add_drop(_deal_drop(), z["pos"])
 	z["chill"] = 0.0
+	z["burn"] = 0.0
+	z["snare"] = 0.0
+	z["swing"] = -1.0
 	_sound("hit", _arena.to_global(z["pos"] + Vector3(0, 1.2, 0)), 0.8, 0.7)
+
+
+# Emberwick: it burns for a while, and those right next to it catch too
+# (for half as long; they don't pass it on).
+func _set_alight(z: Dictionary, seconds: float, spread := true) -> void:
+	z["burn"] = maxf(z["burn"], seconds)
+	if not spread:
+		return
+	for o in _zombies:
+		if o != z and o["state"] != "dying" and o["burn"] <= 0.0 and (o["pos"] as Vector3).distance_to(z["pos"]) < 1.5:
+			_set_alight(o, seconds * 0.5, false)
+
+
+# Gravebell: hurts and throws back every one in front of you (in reach, in
+# BELL_DEGREES of where you aim, no wall between), whether or not it hit.
+func _toll(from: Vector3, ahead: Vector3, spec: Dictionary) -> bool:
+	var reach: float = spec["cone"]
+	var any := false
+	for z in _zombies.duplicate():
+		if z["state"] == "dying":
+			continue
+		var centre: Vector3 = z["pos"] + Vector3(0, 1.1, 0)
+		var to := centre - from
+		var d := to.length()
+		if d > reach or d < 0.01 or rad_to_deg(ahead.angle_to(to)) > BELL_DEGREES or _wall_hit(from, to / d) < d:
+			continue
+		any = true
+		_damage(z, spec["damage"] * (1.0 - 0.5 * d / reach), false, {"pierce": 1})
+		if z["state"] in ["chase", "approach"]:
+			var push := Vector3(to.x, 0, to.z).normalized()
+			var moved := 0.0
+			while moved < float(spec["knock"]):
+				var next: Vector3 = z["pos"] + push * 0.25
+				var c := _cell_of(next)
+				if c < 0 or _blocked[c] == 1 or (z["state"] == "chase" and _room_at(next).is_empty()):
+					break
+				z["pos"] = next
+				moved += 0.25
+	_boom.position = from + ahead * 1.2
+	_boom.scale = Vector3.ONE * 0.6
+	_boom.visible = true
+	_boom_left = 0.12
+	_sound("boom", _arena.to_global(from), 0.8, 1.8)
+	return any
 
 
 func _splash(at: Vector3, spec: Dictionary) -> void:
@@ -2111,8 +2627,8 @@ func _prompt_text(u: Dictionary) -> String:
 		"bench":
 			if shield > 0:
 				return ""
-			if parts.size() < PART_SPOTS.size():
-				return "Shield parts: %d of %d" % [parts.size(), PART_SPOTS.size()]
+			if parts.size() < _map["parts"].size():
+				return "Shield parts: %d of %d" % [parts.size(), _map["parts"].size()]
 			return "A: build the Barn-Door Shield" if not shield_built else "A: rebuild the shield  %d" % SHIELD_REBUILD
 	return ""
 
@@ -2232,7 +2748,7 @@ func buy_tonic(id: String) -> bool:
 
 
 func _door(id: String) -> Dictionary:
-	for d in DOORS:
+	for d in _map["doors"]:
 		if d["id"] == id:
 			return d
 	return {}
@@ -2245,11 +2761,12 @@ func open_door(id: String) -> bool:
 	if not _spend(d["cost"]):
 		return false
 	_debris[id].visible = false
-	for room in ROOMS:
+	for room in _map["rooms"]:
 		if _debris[id].has_meta("label_" + room):
 			_debris[id].get_meta("label_" + room).visible = false
 	for room in d["rooms"]:
 		open_rooms[room] = true
+		_in_dirty = true
 	_sound("rip", _arena.to_global(Vector3(d["at"][0], 1.0, d["at"][1])), 1.0, 0.7)
 	return true
 
@@ -2281,7 +2798,7 @@ func use_crate() -> bool:
 			_crate_gun = pool[_rng.randi() % pool.size()]
 			_crate_state = "shuffle"
 			_crate_t = CRATE_SHUFFLE
-			_sound("crate", _arena.to_global(Vector3(CRATE_SPOT["at"][0], 1.0, CRATE_SPOT["at"][1])), 0.9)
+			_sound("crate", _arena.to_global(Vector3(_map["crate"]["at"][0], 1.0, _map["crate"]["at"][1])), 0.9)
 			return true
 		"offer":
 			_give_gun(_crate_gun)
@@ -2324,10 +2841,11 @@ func _crate_frame(delta: float) -> void:
 func _build_power_things() -> void:
 	_power_lamps.clear()
 	# The generator: a squat engine on the yard's back wall.
-	var g_at := Vector3(GENERATOR_SPOT["at"][0], 0, GENERATOR_SPOT["at"][1])
-	var g_in := Vector3(GENERATOR_SPOT["in"][0], 0, GENERATOR_SPOT["in"][1])
+	var g_at := Vector3(_map["generator"]["at"][0], 0, _map["generator"]["at"][1])
+	var g_in := Vector3(_map["generator"]["in"][0], 0, _map["generator"]["in"][1])
 	var g_yaw := atan2(g_in.x, g_in.z)
 	var engine := _box(_arena, Vector3(1.0, 0.8, 0.6), g_at + g_in * (WALL_T / 2.0 + 0.32) + Vector3(0, 0.4, 0), _mats["machine"])
+	_tag(engine, "generator")
 	engine.rotation.y = g_yaw
 	var tank := _box(_arena, Vector3(0.7, 0.25, 0.4), g_at + g_in * (WALL_T / 2.0 + 0.32) + Vector3(0, 0.92, 0), _mats["crate"])
 	tank.rotation.y = g_yaw
@@ -2339,12 +2857,14 @@ func _build_power_things() -> void:
 	_generator_label.rotation.y = g_yaw
 	_uses.append({"kind": "generator", "id": "generator", "at": g_at + g_in * 1.0, "label": _generator_label})
 	# The Anvil: an anvil on a stump, glowing once the power's on.
-	var a_at := Vector3(ANVIL_SPOT["at"][0], 0, ANVIL_SPOT["at"][1])
-	var a_in := Vector3(ANVIL_SPOT["in"][0], 0, ANVIL_SPOT["in"][1])
+	var a_at := Vector3(_map["anvil"]["at"][0], 0, _map["anvil"]["at"][1])
+	var a_in := Vector3(_map["anvil"]["in"][0], 0, _map["anvil"]["in"][1])
 	var a_yaw := atan2(a_in.x, a_in.z)
 	var spot := a_at + a_in * (WALL_T / 2.0 + 0.45)
 	_box(_arena, Vector3(0.5, 0.6, 0.5), spot + Vector3(0, 0.3, 0), _mats["trunk"]).rotation.y = a_yaw
-	_box(_arena, Vector3(0.7, 0.18, 0.28), spot + Vector3(0, 0.72, 0), _mats["iron"]).rotation.y = a_yaw
+	var anvil_top := _box(_arena, Vector3(0.7, 0.18, 0.28), spot + Vector3(0, 0.72, 0), _mats["iron"])
+	anvil_top.rotation.y = a_yaw
+	_tag(anvil_top, "anvil")
 	_box(_arena, Vector3(0.3, 0.12, 0.18), spot + Vector3(0, 0.6, 0), _mats["iron"]).rotation.y = a_yaw
 	var glow := _box(_arena, Vector3(0.72, 0.02, 0.3), spot + Vector3(0, 0.82, 0), _mats["off"])
 	glow.rotation.y = a_yaw
@@ -2361,8 +2881,8 @@ func _build_power_things() -> void:
 	_arena.add_child(_anvil_show)
 	_uses.append({"kind": "anvil", "id": "anvil", "at": a_at + a_in * 1.1, "label": _anvil_label})
 	# The workbench, and the shield's parts lying about.
-	var b_at := Vector3(BENCH_SPOT["at"][0], 0, BENCH_SPOT["at"][1])
-	var b_in := Vector3(BENCH_SPOT["in"][0], 0, BENCH_SPOT["in"][1])
+	var b_at := Vector3(_map["bench"]["at"][0], 0, _map["bench"]["at"][1])
+	var b_in := Vector3(_map["bench"]["in"][0], 0, _map["bench"]["in"][1])
 	var b_yaw := atan2(b_in.x, b_in.z)
 	_box(_arena, Vector3(1.2, 0.08, 0.6), b_at + b_in * (WALL_T / 2.0 + 0.32) + Vector3(0, 0.85, 0), _mats["plank"]).rotation.y = b_yaw
 	for side in [-0.5, 0.5]:
@@ -2373,8 +2893,8 @@ func _build_power_things() -> void:
 	b_label.rotation.y = b_yaw
 	_uses.append({"kind": "bench", "id": "bench", "at": b_at + b_in * 0.95, "label": b_label})
 	_part_nodes.clear()
-	for i in PART_SPOTS.size():
-		var at := Vector3(PART_SPOTS[i][0], 0, PART_SPOTS[i][1])
+	for i in _map["parts"].size():
+		var at := Vector3(_map["parts"][i][0], 0, _map["parts"][i][1])
 		var bundle := Node3D.new()
 		_arena.add_child(bundle)
 		bundle.position = at
@@ -2407,7 +2927,7 @@ func power_on() -> bool:
 			lamp.material_override = _mats["lamp_on"]
 	if _generator_label:
 		_generator_label.text = "Generator\nrunning"
-	_sound("boom", _arena.to_global(Vector3(GENERATOR_SPOT["at"][0], 1.0, GENERATOR_SPOT["at"][1])), 0.7, 1.6)
+	_sound("boom", _arena.to_global(Vector3(_map["generator"]["at"][0], 1.0, _map["generator"]["at"][1])), 0.7, 1.6)
 	_sound("bell", null, 0.5, 1.5)
 	return true
 
@@ -2481,7 +3001,7 @@ func _anvil_done() -> void:
 
 
 func pick_part(index) -> bool:
-	if typeof(index) != TYPE_INT or index < 0 or index >= PART_SPOTS.size() or index in parts:
+	if typeof(index) != TYPE_INT or index < 0 or index >= _map["parts"].size() or index in parts:
 		return false
 	parts.append(index)
 	if index < _part_nodes.size() and is_instance_valid(_part_nodes[index]):
@@ -2492,8 +3012,8 @@ func pick_part(index) -> bool:
 
 
 func build_shield() -> bool:
-	if shield > 0 or parts.size() < PART_SPOTS.size():
-		if parts.size() < PART_SPOTS.size():
+	if shield > 0 or parts.size() < _map["parts"].size():
+		if parts.size() < _map["parts"].size():
 			_sound("deny", null, 0.6)
 		return false
 	if shield_built and not _spend(SHIELD_REBUILD):
@@ -2603,7 +3123,7 @@ func _take_drop(kind: String) -> void:
 					kills += 1
 			_add_points(400)
 		"hammer":
-			for wnd in WINDOWS:
+			for wnd in _map["windows"]:
 				planks[wnd["id"]] = PLANKS
 				_show_planks(wnd["id"])
 			_add_points(200)
@@ -2816,6 +3336,13 @@ func _flat_glow(color: Color) -> StandardMaterial3D:
 	return m
 
 
+# Marks a piece for the world's list (lib.gd's add_app_things, when it has
+# it): the agent and the inspect / textures tools can then find it by name.
+# The same name every time the buildings go up.
+func _tag(node: Node, thing_name: String) -> void:
+	node.set_meta("slopitect_app_thing", "holdout_" + thing_name)
+
+
 func _box(parent: Node3D, size: Vector3, at: Vector3, material: Material) -> MeshInstance3D:
 	var mesh := BoxMesh.new()
 	mesh.size = size
@@ -2974,6 +3501,63 @@ func _gun_parts(id: String, steel: Color, black: Color, wood: Color, olive: Colo
 			return [[Vector3(0, 0.03, -0.15), Vector3(0.045, 0.055, 0.26), Color(0.75, 0.88, 0.95)],
 				[Vector3(0, 0.04, -0.3), Vector3(0.07, 0.07, 0.06), Color(0.55, 0.85, 1.0)],
 				[Vector3(0, -0.04, 0.0), Vector3(0.03, 0.1, 0.045), steel, -12.0]]
+		"kar98k":
+			return [[Vector3(0, 0.03, -0.45), Vector3(0.016, 0.016, 0.36), steel],
+				[Vector3(0, 0.02, -0.25), Vector3(0.04, 0.04, 0.46), wood],
+				[Vector3(0, 0.045, -0.06), Vector3(0.025, 0.025, 0.12), steel],
+				[Vector3(0.035, 0.045, -0.02), Vector3(0.04, 0.012, 0.012), steel],
+				[Vector3(0, -0.02, 0.14), Vector3(0.04, 0.08, 0.28), wood, -10.0]]
+		"thompson":
+			return [[Vector3(0, 0.03, -0.32), Vector3(0.022, 0.022, 0.16), steel],
+				[Vector3(0, 0.035, -0.14), Vector3(0.045, 0.05, 0.26), steel],
+				[Vector3(0, -0.04, -0.22), Vector3(0.025, 0.08, 0.03), wood],
+				[Vector3(0, -0.06, -0.1), Vector3(0.03, 0.06, 0.14), black],
+				[Vector3(0, -0.04, 0.02), Vector3(0.03, 0.08, 0.04), wood, -12.0],
+				[Vector3(0, 0.0, 0.16), Vector3(0.04, 0.07, 0.22), wood, -8.0]]
+		"remington870":
+			return [[Vector3(0, 0.035, -0.36), Vector3(0.022, 0.022, 0.42), black],
+				[Vector3(0, 0.01, -0.3), Vector3(0.018, 0.018, 0.36), black],
+				[Vector3(0, 0.005, -0.28), Vector3(0.04, 0.04, 0.12), wood],
+				[Vector3(0, 0.025, -0.06), Vector3(0.045, 0.05, 0.14), black],
+				[Vector3(0, -0.01, 0.15), Vector3(0.04, 0.08, 0.26), wood, -10.0]]
+		"galil":
+			return [[Vector3(0, 0.03, -0.4), Vector3(0.018, 0.018, 0.18), black],
+				[Vector3(0, 0.03, -0.24), Vector3(0.045, 0.045, 0.16), black],
+				[Vector3(0, 0.04, -0.06), Vector3(0.045, 0.05, 0.22), black],
+				[Vector3(0, -0.06, -0.1), Vector3(0.028, 0.14, 0.045), black, 15.0],
+				[Vector3(0, -0.04, 0.03), Vector3(0.03, 0.08, 0.04), black, -15.0],
+				[Vector3(0, 0.02, 0.17), Vector3(0.02, 0.05, 0.22), steel]]
+		"spas12":
+			return [[Vector3(0, 0.04, -0.34), Vector3(0.025, 0.025, 0.38), black],
+				[Vector3(0, 0.01, -0.3), Vector3(0.05, 0.035, 0.22), black],
+				[Vector3(0, 0.03, -0.05), Vector3(0.05, 0.06, 0.16), black],
+				[Vector3(0, -0.04, 0.03), Vector3(0.03, 0.08, 0.04), black, -15.0],
+				[Vector3(0, 0.05, 0.14), Vector3(0.012, 0.012, 0.22), steel]]
+		"deagle":
+			return [[Vector3(0, 0.035, -0.09), Vector3(0.035, 0.04, 0.24), steel],
+				[Vector3(0, -0.04, 0.0), Vector3(0.035, 0.11, 0.05), black, -12.0],
+				[Vector3(0, -0.005, -0.04), Vector3(0.008, 0.02, 0.04), steel]]
+		"mp40":
+			return [[Vector3(0, 0.03, -0.3), Vector3(0.018, 0.018, 0.14), black],
+				[Vector3(0, 0.035, -0.12), Vector3(0.04, 0.045, 0.24), black],
+				[Vector3(0, -0.07, -0.13), Vector3(0.024, 0.15, 0.03), black],
+				[Vector3(0, -0.04, 0.0), Vector3(0.03, 0.08, 0.04), black, -12.0],
+				[Vector3(0, 0.03, 0.12), Vector3(0.012, 0.012, 0.18), steel]]
+		"emberwick":
+			return [[Vector3(0, 0.03, -0.18), Vector3(0.05, 0.05, 0.28), Color(0.3, 0.18, 0.1)],
+				[Vector3(0, 0.05, -0.15), Vector3(0.07, 0.09, 0.07), Color(1.0, 0.5, 0.12)],
+				[Vector3(0, 0.03, -0.36), Vector3(0.045, 0.045, 0.06), steel],
+				[Vector3(0, -0.04, 0.0), Vector3(0.03, 0.1, 0.045), wood, -12.0]]
+		"gravebell":
+			return [[Vector3(0, 0.03, -0.18), Vector3(0.04, 0.04, 0.26), Color(0.35, 0.3, 0.22)],
+				[Vector3(0, 0.03, -0.36), Vector3(0.12, 0.12, 0.08), Color(0.7, 0.55, 0.25)],
+				[Vector3(0, 0.03, -0.41), Vector3(0.15, 0.15, 0.02), Color(0.7, 0.55, 0.25)],
+				[Vector3(0, -0.04, 0.0), Vector3(0.03, 0.1, 0.045), wood, -12.0]]
+		"rootsnare":
+			return [[Vector3(0, 0.03, -0.17), Vector3(0.045, 0.05, 0.3), Color(0.32, 0.22, 0.12)],
+				[Vector3(0.025, 0.05, -0.28), Vector3(0.015, 0.015, 0.14), Color(0.35, 0.6, 0.25), 20.0],
+				[Vector3(-0.025, 0.01, -0.3), Vector3(0.015, 0.015, 0.12), Color(0.35, 0.6, 0.25), -20.0],
+				[Vector3(0, -0.04, 0.0), Vector3(0.03, 0.1, 0.045), wood, -12.0]]
 	return [[Vector3(0, 0.02, -0.1), Vector3(0.04, 0.06, 0.2), steel]]
 
 

@@ -31,7 +31,9 @@ extends SlopitectModule
 # window's Moving section); follow_ground and wider ranges are move_config,
 # from the PC. They're kept in user://move.json (where move.gd, which this
 # replaces, kept them). controls_status shows both sticks live, and the log
-# says when you start and stop walking and how far you went.
+# says when you start and stop walking and how far you went. A game can
+# make you walk faster for a while (a sprint) with speed_boost(times), 1
+# to MAX_BOOST, and puts it back with speed_boost(1.0).
 #
 # Two things never go through here, so no module can take them away: X on
 # the left controller always stops the agent (the agent module's), and the
@@ -62,6 +64,7 @@ const MOVE_PATH := "user://move.json"
 const MOVE_DEFAULTS := {"speed": 1.5, "deadzone": 0.2, "turn": "snap", "snap_degrees": 30.0, "smooth_degrees": 90.0, "follow_ground": true}
 # What move_comfort may set, and in what range (narrower than move_config's).
 const COMFORT := {"speed": [0.5, 3.0], "deadzone": [0.05, 0.5], "snap_degrees": [15.0, 90.0], "smooth_degrees": [30.0, 180.0]}
+const MAX_BOOST := 2.5  # the most speed_boost() can multiply walking by
 const SNAP_ON := 0.7  # a stick past this turns once...
 const SNAP_OFF := 0.3  # ...and must come back under this before the next turn
 
@@ -72,6 +75,7 @@ var _last := ""  # the last action, for controls_status
 var move := MOVE_DEFAULTS.duplicate()  # the move settings
 var _origin: XROrigin3D  # what walking and turning move (null: they're off)
 var _snapped := false
+var _boost := 1.0  # speed_boost(): a game's sprint
 var _walk_from = null  # where a walk started (Vector3), null when standing
 var _walk_stick := Vector2.ZERO  # the biggest push of this walk, for the log
 var _lib: SlopitectModule
@@ -128,6 +132,11 @@ func stick(stick_name: String) -> Vector2:
 		if sticks[hand] == stick_name:
 			return (ctx[hand] as XRController3D).get_vector2("primary")
 	return Vector2.ZERO
+
+
+# Walking faster for a while, such as a game's sprint: times 1 to MAX_BOOST.
+func speed_boost(times: float) -> void:
+	_boost = clampf(times, 1.0, MAX_BOOST)
 
 
 # How far a grip or trigger is pressed (0 to 1), or 1 when a finger rests on
@@ -247,7 +256,7 @@ func _process(delta: float) -> void:
 				_walk_stick = Vector2.ZERO
 			if walk.length() > _walk_stick.length():
 				_walk_stick = walk
-			_origin.global_position += (forward.normalized() * push.y + side.normalized() * push.x) * float(move["speed"]) * delta
+			_origin.global_position += (forward.normalized() * push.y + side.normalized() * push.x) * float(move["speed"]) * _boost * delta
 	elif _walk_from != null:
 		var went: Vector3 = _origin.global_position - _walk_from
 		print("Slopitect controls: walked %.2f m (stick pushed up to %.2f, %.2f)" % [Vector2(went.x, went.z).length(), _walk_stick.x, _walk_stick.y])
