@@ -1,0 +1,18 @@
+; gamecoob: GameCoob-Bios's rebuilt GameCube intro and cube menu (isaac's own
+; Rust, https://github.com/Bubbagum88/GameCoob-Bios), for gamecube.gd. Adds
+; the class GameCoob. The libraries are built by CI from native/gamecoob and a
+; pinned GameCoob-Bios commit (see .github/workflows/quest1-apk.yml), not kept
+; in the repo. No Nintendo data is in either: the intro reads the player's own
+; ipl.bin at run time. Only the Quest (Android arm64) and a Linux PC for tests.
+
+[configuration]
+
+entry_symbol = "gamecoob_init"
+compatibility_minimum = 4.7
+
+[libraries]
+
+android.debug.arm64 = "bin/libgamecoob.android.arm64.so"
+android.release.arm64 = "bin/libgamecoob.android.arm64.so"
+linux.debug.x86_64 = "bin/libgamecoob.linux.x86_64.so"
+linux.release.x86_64 = "bin/libgamecoob.linux.x86_64.so"
