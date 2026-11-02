@@ -33,6 +33,7 @@ signal stopped(why: String)
 const PANEL := "gamecube"
 const TITLE := "GameCube"
 const SETTINGS_PATH := "user://gamecube.json"
+const APP_THING := "slopitect_app_thing"  # lib's: a piece in the world's object list
 const DUMP := "gamecube/ipl.bin"  # in the Slopitect folder
 const DUMP_BYTES := 2 * 1024 * 1024  # a GameCube IPL is 2 MiB
 const DEFAULTS := {"threads": 3}
@@ -301,7 +302,8 @@ func _make_tv() -> void:
 	_texture = ImageTexture.create_from_image(_image)
 	_tv = Node3D.new()
 	_tv.name = "tv"
-	add_child(_tv)  # its own, not World's: nothing to save or select
+	_tv.set_meta(APP_THING, "gamecube_tv")
+	add_child(_tv)  # its own, not World's: save never keeps it
 	var screen := MeshInstance3D.new()
 	screen.name = "screen"
 	var quad := QuadMesh.new()
@@ -315,6 +317,7 @@ func _make_tv() -> void:
 	_tv.add_child(screen)
 	var case := MeshInstance3D.new()
 	case.name = "case"
+	case.set_meta(APP_THING, "gamecube_tv_case")
 	var box := BoxMesh.new()
 	box.size = Vector3(SCREEN.x + 0.16, SCREEN.y + 0.16, 0.3)
 	case.mesh = box
@@ -323,6 +326,11 @@ func _make_tv() -> void:
 	case.material_override = plastic
 	case.position = Vector3(0, 0, -0.151)
 	_tv.add_child(case)
+	# The TV and its case go in the world's object list (lib's), so they can
+	# be picked, moved, textured and hidden like any thing. The screen stays
+	# out: a texture on it would cover the picture.
+	if _lib and _lib.has_method("add_app_things"):
+		_lib.add_app_things(self)
 
 
 # In front of you at eye height, facing you.

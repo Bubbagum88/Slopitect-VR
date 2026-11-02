@@ -292,6 +292,7 @@ var _return_to := ""        # the world to go back to on Leave
 var _pack := "All songs"    # the pack shown in the middle window
 var _hands_before := ""     # the hands style to put back when you leave (auto sabers)
 var _placed := false        # the track was laid out with the windows
+const APP_THING := "slopitect_app_thing"  # lib's: a piece in the world's object list
 var _stage: Node3D          # the Rhythm world's surroundings, laid out with the track
 var _swapped := {}          # what the stage changed in the main scene, to put back
 var _sign: Node3D           # the glowing title over the windows (menus only)
@@ -1334,12 +1335,13 @@ func _stage_on() -> void:
 	var dark := _flat(Color(0.04, 0.06, 0.13))
 	var runway := _flat(Color(0.07, 0.09, 0.16))
 	var length := -SPAWN_Z + 4.0
-	_stage_box(Vector3(240.0, 0.02, 240.0), Vector3(0.0, -0.03, 0.0), dark)  # the ground, faded out by the haze
-	_stage_box(Vector3(LANE_W * 4.0 + 0.5, 0.02, length), Vector3(0.0, -0.015, 2.0 - length / 2.0), runway)
-	_stage_box(Vector3(2.4, 0.02, 2.4), Vector3(0.0, -0.01, 0.0), runway)  # where you stand
+	_stage_box(Vector3(240.0, 0.02, 240.0), Vector3(0.0, -0.03, 0.0), dark, "ground")  # faded out by the haze
+	_stage_box(Vector3(LANE_W * 4.0 + 0.5, 0.02, length), Vector3(0.0, -0.015, 2.0 - length / 2.0), runway, "runway")
+	_stage_box(Vector3(2.4, 0.02, 2.4), Vector3(0.0, -0.01, 0.0), runway, "pad")  # where you stand
 	# The lanes' edges: blue on the left, red on the right.
 	for side in [-1, 1]:
-		_stage_box(Vector3(0.04, 0.02, length), Vector3(side * (LANE_W * 2.0 + 0.25), 0.0, 2.0 - length / 2.0), _mat["l" if side < 0 else "r"])
+		_stage_box(Vector3(0.04, 0.02, length), Vector3(side * (LANE_W * 2.0 + 0.25), 0.0, 2.0 - length / 2.0), _mat["l" if side < 0 else "r"],
+			"edge_left" if side < 0 else "edge_right")
 	# Frames over the track: two posts and a bar each, in one MultiMesh.
 	var unit := BoxMesh.new()
 	unit.size = Vector3.ONE
@@ -1356,11 +1358,19 @@ func _stage_on() -> void:
 	frame_node.multimesh = frames
 	frame_node.material_override = _glow(Color(0.55, 0.7, 1.0))
 	frame_node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	frame_node.set_meta(APP_THING, "beatsaber_frames")
 	_stage.add_child(frame_node)
-	_stage.add_child(_stars())
+	var stars := _stars()
+	stars.set_meta(APP_THING, "beatsaber_stars")
+	_stage.add_child(stars)
 	_sign = _make_sign()
+	_sign.set_meta(APP_THING, "beatsaber_sign")
 	_stage.add_child(_sign)
 	_sign.visible = _shown(PANEL)
+	# The stage's pieces go in the world's object list (lib's), so they can
+	# be picked, textured and hidden like any thing; save never keeps them.
+	if _lib and _lib.has_method("add_app_things"):
+		_lib.add_app_things(self)
 
 
 # Stars on a dome above the horizon, one draw: small quads that face you,
@@ -1519,10 +1529,11 @@ func _sign_shown(on: bool) -> void:
 		_sign.visible = on
 
 
-func _stage_box(size: Vector3, at: Vector3, material: Material) -> void:
+func _stage_box(size: Vector3, at: Vector3, material: Material, piece: String) -> void:
 	var box := BoxMesh.new()
 	box.size = size
 	var m := MeshInstance3D.new()
+	m.set_meta(APP_THING, "beatsaber_" + piece)
 	m.mesh = box
 	m.material_override = material
 	m.position = at

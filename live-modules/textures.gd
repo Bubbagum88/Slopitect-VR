@@ -6,7 +6,10 @@ extends SlopitectModule
 # moves, turns and is carried with the shape; it's scaled by the shape's
 # size, so a tile is "scale" metres on a big box and a small one alike, and
 # it's fitted again when the shape is resized. Optional metallic and
-# roughness make things shiny. Kept per project in saves/textures.json and
+# roughness make things shiny. Apps' pieces (lib.add_app_things) take
+# textures too: a MeshInstance3D or a MultiMeshInstance3D (all its copies at
+# once); taking the texture off gives the piece back the app's own material,
+# and the texture comes back each time the app builds the piece again. Kept per project in saves/textures.json and
 # put back when the world loads (it follows projects' project_changed).
 # While a shape has a texture it checks every CHECK_SECONDS that its
 # material is still the one made here (a colour change replaces it) and
@@ -38,6 +41,7 @@ func lib_ready(lib) -> void:
 		_file = ""
 		return
 	lib.watch(self, "save", _world_changed)
+	lib.follow(self, "lib", "thing_entered", _joined)
 	lib.follow(self, "projects", "project_changed", _world_changed)
 	_world_changed()
 
@@ -50,6 +54,15 @@ func _world_changed(_a = null, _b = null) -> void:
 	_mine.clear()
 	_load()
 	_check_now()
+
+
+# A thing (an app's piece built again, a shape put back) gets its texture
+# straight away.
+func _joined(node: Node3D) -> void:
+	var n := String(node.name)
+	if _map.has(n) and _find(n) == node:
+		_put(n, node)
+		set_process(true)
 
 
 func _process(delta: float) -> void:
@@ -86,9 +99,17 @@ func _save() -> void:
 		push_error("Slopitect textures: " + problem)
 
 
-# A shape (textures go on shapes, not placed models).
-func _find(node_name) -> MeshInstance3D:
-	return _lib.world_node(node_name) as MeshInstance3D if _lib else null
+# A shape or an app's piece (textures go on meshes, not placed models).
+func _find(node_name) -> GeometryInstance3D:
+	var node: Node3D = _lib.world_node(node_name) if _lib else null
+	return node as GeometryInstance3D if node is MeshInstance3D or node is MultiMeshInstance3D else null
+
+
+func _mesh_of(node: GeometryInstance3D) -> Mesh:
+	if node is MeshInstance3D:
+		return (node as MeshInstance3D).mesh
+	var mm := (node as MultiMeshInstance3D).multimesh
+	return mm.mesh if mm else null
 
 
 func _texture(path: String) -> Texture2D:
@@ -121,10 +142,13 @@ func _texture(path: String) -> Texture2D:
 	return tex
 
 
-func _color_of(node: MeshInstance3D) -> Color:
-	var mats := [node.material_override, node.get_surface_override_material(0)]
-	if node.mesh and node.mesh.get_surface_count() > 0:
-		mats.append(node.mesh.surface_get_material(0))
+func _color_of(node: GeometryInstance3D) -> Color:
+	var mats := [node.material_override]
+	if node is MeshInstance3D:
+		mats.append((node as MeshInstance3D).get_surface_override_material(0))
+	var mesh := _mesh_of(node)
+	if mesh and mesh.get_surface_count() > 0:
+		mats.append(mesh.surface_get_material(0))
 	for m in mats:
 		if m and m != _mine.get(String(node.name)) and m is BaseMaterial3D:
 			return (m as BaseMaterial3D).albedo_color
@@ -134,7 +158,7 @@ func _color_of(node: MeshInstance3D) -> Color:
 	return Color.WHITE
 
 
-func _put(n: String, node: MeshInstance3D) -> bool:
+func _put(n: String, node: GeometryInstance3D) -> bool:
 	var info: Dictionary = _map[n]
 	var tex := _texture(String(info.get("texture", "")))
 	if tex == null:
@@ -142,6 +166,14 @@ func _put(n: String, node: MeshInstance3D) -> bool:
 	var base := _color_of(node)
 	var m := StandardMaterial3D.new()
 	m.set_meta("base", base)
+	# An app's piece gets the app's own material back when it comes off.
+	var old = _mine.get(n)
+	if old is Material and node.material_override == old and old.has_meta("app_piece"):
+		m.set_meta("app_piece", true)
+		m.set_meta("was", old.get_meta("was", null))
+	elif _lib and not _lib.app_of(node).is_empty():
+		m.set_meta("app_piece", true)
+		m.set_meta("was", node.material_override)
 	m.albedo_texture = tex
 	m.albedo_color = base if info.get("tint", true) else Color.WHITE
 	# Triplanar in the shape's own space, not the world's, so the texture
@@ -166,7 +198,7 @@ func _apply_command(request: Dictionary) -> Dictionary:
 		return {"ok": false, "error": "\"names\" must be a list of shape names"}
 	for n in names:
 		if _find(n) == null:
-			return {"ok": false, "error": "no shape named %s (list shows them)" % JSON.stringify(n)}
+			return {"ok": false, "error": "no shape or app piece named %s that takes a texture (inspect_list shows them)" % JSON.stringify(n)}
 	var path = request.get("texture")
 	if typeof(path) != TYPE_STRING or path.is_empty() or ".." in path:
 		return {"ok": false, "error": "\"texture\" must be a path under downloads/ or \"noise\""}
@@ -209,7 +241,9 @@ func _take_off(names: Array) -> void:
 	for n in names:
 		_map.erase(n)
 		var node := _find(n)
-		if node and _mine.has(n) and node.material_override == _mine[n]:
+		if node and _mine.has(n) and node.material_override == _mine[n] and _mine[n].has_meta("app_piece"):
+			node.material_override = _mine[n].get_meta("was", null)
+		elif node and _mine.has(n) and node.material_override == _mine[n]:
 			var base = _mine[n].get_meta("base")
 			var m := StandardMaterial3D.new()
 			m.albedo_color = base

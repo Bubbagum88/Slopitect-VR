@@ -38,7 +38,7 @@ func setup() -> String:
 	register("inspect_delete", _delete_command, "delete a shape or model (one undo in the tool window): optional name (default: the selected one)")
 	register("inspect_show_all", _show_all, "show every hidden thing again")
 	register("inspect_status", _status, "the selected thing and its switches")
-	register("inspect_list", _list, "every shape and model with its switches")
+	register("inspect_list", _list, "every shape, model and app piece (kind: shape, model, or the app's name, like holdout) with its switches")
 	return ""
 
 
@@ -128,7 +128,7 @@ func _line() -> String:
 	var node := _find(_selected)
 	if node == null:
 		return "Point at a shape or model and pull the trigger"
-	var parts := PackedStringArray([_selected + (" (model)" if node.get_parent().name == "PolyHaven" else " (shape)")])
+	var parts := PackedStringArray([_selected + " (%s)" % _kind(node)])
 	if ctx["modules"].module("physics"):
 		parts.append("physics " + _physics_mode(_selected))
 	parts.append("grabbable" if _flag(_selected, "grabbable") else "not grabbable")
@@ -146,6 +146,14 @@ func _things() -> Array:
 
 func _find(node_name) -> Node3D:
 	return _lib.thing(node_name) if _lib else null
+
+
+# "shape", "model", or the app a piece belongs to ("holdout").
+func _kind(node: Node3D) -> String:
+	var app: String = _lib.app_of(node) if _lib and _lib.has_method("app_of") else ""
+	if not app.is_empty():
+		return app
+	return "model" if node.get_parent().name == "PolyHaven" else "shape"
 
 
 func _box(thing: Node3D) -> AABB:
@@ -309,7 +317,10 @@ func _delete_command(request: Dictionary) -> Dictionary:
 	if not named[1].is_empty():
 		return {"ok": false, "error": named[1]}
 	var node_name: String = named[0]
-	var is_model: bool = _find(node_name).get_parent().name == "PolyHaven"
+	var kind := _kind(_find(node_name))
+	if not kind in ["shape", "model"]:
+		return {"ok": false, "error": "%s is part of %s, which builds it again each time; hide it instead (inspect_set hidden true)" % [node_name, kind]}
+	var is_model: bool = kind == "model"
 	# What it takes to put it back exactly.
 	var again := {}
 	for item in ctx["server"].run({"cmd": "assets_placed" if is_model else "list"}).get("placed" if is_model else "objects", []):
@@ -378,6 +389,6 @@ func _list(_request: Dictionary) -> Dictionary:
 	var listed := []
 	for thing in _things():
 		var node_name := String(thing.name)
-		listed.append({"name": node_name, "kind": "model" if thing.get_parent().name == "PolyHaven" else "shape",
+		listed.append({"name": node_name, "kind": _kind(thing),
 			"grabbable": _flag(node_name, "grabbable"), "hidden": _flag(node_name, "hidden")})
 	return {"ok": true, "things": listed}
