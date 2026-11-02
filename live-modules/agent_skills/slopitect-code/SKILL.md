@@ -77,6 +77,12 @@ The rules every module follows:
    `lib.thing(name)`, `lib.things()`, `lib.world_box(node)`, `lib.home()`
    (the Slopitect folder), `lib.read_json(path)`, `lib.write_json(path,
    data)`, `lib.module(name)`. A helper two modules need goes into lib.
+   Apps and games (holdout, beatsaber, gamecube) build their pieces under
+   their own node, so save never writes them. To put a piece in the
+   object list (inspect_list, textures_apply, hide, grab) tag it:
+   `node.set_meta("slopitect_app_thing", "APP_piece")` with a stable
+   name starting with the app's, then `lib.add_app_things(self)` once
+   built. `lib.app_of(node)` says whose piece it is ("" for the world's).
 6. No hard dependencies: when a module you use isn't loaded, keep working
    or quietly turn that feature off (say so in a command's reply).
 7. Clean unload: `_exit_tree()` frees what you made outside your own node

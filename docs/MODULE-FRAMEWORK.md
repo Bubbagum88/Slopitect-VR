@@ -136,7 +136,7 @@ seen on the headset yet.
 
 | Module | State |
 | --- | --- |
-| lib | New; `world_file()` added in batch 4a, the `thing_entered(node)` event in 4b, `thing_exited(name)` in 4c. PC (tests/zz_lib.gd, 36 checks) |
+| lib | New; `world_file()` added in batch 4a, the `thing_entered(node)` event in 4b, `thing_exited(name)` in 4c. `add_app_things(app)` / `app_of(node)`: apps' tagged pieces join the object list (tests/zz_app_things.gd). PC (tests/zz_lib.gd, 36 checks) |
 | projects | Batch 1. Emits `project_changed(project, folder)`; joins save through `lib.watch` instead of checking every frame; no `_process`. PC (zz_projects, 13) |
 | physics | Batch 1. Bodies come back when a thing joins the world (no 1 s scan); idle when nothing is physical; ground follows landscape through lib; `_find` is lib's `world_node`. A thing or body freed by something else is let go at once (a freed body is made again), not tripped over every frame (found by the headset agent). PC (zz_physics, 16) |
 | jelly | Batch 1. Off without an avatar, on when it loads (`lib.watch`). PC (zz_jelly, 13) |

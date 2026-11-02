@@ -13,6 +13,7 @@ The modules each test loads, in order (the order matters: some load lib last on 
 | `zz_agent_settings.gd` | `agent_settings zz_agent_settings` |
 | `zz_agent_tuning.gd` | `lib agent_tuning zz_agent_tuning` |
 | `zz_aimsg.gd` | `lib aimsg zz_aimsg` |
+| `zz_app_things.gd` | `lib vrui save projects tools inspect textures beatsaber gamecube zz_app_things` (beatsaber and gamecube optional: their checks run only when loaded) |
 | `zz_assets.gd` | `lib assets zz_assets` |
 | `zz_audio.gd` | `audio lib zz_audio` |
 | `zz_avatar.gd` | `controls vrui tts avatar lib zz_avatar` |
