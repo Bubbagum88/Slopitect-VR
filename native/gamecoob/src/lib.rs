@@ -30,6 +30,10 @@ mod ipl;
 #[allow(dead_code)]
 mod sdk;
 
+#[path = "../GameCoob-Bios/src/card/mod.rs"]
+#[allow(dead_code)]
+mod card;
+
 #[path = "../GameCoob-Bios/src/bs2/mod.rs"]
 #[allow(dead_code)]
 mod bs2;

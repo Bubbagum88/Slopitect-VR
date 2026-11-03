@@ -10,8 +10,11 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use crate::bs2;
+use crate::bs2::bs2main::{Bs2Main, FrameInput};
 use crate::bs2::menu::backend::{FakeCards, FakeDrive};
-use crate::bs2::menu::{Menu, MenuAssets, Pad, SysInfo};
+use crate::bs2::menu::volumes::{Entry, Volume, Volumes};
+use crate::bs2::menu::{MenuAssets, SysInfo};
+use crate::bs2::pad;
 use crate::ipl;
 
 pub const WIDTH: usize = bs2::render::EFB_W;
@@ -168,7 +171,48 @@ fn sys_info(time: [i32; 6]) -> SysInfo {
     SysInfo { time, entries: Vec::new(), timeout: 5, vendor: "Slopitect".into(), fw_ui: false }
 }
 
-/// The worker: load, then logic at 60 Hz and a picture after each catch-up.
+/// No disks to browse: the Memory Card screen's file side lists nothing.
+struct NoVolumes;
+
+impl Volumes for NoVolumes {
+    fn volumes(&mut self) -> Vec<Volume> {
+        Vec::new()
+    }
+    fn list(&mut self, _id: &str, _path: &str) -> Result<Vec<Entry>, String> {
+        Err("no volumes in Slopitect".into())
+    }
+    fn read(&mut self, _id: &str, _path: &str) -> Result<Vec<u8>, String> {
+        Err("no volumes in Slopitect".into())
+    }
+    fn write(&mut self, _id: &str, _path: &str, _bytes: &[u8]) -> Result<(), String> {
+        Err("no volumes in Slopitect".into())
+    }
+    fn mkdir(&mut self, _id: &str, _path: &str) -> Result<(), String> {
+        Err("no volumes in Slopitect".into())
+    }
+}
+
+/// gamecube.gd's pad bits as the GameCube pad's buttons.
+fn pad_buttons(bits: u32) -> u16 {
+    let mut out = 0;
+    for (bit, button) in [
+        (A, pad::PAD_BUTTON_A),
+        (B, pad::PAD_BUTTON_B),
+        (START, pad::PAD_BUTTON_START),
+        (UP, pad::PAD_BUTTON_UP),
+        (DOWN, pad::PAD_BUTTON_DOWN),
+        (LEFT, pad::PAD_BUTTON_LEFT),
+        (RIGHT, pad::PAD_BUTTON_RIGHT),
+    ] {
+        if bits & bit != 0 {
+            out |= button;
+        }
+    }
+    out
+}
+
+/// The worker: load, then logic at 60 Hz (BS2Main's loop, which reads the
+/// pad and finds new presses itself) and a picture after each catch-up.
 fn run(rom: Vec<u8>, shared: &Shared, ready: &mpsc::Sender<String>) {
     let parsed = ipl::Ipl::parse(&rom);
     let ipl = match parsed {
@@ -188,8 +232,7 @@ fn run(rom: Vec<u8>, shared: &Shared, ready: &mpsc::Sender<String>) {
     };
     drop(ipl);
     drop(rom);
-    let mut intro = bs2::Intro::new(&assets);
-    let mut menu: Option<Menu> = None;
+    let mut bs = Bs2Main::new(&assets, Box::new(FakeDrive::new()), Box::new(FakeCards::new()), Box::new(NoVolumes));
     let mut target = bs2::raster::Target::new(WIDTH, HEIGHT);
     shared.state.store(INTRO as u32, Ordering::Release);
     let _ = ready.send(String::new());
@@ -204,45 +247,28 @@ fn run(rom: Vec<u8>, shared: &Shared, ready: &mpsc::Sender<String>) {
             continue;
         }
         done = done.max(due.saturating_sub(MAX_CATCH_UP));
-        if shared.skip.swap(false, Ordering::AcqRel) && menu.is_none() {
-            while !intro.finished() {
-                intro.update(bs2::Input { a: false, egg: None });
-            }
+        if shared.skip.swap(false, Ordering::AcqRel) && bs.menu.is_none() {
+            bs.skip_intro();
         }
+        // A press shorter than a logic frame still counts: it's held for
+        // the first frame of this catch-up.
         let mut pressed = shared.pressed.swap(0, Ordering::AcqRel);
         while done < due {
             done += 1;
             shared.logic_frames.fetch_add(1, Ordering::Relaxed);
-            let held = shared.held.load(Ordering::Relaxed);
-            if let Some(m) = &mut menu {
-                intro.update(bs2::Input::default());
-                let pad = Pad {
-                    a: pressed & A != 0,
-                    b: pressed & B != 0,
-                    start: pressed & START != 0,
-                    up: pressed & UP != 0,
-                    down: pressed & DOWN != 0,
-                    left: pressed & LEFT != 0,
-                    right: pressed & RIGHT != 0,
-                    ..Pad::default()
-                };
-                m.info.time = *shared.clock.lock().unwrap();
-                let _ = m.update(&ma, &intro.camera_view(), &pad);
-                m.tick_guide();
-                m.update_fx(&ma);
-            } else {
-                intro.update(bs2::Input { a: (held | pressed) & A != 0, egg: None });
-                if intro.finished() {
-                    let time = *shared.clock.lock().unwrap();
-                    menu = Some(Menu::new(sys_info(time), &ma, Box::new(FakeDrive::new()), Box::new(FakeCards::new()), intro.menu.clone()));
-                    shared.state.store(MENU as u32, Ordering::Release);
-                }
-            }
+            let mut input = FrameInput::default();
+            input.pads[0].button = pad_buttons(shared.held.load(Ordering::Relaxed) | pressed);
             pressed = 0;
+            if let Some(m) = &mut bs.menu {
+                m.info.time = *shared.clock.lock().unwrap();
+            }
+            let _ = bs.update(&assets, &ma, &input, || sys_info(*shared.clock.lock().unwrap()));
+            let state = if bs.menu.is_some() { MENU } else { INTRO };
+            shared.state.store(state as u32, Ordering::Release);
         }
         let d0 = Instant::now();
         let threads = shared.threads.load(Ordering::Relaxed) as usize;
-        intro.render_with_menu(&mut target, &assets, &ma, menu.as_ref(), &|job| {
+        bs.render(&mut target, &assets, &ma, &|job| {
             std::thread::scope(|sc| {
                 for _ in 1..threads {
                     sc.spawn(|| job.work());
