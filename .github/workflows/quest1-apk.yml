@@ -26,7 +26,7 @@ env:
   # GameCoob-Bios (isaac's own): the GameCube intro and cube menu in Rust,
   # for gamecube.gd through the gamecoob extension (native/gamecoob). No
   # Nintendo data is in it; the intro reads the player's own ipl.bin.
-  GAMECOOB_COMMIT: 93b3e4a5c851bddbca3c34d64e4e1bbc0e724c53
+  GAMECOOB_COMMIT: a32a376591e33461b246d01bc9cf2248b64cf697
 
 jobs:
   whisper:
