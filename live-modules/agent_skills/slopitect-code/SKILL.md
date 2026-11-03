@@ -16,6 +16,20 @@ wants a new feature; prefer existing commands and panels for everything else.
    answer; "the person said No" means don't retry without asking them.
 3. If it doesn't compile, the error says which line. Fix the file and
    `code_load` again (a changed file needs a new Yes).
+
+To change a module that's already there, never read and rewrite the whole
+file: the big ones (holdout, beatsaber, vrui) are over 100 KB, more than one
+reply can hold, and `files_read` replies are cut at 8,000 characters. Use the
+edit module instead:
+
+- `edit_find` (path, text) gives the line numbers where something is.
+- `edit_view` (path, from, lines) shows numbered lines; `next_from` says
+  where to go on. Look at a function before changing it.
+- `edit_replace` (path, old, new) swaps one exact piece. Copy `old` from
+  `edit_view` without the line numbers, tabs and all, with enough lines
+  around it to be found only once. Make one small change per call, then
+  `code_load` the module (it needs the person's Yes again).
+- If the edit module isn't loaded, ask the person to load it.
 4. `code_list` shows each module, whether it's loaded and its last error;
    `code_unload` takes one out.
 5. Errors a loaded module hits while it runs (a null, a bad index, its own
