@@ -256,8 +256,11 @@ func _load_now(module_name: String, sha256: String) -> Dictionary:
 		return {"ok": false, "error": "it didn't load: " + problem}
 	_errors.erase(module_name)
 	print("Slopitect code: loaded \"%s\"" % module_name)
-	return {"ok": true, "loaded": module_name, "commands": ctx["server"].describe_commands().keys().filter(
-		func(cmd): return ctx["server"].describe_commands()[cmd]["module"] == module_name)}
+	# The commands it added. One pass over the table: building it again for
+	# each command made every load cost commands squared (seconds at startup).
+	var described: Dictionary = ctx["server"].describe_commands()
+	return {"ok": true, "loaded": module_name, "commands": described.keys().filter(
+		func(cmd): return described[cmd]["module"] == module_name)}
 
 
 func _uses(source: String) -> Array:
