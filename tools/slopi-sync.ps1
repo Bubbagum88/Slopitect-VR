@@ -271,8 +271,9 @@ if ($Load) {
         Write-Error "The app isn't answering, so nothing was loaded (is Slopitect open and the headset awake?): $($list.error)"
         exit 1
     }
-    # Changed files, and ones the app has but isn't running.
-    $toLoad = @($wanted | Where-Object { $changed -contains $_ -or ($app[$_] -and -not $app[$_].loaded) })
+    # Changed files, ones the app has but isn't running, and ones pushed
+    # earlier that still wait for a Yes (the headset slept before loading).
+    $toLoad = @($wanted | Where-Object { $changed -contains $_ -or ($app[$_] -and (-not $app[$_].loaded -or $app[$_].changed_since_approved)) })
     if ($toLoad.Count -eq 0) { Write-Host "Every one of these modules is already loaded." }
     foreach ($n in $toLoad) {
         $needsYes = -not ($app[$n] -and $app[$n].approved -and $changed -notcontains $n)

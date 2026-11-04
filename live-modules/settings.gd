@@ -37,8 +37,8 @@ const PANEL := "settings"
 const WIDTH := 0.42
 const FULL := [0.42, 0.055]
 const KINDS := ["choice", "slider", "toggle", "button"]
-const PAGES := ["Move", "Look", "Other", "Speech"]
-const PAGE_OF := {"controls": "Move", "vrui": "Look", "hands": "Look", "avatar": "Look", "tts": "Speech", "vtt": "Speech"}
+const PAGES := ["Move", "Look", "Sound", "Games", "Other", "Speech"]
+const PAGE_OF := {"controls": "Move", "vrui": "Look", "hands": "Look", "avatar": "Look", "audio": "Sound", "beatsaber": "Games", "holdout": "Games", "tts": "Speech", "vtt": "Speech"}
 const PAGE_OTHER := "Other"
 
 var _signature := ""  # what the window was last drawn from

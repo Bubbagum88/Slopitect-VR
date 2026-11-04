@@ -33,7 +33,7 @@ const SAVE_PATH := "user://avatar.json"
 const BODY_SIZE := 0.22
 const BODY_COLOR := Color(0.88, 0.2, 0.22)
 const HAND_RADIUS := 0.035
-const STATES := ["idle", "thinking", "talking", "happy", "wave"]
+const STATES := ["idle", "thinking", "talking", "happy", "wave", "hands_up", "dead"]
 const SHAPES := ["box", "sphere", "cylinder", "cone", "torus"]
 const MAX_PARTS := 12
 const TURN_SPEED := 3.0
@@ -58,6 +58,7 @@ const EMOTIONS := {
 	"surprised": {"smile": 0.0, "eyes": 1.3, "brow_y": 0.014, "brow_tilt": 0.0, "brow_lift": 0.0, "mouth_w": 0.6, "rest_open": 0.9},
 	"angry": {"smile": -0.5, "eyes": 0.75, "brow_y": -0.006, "brow_tilt": 22.0, "brow_lift": 0.0, "mouth_w": 0.9, "rest_open": 0.0},
 	"confused": {"smile": -0.25, "eyes": 1.0, "brow_y": 0.0, "brow_tilt": 0.0, "brow_lift": 0.012, "mouth_w": 0.8, "rest_open": 0.1},
+	"cute": {"smile": 1.0, "eyes": 0.12, "brow_y": 0.005, "brow_tilt": -6.0, "brow_lift": 0.0, "mouth_w": 1.2, "rest_open": 0.3},
 	"sleepy": {"smile": 0.0, "eyes": 0.3, "brow_y": -0.004, "brow_tilt": -6.0, "brow_lift": 0.0, "mouth_w": 0.7, "rest_open": 0.15},
 }
 
@@ -95,8 +96,8 @@ const DEFAULT_THEME := {
 const OUTFITS := {
 	"none": [],
 	"top_hat": [
-		{"shape": "cylinder", "size": [0.2, 0.012, 0.2], "position": [0, 0.116, 0], "color": "#161616"},
-		{"shape": "cylinder", "size": [0.12, 0.12, 0.12], "position": [0, 0.18, 0], "color": "#161616"},
+		{"shape": "cylinder", "size": [0.26, 0.012, 0.26], "position": [0, 0.116, 0], "color": "#161616"},
+		{"shape": "cylinder", "size": [0.12, 0.48, 0.12], "position": [0, 0.36, 0], "color": "#161616"},
 		{"shape": "cylinder", "size": [0.124, 0.02, 0.124], "position": [0, 0.135, 0], "color": "#7a1c1c"},
 	],
 	"party_hat": [
@@ -106,6 +107,14 @@ const OUTFITS := {
 	"crown": [
 		{"shape": "cylinder", "size": [0.16, 0.05, 0.16], "position": [0, 0.135, 0], "color": "#f2c230"},
 		{"shape": "sphere", "size": [0.025, 0.025, 0.025], "position": [0, 0.14, -0.08], "color": "#3bd16f"},
+		{"shape": "cone", "size": [0.04, 0.06, 0.04], "position": [0, 0.17, 0.07], "color": "#f2c230"},
+		{"shape": "cone", "size": [0.04, 0.06, 0.04], "position": [0.067, 0.17, 0.022], "color": "#f2c230"},
+		{"shape": "cone", "size": [0.04, 0.06, 0.04], "position": [0.041, 0.17, -0.057], "color": "#f2c230"},
+		{"shape": "cone", "size": [0.04, 0.06, 0.04], "position": [-0.041, 0.17, -0.057], "color": "#f2c230"},
+		{"shape": "cone", "size": [0.04, 0.06, 0.04], "position": [-0.067, 0.17, 0.022], "color": "#f2c230"},
+		{"shape": "sphere", "size": [0.03, 0.03, 0.03], "position": [0.082, 0.135, 0], "color": "#e03338"},
+		{"shape": "sphere", "size": [0.03, 0.03, 0.03], "position": [-0.082, 0.135, 0], "color": "#3d7bff"},
+		{"shape": "sphere", "size": [0.025, 0.025, 0.025], "position": [0, 0.2, 0], "color": "#ffffff"},
 	],
 	"bow_tie": [
 		{"shape": "cone", "size": [0.045, 0.05, 0.015], "position": [-0.026, -0.095, -0.115], "rotation": [0, 0, -90], "color": "#2d2d8a"},
@@ -113,13 +122,17 @@ const OUTFITS := {
 		{"shape": "sphere", "size": [0.022, 0.022, 0.016], "position": [0, -0.095, -0.12], "color": "#3d3db0"},
 	],
 	"headphones": [
-		{"shape": "torus", "size": [0.25, 0.25, 0.25], "position": [0, 0.0, 0], "rotation": [90, 0, 0], "color": "#2a2a2a"},
-		{"shape": "cylinder", "size": [0.06, 0.03, 0.06], "position": [-0.12, 0, 0], "rotation": [0, 0, 90], "color": "#d94f9b"},
-		{"shape": "cylinder", "size": [0.06, 0.03, 0.06], "position": [0.12, 0, 0], "rotation": [0, 0, 90], "color": "#d94f9b"},
+		{"shape": "box", "size": [0.26, 0.03, 0.03], "position": [0, 0.17, 0], "color": "#2a2a2a"},
+		{"shape": "box", "size": [0.03, 0.12, 0.03], "position": [-0.13, 0.11, 0], "color": "#2a2a2a"},
+		{"shape": "box", "size": [0.03, 0.12, 0.03], "position": [0.13, 0.11, 0], "color": "#2a2a2a"},
+		{"shape": "sphere", "size": [0.06, 0.11, 0.11], "position": [-0.13, 0.05, 0], "color": "#2a2a2a"},
+		{"shape": "sphere", "size": [0.06, 0.11, 0.11], "position": [0.13, 0.05, 0], "color": "#2a2a2a"},
 	],
 }
 
 var _root: Node3D      # follows the avatar's place; turns to face you
+var _skin_parts: Array = []  # body and hands, for the body colour setting
+var _colour_text := "#e03338"
 var _body: Node3D      # bobs and leans inside _root
 var _outfit_holder: Node3D
 var _eyes: Array[MeshInstance3D] = []
@@ -174,6 +187,7 @@ func setup() -> String:
 	_build()
 	_load()
 	_wear(_outfit)
+	_set_colour(_colour_text)
 	_root.global_position = Vector3(-0.6, 1.3, -1.0)
 
 	register("avatar_move", _move_command, "move the avatar: position [x, y, z]")
@@ -185,6 +199,7 @@ func setup() -> String:
 	register("avatar_outfits", _outfits_command, "list the avatar's outfits")
 	register("avatar_outfit_add", _outfit_add_command, "add or replace an outfit: name, parts [{shape (%s), size [x,y,z], position [x,y,z], optional rotation [x,y,z] degrees, color}]" % ", ".join(SHAPES))
 	register("avatar_outfit_remove", _outfit_remove_command, "remove an outfit that was added: name")
+	register("avatar_colour", _colour_command, "the avatar's body colour: color (#rrggbb or a colour name)")
 	return ""
 
 
@@ -235,6 +250,7 @@ func _build() -> void:
 
 	var cube := _mesh_part("box", Vector3.ONE * BODY_SIZE, BODY_COLOR)
 	_body.add_child(cube)
+	_skin_parts.append(cube)
 
 	# The face is on the cube's -z side: big dark eyes with a light dot,
 	# brows, pink cheeks and a mouth that's drawn fresh as it moves.
@@ -270,6 +286,7 @@ func _build() -> void:
 	for side in [-1, 1]:
 		var hand := _mesh_part("sphere", Vector3.ONE * HAND_RADIUS * 2.0, BODY_COLOR)
 		_root.add_child(hand)
+		_skin_parts.append(hand)
 		_hands.append(hand)
 
 	_outfit_holder = Node3D.new()
@@ -396,7 +413,7 @@ func _animate_body(state: String) -> void:
 		lean += 4.0
 		bob *= 0.5
 	_body.position = Vector3(0, bob + hop, 0)
-	_body.rotation_degrees = Vector3(0, 0, lean)
+	_body.rotation_degrees = Vector3(0, 0, 90.0 if state == "dead" else lean + (7.0 if _emotion == "cute" else 0.0))
 
 	for i in _hands.size():
 		var side := -1.0 if i == 0 else 1.0
@@ -412,6 +429,9 @@ func _animate_body(state: String) -> void:
 					at = Vector3(0.2 + sin(_time * 10.0) * 0.03, 0.12, -0.02)
 			"happy":
 				at.y = 0.08 + sin(phase * 2.0) * 0.02
+			"hands_up":
+				# Both hands raised, up beside the head.
+				at = Vector3(side * 0.24, 0.36 + sin(_time * 6.0) * 0.012, -0.02)
 			"talking":
 				at.y += sin(_time * 6.0 + i) * 0.015
 		if _emotion == "sad":
@@ -893,6 +913,28 @@ func _outfit_command(request: Dictionary) -> Dictionary:
 	return {"ok": true, "outfit": outfit_name}
 
 
+# The body colour: the cube and the hands. Settings and avatar_colour both use it.
+func _colour_command(request: Dictionary) -> Dictionary:
+	var text = request.get("color")
+	if typeof(text) != TYPE_STRING or not _set_colour(text):
+		return {"ok": false, "error": "\"color\" must be #rrggbb or a colour name"}
+	_save()
+	return {"ok": true, "color": _colour_text}
+
+
+# Paints the cube and hands; false when the text isn't a colour.
+func _set_colour(text: String) -> bool:
+	var colour := Color.from_string(text, Color(0, 0, 0, 0))
+	if colour.a == 0.0:
+		return false
+	_colour_text = "#" + colour.to_html(false)
+	for part in _skin_parts:
+		var mesh := part as MeshInstance3D
+		if mesh and mesh.material_override is StandardMaterial3D:
+			(mesh.material_override as StandardMaterial3D).albedo_color = colour
+	return true
+
+
 # Its section of the Settings window (settings.gd): the outfit it wears.
 func settings_info() -> Dictionary:
 	var options := []
@@ -900,6 +942,7 @@ func settings_info() -> Dictionary:
 		options.append({"label": outfit_name, "value": outfit_name})
 	return {"title": "The avatar's outfit", "order": 40, "settings": [
 		{"id": "outfit", "type": "choice", "value": _outfit, "options": options, "columns": 2, "set": {"cmd": "avatar_outfit", "name": "{value}"}},
+		{"id": "body", "label": "Body colour", "type": "choice", "value": _colour_text, "columns": 3, "options": [{"label": "Red", "value": "#e03338", "color": "#e03338"}, {"label": "Blue", "value": "#3b6bff", "color": "#3b6bff"}, {"label": "Green", "value": "#3bd16f", "color": "#3bd16f"}, {"label": "Yellow", "value": "#f2c230", "color": "#f2c230"}, {"label": "Pink", "value": "#ff3b7a", "color": "#ff3b7a"}, {"label": "White", "value": "#f4f4f4", "color": "#f4f4f4"}, {"label": "Orange", "value": "#ff8a3d", "color": "#ff8a3d"}, {"label": "Purple", "value": "#9b59d0", "color": "#9b59d0"}, {"label": "Cyan", "value": "#3bd6e0", "color": "#3bd6e0"}, {"label": "Black", "value": "#16161c", "color": "#16161c"}, {"label": "Brown", "value": "#8b5a2b", "color": "#8b5a2b"}, {"label": "Grey", "value": "#8a9299", "color": "#8a9299"}], "set": {"cmd": "avatar_colour", "color": "{value}"}},
 	]}
 
 
@@ -957,6 +1000,9 @@ func _load() -> void:
 			_custom_outfits = custom
 			var wearing = json.data.get("outfit", "none")
 			_outfit = wearing if _all_outfits().has(wearing) else "none"
+			var colour = json.data.get("color", _colour_text)
+			if typeof(colour) == TYPE_STRING:
+				_colour_text = colour
 			print("Slopitect avatar: wearing \"%s\", %d custom outfits" % [_outfit, _custom_outfits.size()])
 			return
 	var kept := SAVE_PATH + ".bad"
@@ -969,5 +1015,5 @@ func _save() -> void:
 	if file == null:
 		push_error("Slopitect avatar: could not save %s (%s)" % [SAVE_PATH, error_string(FileAccess.get_open_error())])
 		return
-	file.store_string(JSON.stringify({"outfit": _outfit, "custom_outfits": _custom_outfits}, "  "))
+	file.store_string(JSON.stringify({"outfit": _outfit, "color": _colour_text, "custom_outfits": _custom_outfits}, "  "))
 	file.close()
