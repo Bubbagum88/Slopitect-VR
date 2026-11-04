@@ -150,7 +150,17 @@ func _run() -> void:
 	avatar._check_engine(0.1, false)
 	avatar.set_process(true)
 
-	# Unload and reload keeps the outfit.
+	# Body colour and the new states.
+	_check("bad colour refused", not _r({"cmd": "avatar_colour", "color": "notacolour"}).ok)
+	var col = _r({"cmd": "avatar_colour", "color": "#3b6bff"})
+	_check("colour set", col.ok and col.color == "#3b6bff", col)
+	_check("colour saved", FileAccess.get_file_as_string("user://avatar.json").contains("#3b6bff"))
+	_check("hands_up and dead states", avatar.set_state("hands_up") and avatar.set_state("dead"))
+	_check("cute emotion", avatar.set_emotion("cute"))
+	avatar.set_state("idle")
+	avatar.set_emotion("neutral")
+
+	# Unload and reload keeps the outfit and colour.
 	var un = _r({"cmd": "code_unload", "name": "avatar"})
 	_check("unload", un.ok, un)
 	await _wait(2)
@@ -160,5 +170,6 @@ func _run() -> void:
 		ld = await ld["wait"].done
 	_check("reload", ld.get("ok", false), ld)
 	_check("outfit kept", _r({"cmd": "avatar_outfits"}).wearing == "wizard")
+	_check("colour kept", ctx["modules"].module("avatar")._colour_text == "#3b6bff")
 	print("RESULT done, %d failed" % _fails)
 	get_tree().quit(_fails)
