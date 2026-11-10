@@ -59,6 +59,23 @@ func _go() -> void:
 	_heard.clear()
 	_r({"cmd": "ui_update", "id_panel": "zz_win", "visible": true})
 	_check("shown through ui_update", ["shown", "zz_win", true] in _heard and ["changed", "zz_win"] in _heard, _heard)
+	# Several elements out in one call: one panel_changed, one save at the end of the frame.
+	_r({"cmd": "ui_element_add", "id_panel": "zz_win", "element": {"id": "u", "type": "text", "text": "u"}})
+	_r({"cmd": "ui_element_add", "id_panel": "zz_win", "element": {"id": "v", "type": "text", "text": "v"}})
+	_heard.clear()
+	r = _r({"cmd": "ui_element_remove", "id_panel": "zz_win", "ids": ["u", "v", "nope"]})
+	var left: Array = _r({"cmd": "ui_get", "id_panel": "zz_win"}).get("panel", {}).get("elements", []).map(func(e): return e["id"])
+	_check("ids: removed together, one change", r.get("removed") == ["u", "v"] and r.get("missing") == ["nope"]
+		and _heard == [["changed", "zz_win"]] and left == ["t"], [r, _heard, left])
+	_check("ids: none there is an error", not _r({"cmd": "ui_element_remove", "id_panel": "zz_win", "ids": ["nope"]}).get("ok", true))
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var saved_ids := []
+	var saved = JSON.parse_string(FileAccess.get_file_as_string("user://ui.json"))
+	for panel in (saved if saved is Array else []):
+		if panel.get("id_panel") == "zz_win":
+			saved_ids = panel.get("elements", []).map(func(e): return e["id"])
+	_check("ui.json written by the end of the frame", saved_ids == ["t"], saved_ids)
 	_heard.clear()
 	_r({"cmd": "ui_remove", "id_panel": "zz_win"})
 	_check("removed: changed and hidden", ["changed", "zz_win"] in _heard and ["shown", "zz_win", false] in _heard, _heard)

@@ -237,8 +237,10 @@ var _menu_player: AudioStreamPlayer  # music while the menus are open
 var _menu_loop: Timer                # brings a preview back to its start
 var _menu_for := ""                  # what the menu music is playing ("calm" or a song folder)
 var _menu_from := 0.0
-var _calm: AudioStreamWAV            # the calm loop, made on a worker thread at load
+var _calm: AudioStreamWAV            # the calm loop, made on a worker thread the first time you go to the Rhythm world
 var _calm_task := -1
+var _made_cut: AudioStream          # the made cut sound, made on a worker thread the first time you go to the Rhythm world
+var _cut_task := -1
 var _hidden_boxes: Array = []
 var _sabers := {}           # side -> Node3D on that controller
 var _trails := {}           # side -> {"node", "mesh", "pts", "color"}
@@ -341,9 +343,7 @@ func setup() -> String:
 	_menu_loop.one_shot = true
 	_menu_loop.timeout.connect(_menu_again)
 	add_child(_menu_loop)
-	_calm_task = WorkerThreadPool.add_task(_make_calm, false, "Rhythm Sabers menu music")  # off the main thread: no hitch
 	_hit_player = AudioStreamPlayer.new()
-	_hit_player.stream = _hit_sound()
 	_hit_player.max_polyphony = 4
 	_hit_player.volume_db = CUT_MADE_DB
 	add_child(_hit_player)
@@ -403,6 +403,9 @@ func _exit_tree() -> void:
 	if _calm_task >= 0:
 		WorkerThreadPool.wait_for_task_completion(_calm_task)
 		_calm_task = -1
+	if _cut_task >= 0:
+		WorkerThreadPool.wait_for_task_completion(_cut_task)
+		_cut_task = -1
 	if _lib and _lib.info_changed.is_connected(_on_info_changed):
 		_lib.info_changed.disconnect(_on_info_changed)
 	_stage_off()
@@ -1305,6 +1308,7 @@ const STAGE_FRAME_GAP := 3.5     # metres between them
 func _stage_on() -> void:
 	if _stage != null:
 		return
+	_want_sounds()
 	var scene := ctx["world"].get_parent() as Node if ctx.get("world") else null
 	if scene:
 		var env := scene.get_node_or_null("WorldEnvironment") as WorldEnvironment
@@ -1454,6 +1458,7 @@ func _menu_music() -> void:
 		want = "calm"
 		if _calm == null:
 			_menu_stop()  # still being made; it starts when ready (_calm_made)
+			_want_sounds()
 			return
 		stream = _calm
 	_menu_for = want
@@ -1483,14 +1488,42 @@ func _menu_stop() -> void:
 	_menu_for = ""
 
 
+# The menu music and the made cut sound take a while to make, so they're
+# made once, on worker threads (no hitch), the first time you go to the
+# Rhythm world, not at start-up. Until they're ready there's no sound.
+func _want_sounds() -> void:
+	if _calm == null and _calm_task < 0:
+		_calm_task = WorkerThreadPool.add_task(_make_calm, false, "Rhythm Sabers menu music")
+	if _made_cut == null and _cut_task < 0:
+		_cut_task = WorkerThreadPool.add_task(_make_cut, false, "Rhythm Sabers cut sound")
+
+
 func _make_calm() -> void:
 	var made := _calm_loop()
 	_calm_made.call_deferred(made)
 
 
 func _calm_made(made: AudioStreamWAV) -> void:
+	if _calm_task >= 0:
+		WorkerThreadPool.wait_for_task_completion(_calm_task)
+		_calm_task = -1
 	_calm = made
 	_menu_music()
+
+
+func _make_cut() -> void:
+	var made := _hit_sound()
+	_cut_made.call_deferred(made)
+
+
+func _cut_made(made: AudioStream) -> void:
+	if _cut_task >= 0:
+		WorkerThreadPool.wait_for_task_completion(_cut_task)
+		_cut_task = -1
+	_made_cut = made
+	if _cut_files.is_empty() and _hit_player:  # no cut sound files: the made one
+		_hit_player.stream = made
+		_hit_player.volume_db = CUT_MADE_DB
 
 
 # The calm loop: eight seconds, two soft chords (pads of detuned sines with
@@ -2559,7 +2592,7 @@ func _hit(a: Dictionary, side: String) -> void:
 		"last_centre_off_cm": snappedf(off * 100.0, 0.1), "last_swing_cm": snappedf(box.get_longest_axis_size() * 100.0, 1.0)}
 	_judge(points, "", pos)
 	_pulse(hand, 0.6, 0.06)
-	if game["hit_sounds"]:
+	if game["hit_sounds"] and _hit_player.stream != null:  # null while the made one is still being made
 		_hit_player.play()
 
 
@@ -2780,7 +2813,7 @@ func _load_cut_sounds() -> void:
 		takes.add_stream(-1, take)
 	if takes.streams_count == 0:
 		_cut_files = ""
-		_hit_player.stream = _hit_sound()
+		_hit_player.stream = _made_cut  # null until it's made; _cut_made puts it in then
 		_hit_player.volume_db = CUT_MADE_DB
 		return
 	_hit_player.stream = takes

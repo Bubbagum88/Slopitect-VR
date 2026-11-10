@@ -115,6 +115,7 @@ func _go() -> void:
 	var long_labels: Array = _h.settings_info()["settings"].filter(func(s): return s.get("label", "").length() > 40)
 	_check("Settings labels 40 characters or less", long_labels.is_empty(), long_labels)
 	_check("no game: actions pass through", not _h.on_action("point", true))
+	_check("sounds not made at load (start-up speed)", _h._sounds.is_empty() and _h._sounds_task < 0)
 	var floor_node: Node3D = ctx["world"].get_parent().get_node_or_null("Floor")
 	var sky_env = ctx["world"].get_parent().get_node("WorldEnvironment").environment
 
@@ -125,6 +126,11 @@ func _go() -> void:
 	_check("the night and the lodge are up", _h._arena != null and floor_node != null and not floor_node.visible
 		and ctx["world"].get_parent().get_node("WorldEnvironment").environment != sky_env)
 	_check("running and processing", _h.running and _h.is_processing())
+	for i in 600:  # the sounds, made on a worker thread on the way in
+		if not _h._sounds.is_empty():
+			break
+		await _frames(1)
+	_check("sounds made on the way in, off the main thread", _h._sounds.size() == 16 and _h._sounds_task < 0)
 	await _frames(2)
 	_check("the window stays out of the way while you play", not _run({"cmd": "ui_get", "id_panel": "holdout"}).get("panel", {}).get("visible", false))
 	_check("the M1911 in the right hand", ctx["right"].has_node("holdout_gun") and _h._gun().get("id") == "m1911")
