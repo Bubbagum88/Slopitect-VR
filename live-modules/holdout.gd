@@ -394,6 +394,7 @@ var _hidden_boxes: Array = []
 var _gun_meshes := {}
 var _mats := {}
 var _sounds := {}
+var _sounds_task := -1  # the worker making _sounds, or -1
 var _players: Array = []         # without audio.gd
 var _next_player := 0
 var _rng := RandomNumberGenerator.new()
@@ -460,7 +461,6 @@ func setup() -> String:
 	register("holdout_leave", _leave, "end the game and go back from the Holdout world to the world you came from")
 	_rng.randomize()
 	_make_materials()
-	_make_sounds()
 	for i in 4:
 		var p := AudioStreamPlayer.new()
 		add_child(p)
@@ -504,6 +504,9 @@ func _audio_gone(_old: SlopitectModule) -> void:
 
 
 func _exit_tree() -> void:
+	if _sounds_task >= 0:
+		WorkerThreadPool.wait_for_task_completion(_sounds_task)
+		_sounds_task = -1
 	_end_game(false)
 	_sprint(false)
 	_stage_off()
@@ -1021,6 +1024,7 @@ func _status(_request: Dictionary) -> Dictionary:
 func _stage_on() -> void:
 	if _arena != null:
 		return
+	_want_sounds()
 	var scene := ctx["world"].get_parent() as Node if ctx.get("world") else null
 	if scene:
 		var env := scene.get_node_or_null("WorldEnvironment") as WorldEnvironment
@@ -3575,8 +3579,22 @@ func _add_box_turned(st: SurfaceTool, centre: Vector3, size: Vector3, color: Col
 
 
 # --- Sounds --------------------------------------------------------------------------------
-# Made once at load, short and small; played through audio.gd (3D where
-# they happen) or, without it, through this module's own players.
+# Made once, short and small, the first time you go to the Holdout world (on
+# a worker thread, so neither start-up nor the walk in waits for them);
+# played through audio.gd (3D where they happen) or, without it, through this
+# module's own players. Until they're made, there's simply no sound.
+
+func _want_sounds() -> void:
+	if _sounds.is_empty() and _sounds_task < 0:
+		_sounds_task = WorkerThreadPool.add_task(_make_sounds, false, "Holdout sounds")
+
+
+func _sounds_made(made: Dictionary) -> void:
+	if _sounds_task >= 0:
+		WorkerThreadPool.wait_for_task_completion(_sounds_task)
+		_sounds_task = -1
+	_sounds = made
+
 
 func _sound(kind: String, at, volume := 1.0, pitch := 1.0) -> void:
 	if not settings["sounds"] or not _sounds.has(kind):
@@ -3597,22 +3615,24 @@ func _sound(kind: String, at, volume := 1.0, pitch := 1.0) -> void:
 
 
 func _make_sounds() -> void:
-	_sounds["shot"] = _synth(0.22, {"noise": 0.9, "noise_decay": 18.0, "tone": [180.0, 60.0], "tone_amp": 0.6, "tone_decay": 14.0, "low": 4500.0})
-	_sounds["shot_heavy"] = _synth(0.45, {"noise": 1.0, "noise_decay": 9.0, "tone": [120.0, 40.0], "tone_amp": 0.8, "tone_decay": 8.0, "low": 3000.0})
-	_sounds["click"] = _synth(0.05, {"noise": 0.6, "noise_decay": 120.0, "tone": [2400.0, 1800.0], "tone_amp": 0.3, "tone_decay": 90.0, "low": 9000.0})
-	_sounds["reload"] = _synth(0.35, {"noise": 0.5, "noise_decay": 30.0, "tone": [900.0, 500.0], "tone_amp": 0.2, "tone_decay": 25.0, "low": 6000.0, "second": 0.2})
-	_sounds["hit"] = _synth(0.18, {"noise": 0.6, "noise_decay": 25.0, "tone": [140.0, 70.0], "tone_amp": 0.7, "tone_decay": 20.0, "low": 1500.0})
-	_sounds["groan"] = _synth(1.1, {"noise": 0.15, "noise_decay": 1.5, "tone": [95.0, 70.0], "tone_amp": 0.7, "tone_decay": 1.6, "low": 900.0, "saw": true, "wobble": 5.0, "attack": 0.25})
-	_sounds["rip"] = _synth(0.4, {"noise": 0.9, "noise_decay": 7.0, "tone": [300.0, 120.0], "tone_amp": 0.3, "tone_decay": 10.0, "low": 2500.0, "crackle": true})
-	_sounds["nail"] = _synth(0.15, {"noise": 0.5, "noise_decay": 40.0, "tone": [700.0, 650.0], "tone_amp": 0.6, "tone_decay": 30.0, "low": 7000.0})
-	_sounds["bell"] = _synth(2.0, {"noise": 0.0, "tone": [220.0, 218.0], "tone_amp": 0.5, "tone_decay": 1.4, "low": 4000.0, "overtone": 2.76})
-	_sounds["buy"] = _synth(0.35, {"noise": 0.0, "tone": [660.0, 990.0], "tone_amp": 0.4, "tone_decay": 6.0, "low": 8000.0})
-	_sounds["deny"] = _synth(0.3, {"noise": 0.0, "tone": [180.0, 150.0], "tone_amp": 0.45, "tone_decay": 6.0, "low": 3000.0, "saw": true})
-	_sounds["gulp"] = _synth(0.5, {"noise": 0.2, "noise_decay": 8.0, "tone": [300.0, 520.0], "tone_amp": 0.5, "tone_decay": 5.0, "low": 2500.0, "wobble": 12.0})
-	_sounds["crate"] = _synth(2.2, {"noise": 0.0, "tone": [520.0, 880.0], "tone_amp": 0.35, "tone_decay": 0.9, "low": 6000.0, "wobble": 9.0, "overtone": 1.5})
-	_sounds["hurt"] = _synth(0.3, {"noise": 0.7, "noise_decay": 12.0, "tone": [90.0, 50.0], "tone_amp": 0.8, "tone_decay": 9.0, "low": 1200.0})
-	_sounds["zap"] = _synth(0.4, {"noise": 0.8, "noise_decay": 9.0, "tone": [1200.0, 300.0], "tone_amp": 0.4, "tone_decay": 8.0, "low": 9000.0, "crackle": true})
-	_sounds["boom"] = _synth(0.9, {"noise": 1.0, "noise_decay": 4.0, "tone": [80.0, 30.0], "tone_amp": 1.0, "tone_decay": 4.0, "low": 1200.0})
+	var made := {}
+	made["shot"] = _synth(0.22, {"noise": 0.9, "noise_decay": 18.0, "tone": [180.0, 60.0], "tone_amp": 0.6, "tone_decay": 14.0, "low": 4500.0})
+	made["shot_heavy"] = _synth(0.45, {"noise": 1.0, "noise_decay": 9.0, "tone": [120.0, 40.0], "tone_amp": 0.8, "tone_decay": 8.0, "low": 3000.0})
+	made["click"] = _synth(0.05, {"noise": 0.6, "noise_decay": 120.0, "tone": [2400.0, 1800.0], "tone_amp": 0.3, "tone_decay": 90.0, "low": 9000.0})
+	made["reload"] = _synth(0.35, {"noise": 0.5, "noise_decay": 30.0, "tone": [900.0, 500.0], "tone_amp": 0.2, "tone_decay": 25.0, "low": 6000.0, "second": 0.2})
+	made["hit"] = _synth(0.18, {"noise": 0.6, "noise_decay": 25.0, "tone": [140.0, 70.0], "tone_amp": 0.7, "tone_decay": 20.0, "low": 1500.0})
+	made["groan"] = _synth(1.1, {"noise": 0.15, "noise_decay": 1.5, "tone": [95.0, 70.0], "tone_amp": 0.7, "tone_decay": 1.6, "low": 900.0, "saw": true, "wobble": 5.0, "attack": 0.25})
+	made["rip"] = _synth(0.4, {"noise": 0.9, "noise_decay": 7.0, "tone": [300.0, 120.0], "tone_amp": 0.3, "tone_decay": 10.0, "low": 2500.0, "crackle": true})
+	made["nail"] = _synth(0.15, {"noise": 0.5, "noise_decay": 40.0, "tone": [700.0, 650.0], "tone_amp": 0.6, "tone_decay": 30.0, "low": 7000.0})
+	made["bell"] = _synth(2.0, {"noise": 0.0, "tone": [220.0, 218.0], "tone_amp": 0.5, "tone_decay": 1.4, "low": 4000.0, "overtone": 2.76})
+	made["buy"] = _synth(0.35, {"noise": 0.0, "tone": [660.0, 990.0], "tone_amp": 0.4, "tone_decay": 6.0, "low": 8000.0})
+	made["deny"] = _synth(0.3, {"noise": 0.0, "tone": [180.0, 150.0], "tone_amp": 0.45, "tone_decay": 6.0, "low": 3000.0, "saw": true})
+	made["gulp"] = _synth(0.5, {"noise": 0.2, "noise_decay": 8.0, "tone": [300.0, 520.0], "tone_amp": 0.5, "tone_decay": 5.0, "low": 2500.0, "wobble": 12.0})
+	made["crate"] = _synth(2.2, {"noise": 0.0, "tone": [520.0, 880.0], "tone_amp": 0.35, "tone_decay": 0.9, "low": 6000.0, "wobble": 9.0, "overtone": 1.5})
+	made["hurt"] = _synth(0.3, {"noise": 0.7, "noise_decay": 12.0, "tone": [90.0, 50.0], "tone_amp": 0.8, "tone_decay": 9.0, "low": 1200.0})
+	made["zap"] = _synth(0.4, {"noise": 0.8, "noise_decay": 9.0, "tone": [1200.0, 300.0], "tone_amp": 0.4, "tone_decay": 8.0, "low": 9000.0, "crackle": true})
+	made["boom"] = _synth(0.9, {"noise": 1.0, "noise_decay": 4.0, "tone": [80.0, 30.0], "tone_amp": 1.0, "tone_decay": 4.0, "low": 1200.0})
+	_sounds_made.call_deferred(made)  # back on the main thread
 
 
 # A short sound: noise (low-passed, maybe crackling) and a tone sliding from

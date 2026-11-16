@@ -178,6 +178,7 @@ var _camera: XRCamera3D
 var _left: XRController3D
 var _right: XRController3D
 var _holders := {}  # id_panel -> Node3D
+var _save_queued := false  # ui.json is written at the end of the frame (_save)
 var _inputs := {}  # "panel/element" -> typed text (not saved)
 var _live_text := {}  # "panel/element" -> text set with set_text (not saved: it can be anything)
 var _focus := ""  # "panel/element" of the input box that typing goes to
@@ -227,7 +228,7 @@ func setup() -> String:
 	register("ui_scroll", _scroll_command, "scroll a text element with scroll: id_panel, id_element, lines (more goes back, fewer forward; 0 for the newest)")
 	register("ui_element_add", _element_add, "add an element to a panel: id_panel, element ({type: text|button|input|box|toggle|slider|row|column|grid, id, at [x,y] or in a flow, ...}), optional parent (a row, column or grid's id), index")
 	register("ui_element_update", _element_update, "change an element's fields: id_panel, id_element, then the fields")
-	register("ui_element_remove", _element_remove, "remove an element: id_panel, id_element")
+	register("ui_element_remove", _element_remove, "remove an element: id_panel, id_element (or ids: a list of them, the window built once)")
 	register("ui_press", _press_command, "press a button or toggle, as if pointed at and clicked: id_panel, id_element")
 	register("ui_slide", _slide_command, "set a slider and run its action: id_panel, id_element, value")
 	register("ui_type", _type_command, "type text into the selected input box: text, optional id_panel and id_element to pick the box")
@@ -286,6 +287,7 @@ func _tell(id_panel: String) -> void:
 # The wrist panel, laser and ray hang off the controllers, not this node, so
 # they are removed by hand when the module goes.
 func _exit_tree() -> void:
+	_save_now()  # a change made this frame isn't lost
 	for node in _holders.values() + [_ray, _laser, _home_ghost]:
 		if node and is_instance_valid(node):
 			node.queue_free()
@@ -1244,6 +1246,19 @@ func _element_remove(request: Dictionary) -> Dictionary:
 	var index := _index_of(str(request.get("id_panel")))
 	if index == -1:
 		return {"ok": false, "error": "no panel \"%s\" (ui_list shows them)" % str(request.get("id_panel"))}
+	if request.has("ids"):  # several at once: the window is built (and saved) once, not once per element
+		if typeof(request["ids"]) != TYPE_ARRAY:
+			return {"ok": false, "error": "\"ids\" must be a list of element ids"}
+		var removed := []
+		var missing := []
+		for id in request["ids"]:
+			if _remove_in(panels[index]["elements"], str(id)):
+				removed.append(str(id))
+			else:
+				missing.append(str(id))
+		if removed.is_empty():
+			return {"ok": false, "error": "none of those elements are on panel \"%s\" (ui_get shows them)" % panels[index]["id_panel"]}
+		return _changed(panels[index]["id_panel"], {"ok": true, "removed": removed, "missing": missing})
 	if not _remove_in(panels[index]["elements"], str(request.get("id_element"))):
 		return {"ok": false, "error": "no element \"%s\" on panel \"%s\" (ui_get shows them)" % [str(request.get("id_element")), panels[index]["id_panel"]]}
 	return _changed(panels[index]["id_panel"], {"ok": true, "removed": str(request.get("id_element"))})
@@ -2948,7 +2963,20 @@ func _bring_over_old_menu() -> void:
 	_save()
 
 
+# Writing the file is slow on the headset, and a burst of changes (start-up,
+# a module building its window) used to write it once per change; now it's
+# written once, at the end of the frame, however many things changed.
 func _save() -> void:
+	if _save_queued:
+		return
+	_save_queued = true
+	_save_now.call_deferred()
+
+
+func _save_now() -> void:
+	if not _save_queued:
+		return
+	_save_queued = false
 	var file := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
 	if file == null:
 		push_error("Slopitect ui: could not save %s (%s)" % [SAVE_PATH, error_string(FileAccess.get_open_error())])

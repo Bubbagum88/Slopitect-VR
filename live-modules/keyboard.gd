@@ -280,16 +280,16 @@ func _status(_request: Dictionary) -> Dictionary:
 	return {"ok": true, "typing_into": _target(_shown()), "layout": _layout, "text": _line(), "shift": _shift, "collapsed": _collapsed}
 
 
-# Takes the keys off the chat window. The shift key is there whenever the window
-# has its keyboard, so a window without one costs a single call.
+# Takes the keys off the chat window, in one call (a window without them
+# just answers that none were there).
 func _strip(id_panel: String) -> void:
-	if not _run({"cmd": "ui_element_remove", "id_panel": id_panel, "id_element": "shift"}).get("ok", false):
-		return
-	for id in OTHER_IDS:
-		_run({"cmd": "ui_element_remove", "id_panel": id_panel, "id_element": id})
+	var ids := OTHER_IDS.duplicate()
 	for r in 4:
 		for c in COLS:
-			_run({"cmd": "ui_element_remove", "id_panel": id_panel, "id_element": "key_%d_%d" % [r, c]})
+			ids.append("key_%d_%d" % [r, c])
+	# All in one go: removing them one by one rebuilt the window each time
+	# (90-odd rebuilds at start-up, about a second on a PC).
+	_run({"cmd": "ui_element_remove", "id_panel": id_panel, "ids": ids})
 
 
 # The window's keys: letters and figures, then Shift, Space, Del, Clr and

@@ -83,6 +83,14 @@ func _go() -> void:
 	await _frames(3)
 	var hands = ctx["modules"].module("hands")
 	_check("hands chosen outside the game: sabers hidden", not saber.visible)
+	# Start-up speed: the made sounds wait for the first trip to the Rhythm world.
+	_check("cut sound and menu music not made at load", _beat._hit_player.stream == null and _beat._made_cut == null and _beat._calm == null)
+	_beat._want_sounds()
+	for i in 600:
+		if _beat._made_cut != null and _beat._calm != null:
+			break
+		await _frames(1)
+	_check("made on worker threads when wanted, then in use", _beat._hit_player.stream == _beat._made_cut and _beat._calm != null and _beat._cut_task < 0 and _beat._calm_task < 0)
 	var cut_sound = _beat._hit_player.stream
 	var sound_ok: bool = cut_sound is AudioStreamRandomizer and cut_sound.streams_count == 3
 	for take in (cut_sound.streams_count if sound_ok else 0):
