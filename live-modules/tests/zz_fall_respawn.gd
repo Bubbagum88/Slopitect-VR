@@ -29,10 +29,8 @@ func _go() -> void:
 	for i in 3: await get_tree().process_frame
 	var m = ctx["modules"].module("fall_respawn")
 	_check("loaded", m != null)
-	var box := Node3D.new()
-	box.name = "zz_box"
-	ctx["world"].add_child(box)
-	box.global_position = Vector3(0, 1, 0)
+	ctx["server"].run({"cmd": "spawn", "shape": "box", "name": "zz_box", "position": [0, 1, 0]})
+	var box: Node3D = ctx["world"].get_node("zz_box")
 	await get_tree().create_timer(1.6).timeout
 	_check("rest spot learned", m._seen.get("zz_box", {}).get("has_home", false), m._seen.get("zz_box"))
 	box.global_position = Vector3(0, -30, 0)

@@ -159,7 +159,7 @@ seen on the headset yet.
 | net | Batch 3b. Folder and saving through lib; `downloads/` made in `lib_ready`, `net_fetch` waits for lib. The allowed hosts still load in `setup()` so the safety list is never at its default. PC (zz_net, 10, no network) |
 | assets | Batch 3b. Its models folder is made in `lib_ready` (no copied Slopitect-folder path); `assets_get` and `assets_place` wait for lib; tools found through lib. PC (zz_assets, 9, no network) |
 | aimsg | Batch 3b. Its size loads and saves through lib's JSON helpers, once lib is there (the defaults until then). PC (zz_aimsg, 7) |
-| perf | Batch 3b. `perf_load` finds the modules folder through `lib.home()` (says it needs lib otherwise); it still notes every frame time on purpose (perf_status looks back 10 s). PC (zz_perf, 5) |
+| perf | Batch 3b. `perf_load` finds the modules folder through `lib.home()` (says it needs lib otherwise); it still notes every frame time on purpose (perf_status looks back 10 s), now without copying the history every frame; perf_config (foveation, clocks, physics ticks). PC (zz_perf, 20) |
 | audio | New (2026-10-31), written to the rules: settings in its own `settings_info()`, saved through lib; nothing per frame unless a sound follows a node, zone checks on a timer only while there are zones; buses, effects and Master's volume put back on unload. PC (zz_audio, 57) |
 | gamecube | New, written to the rules. Needs the APK's gamecoob extension (native/gamecoob). PC (zz_gamecube, 16 without a dump; the intro checks need isaac's dump) |
 | edit | New, written to the rules (no settings, UI or processing; uses files.gd's commands). PC (zz_edit, 25) |

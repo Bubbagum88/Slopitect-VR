@@ -38,6 +38,7 @@ const FINGER_R := [0.0095, 0.0095, 0.009, 0.008]
 const SPLIT := [0.45, 0.3, 0.25]  # how a finger's length splits into its three bones
 const CURL := [75.0, 95.0, 70.0]  # degrees each bone bends when fully curled
 const FOLLOW := 18.0  # how fast a finger catches up with the press
+const SETTLED := 0.001  # a finger this close to where it's going counts as there
 const INDEX_ON := 0.35  # index curl when it rests on the trigger without pulling
 const THUMB_ON := 0.75  # thumb curl when it rests on a button or the thumbstick
 
@@ -164,8 +165,17 @@ func _process(delta: float) -> void:
 		var index := lerpf(INDEX_ON, 1.0, trigger) if finger_on > 0.5 or trigger > 0.0 else 0.0
 		var targets := [THUMB_ON * thumb_on, index, held, held, held]
 		var curl: Array = h["curl"]
+		# Fingers already where they're going (a hand at rest, most of the
+		# time) aren't set again: 15 joints a hand every frame for nothing.
+		var still := true
 		for i in 5:
-			curl[i] = lerpf(curl[i], targets[i], k)
+			if absf(curl[i] - targets[i]) > SETTLED:
+				still = false
+		if still and h.get("settled", false):
+			continue
+		for i in 5:
+			curl[i] = targets[i] if still else lerpf(curl[i], targets[i], k)
+		h["settled"] = still
 		for i in 4:
 			var bones: Array = h["fingers"][i]
 			for j in 3:

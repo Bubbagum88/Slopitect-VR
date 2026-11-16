@@ -50,6 +50,29 @@ func _go() -> void:
 	_check("save_now writes the shape", saved.get("ok", false) and typeof(world) == TYPE_DICTIONARY
 		and world.get("shapes", []).any(func(s): return s.get("name") == "zz_box"), world)
 
+	# The timed autosave: the same world isn't written again; a changed one is
+	# written on a worker thread, and is on disk once that's finished.
+	var file: String = lib.world_file("world.json")
+	DirAccess.remove_absolute(file)
+	save.call("_autosave", true)
+	_check("an unchanged world isn't written again", not FileAccess.file_exists(file) and int(save.get("_task")) == -1)
+	await _r({"cmd": "move", "name": "zz_box", "position": [0, 1.5, -2]})
+	save.call("_autosave", true)
+	_check("a change is handed to a worker thread", int(save.get("_task")) != -1)
+	save.call("_finish_writing")
+	world = lib.read_json(file)
+	_check("the background write is on disk", typeof(world) == TYPE_DICTIONARY
+		and world.get("shapes", []).any(func(s): return s.get("name") == "zz_box" and is_equal_approx(float(s["position"][1]), 1.5)), world)
+	_check("and nothing half-written is left", not FileAccess.file_exists(file + ".writing"))
+	await _r({"cmd": "move", "name": "zz_box", "position": [0, 1, -2]})
+	save.call("_autosave", true)
+	saved = await _r({"cmd": "save_now"})  # waits for the background write, then writes itself
+	world = lib.read_json(file)
+	_check("save_now after a background save", saved.get("ok", false) and int(save.get("_task")) == -1
+		and world.get("shapes", []).any(func(s): return s.get("name") == "zz_box" and is_equal_approx(float(s["position"][1]), 1.0)), world)
+	var hash_now: int = save.call("_comparable", save.call("_snapshot"))
+	_check("the hash leaves out the time", hash_now == save.call("_comparable", save.call("_snapshot")))
+
 	# A part whose module isn't loaded waits, and goes back when lib says it loaded.
 	var paths_script: GDScript = loader.module("paths").get_script()
 	loader.unload("paths")

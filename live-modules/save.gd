@@ -29,7 +29,8 @@ const CHECKPOINT_PARTS := {"groups": ["multi", "get_grouping", "set_grouping"], 
 	"doors": ["doors", "get_doors", "set_doors"], "physics": ["physics", "get_physics", "set_physics"]}
 
 var _folder := ""
-var _last_saved := ""  # what world.json holds, to save only on a change
+var _last_saved := -1  # a hash of what world.json holds (without its time), to save only on a change; -1: save at the next look
+var _task := -1  # a timed autosave being written on a worker thread, or -1
 var _lib: SlopitectModule
 var _timer: Timer
 var _pending := {}  # part -> its saved value, while its module isn't loaded; kept in every save until it is
@@ -43,7 +44,7 @@ func setup() -> String:
 	set_process(false)
 	_timer = Timer.new()
 	_timer.wait_time = CHECK_SECONDS
-	_timer.timeout.connect(_autosave)
+	_timer.timeout.connect(_autosave.bind(true))
 	add_child(_timer)
 	register("save_status", _status, "what is saved: the world file, its time, how many shapes and models; and the checkpoints")
 	register("save_now", _save_command, "save the shapes and models now (it also saves by itself when they change)")
@@ -95,11 +96,13 @@ func _notification(what: int) -> void:
 	if what == NOTIFICATION_APPLICATION_PAUSED or what == NOTIFICATION_WM_CLOSE_REQUEST:
 		_ground = ""
 		_autosave()
+		_finish_writing()
 
 
 func _exit_tree() -> void:
 	_ground = ""
 	_autosave()
+	_finish_writing()
 	var landscape := instance_from_id(_ground_from) if _ground_from != 0 else null
 	if is_instance_valid(landscape) and landscape.is_connected("changed", _ground_changed):
 		landscape.disconnect("changed", _ground_changed)
@@ -262,7 +265,7 @@ func _put_models(models: Array) -> PackedStringArray:
 func _load_world() -> void:
 	var path := _folder + "/world.json"
 	if not FileAccess.file_exists(path):
-		_last_saved = ""
+		_last_saved = -1
 		return
 	var state = JSON.parse_string(FileAccess.get_file_as_string(path))
 	if typeof(state) != TYPE_DICTIONARY:
@@ -293,14 +296,20 @@ func _ground_changed() -> void:
 	_ground = ""
 
 
-# Without the time, so the same world compares the same.
-func _comparable(state: Dictionary) -> String:
+# Without the time, so the same world compares the same. A hash, worked out
+# by the engine, rather than the whole world as text: the text took most of
+# an autosave's time (and every 5 s, even with nothing changed).
+func _comparable(state: Dictionary) -> int:
 	var copy := state.duplicate()
 	copy.erase("saved")
-	return JSON.stringify(copy)
+	return copy.hash()
 
 
-func _autosave() -> void:
+# in_background (the timed autosave): the file is made and written on a
+# worker thread, so the frame only pays for looking at the world. Saves that
+# must be on disk when they return (save_now, closing, switching projects)
+# write straight away, after any background write has finished.
+func _autosave(in_background := false) -> void:
 	if _restoring or _folder.is_empty():
 		return
 	var started := Time.get_ticks_usec()
@@ -310,17 +319,41 @@ func _autosave() -> void:
 	var compared := Time.get_ticks_usec()
 	var wrote := compared
 	if now != _last_saved:
-		var problem := _write(_folder + "/world.json", state)
-		wrote = Time.get_ticks_usec()
-		if problem.is_empty():
-			_last_saved = now
+		_finish_writing()
+		if in_background:
+			_last_saved = now  # put back to -1 if the write fails
+			_task = WorkerThreadPool.add_task(_write_in_background.bind(_folder + "/world.json", state.duplicate(true)), false, "Slopitect autosave")
 		else:
-			push_error("Slopitect save: " + problem)
+			var problem := _write(_folder + "/world.json", state)
+			if problem.is_empty():
+				_last_saved = now
+			else:
+				push_error("Slopitect save: " + problem)
+		wrote = Time.get_ticks_usec()
 	if (wrote - started) / 1000.0 > SLOW_MS:
-		print("Slopitect save: autosave took %.1f ms (snapshot %.1f, compare %.1f, write %s; %d shapes, %.0f KB)" % [
+		print("Slopitect save: autosave took %.1f ms of the frame (snapshot %.1f, compare %.1f, write %s; %d shapes)" % [
 			(wrote - started) / 1000.0, (taken - started) / 1000.0, (compared - taken) / 1000.0,
-			"%.1f" % ((wrote - compared) / 1000.0) if wrote != compared else "none, unchanged",
-			state.get("shapes", []).size(), now.length() / 1024.0])
+			("%.1f" % ((wrote - compared) / 1000.0)) + (" to hand it to a worker thread" if in_background else "") if wrote != compared else "none, unchanged",
+			state.get("shapes", []).size()])
+
+
+# On a worker thread: it touches only its own copy of the world and the file.
+func _write_in_background(path: String, state: Dictionary) -> void:
+	var problem := _write(path, state)
+	if not problem.is_empty():
+		_write_failed.call_deferred(problem)
+
+
+func _write_failed(problem: String) -> void:
+	_last_saved = -1  # try again at the next look
+	push_error("Slopitect save: " + problem)
+
+
+# Waits for a background write still going, so two writes never overlap.
+func _finish_writing() -> void:
+	if _task != -1:
+		WorkerThreadPool.wait_for_task_completion(_task)
+		_task = -1
 
 
 # For the projects module: saves this world where it belongs, then switches
@@ -346,7 +379,7 @@ func use_folder(folder: String) -> String:
 			flat.resize((landscape.call("get_heights") as PackedFloat32Array).size())
 			empty["landscape"] = Marshalls.raw_to_base64(flat.to_byte_array())
 		_put_back(empty)
-		_last_saved = ""
+		_last_saved = -1
 		_autosave()
 	print("Slopitect save: now saving in %s" % folder)
 	return ""
@@ -375,9 +408,9 @@ func _waiting() -> Dictionary:
 func _save_command(_request: Dictionary) -> Dictionary:
 	if _folder.is_empty():
 		return _waiting()
-	_last_saved = ""
+	_last_saved = -1
 	_autosave()
-	return {"ok": _last_saved != "", "saved": _folder + "/world.json"}
+	return {"ok": _last_saved != -1, "saved": _folder + "/world.json"}
 
 
 func _status(_request: Dictionary) -> Dictionary:
