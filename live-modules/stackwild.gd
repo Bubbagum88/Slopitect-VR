@@ -46,6 +46,12 @@ extends SlopitectModule
 # voxel walk along the ray; walking into walls is checked against the
 # blocks. Nothing runs outside the world.
 #
+# Sounds: footsteps as you walk, by what you walk on (grass, sand, stone,
+# wood, snow, leaves, felt), a thud when you land from a jump or a fall,
+# and digging, breaking and placing sounds by block. All made in code (no
+# sound files), once, on a worker the first time you go in; played through
+# audio.gd at the spot they happen (its Effects volume).
+#
 # Signals: started(), stopped(), world_ready(), block_changed(cell, block).
 
 signal started()
@@ -90,34 +96,36 @@ const JUMP_SPEED := 6.4         # about 1.15 m up
 const REACH := 5.0              # metres you can dig and place
 const REPEAT := 0.25            # seconds between blocks while held (Build digging, placing)
 const GATHER_DIG := 0.9         # seconds of digging per point of hardness, in Gather
+const STRIDE := 0.65            # metres walked between footsteps
+const LAND_HARD := 3.0          # m/s falling: a landing this fast is heard
 
 const AIR := 0
 const DEEP := 21
 # Blocks by id (the index). tiles: [top, side, bottom] in the texture sheet.
 # hard: how long it takes to dig in Gather (-1: it can't be dug).
 const BLOCKS := [
-	{"id": "air", "name": "Air", "tiles": [0, 0, 0], "hard": 0.0, "sound": "soft"},
-	{"id": "turf", "name": "Turf", "tiles": [0, 1, 2], "hard": 0.6, "sound": "soft"},
-	{"id": "loam", "name": "Loam", "tiles": [2, 2, 2], "hard": 0.5, "sound": "soft"},
-	{"id": "slate", "name": "Slate", "tiles": [3, 3, 3], "hard": 1.5, "sound": "hard"},
-	{"id": "fieldstone", "name": "Fieldstone", "tiles": [4, 4, 4], "hard": 1.7, "sound": "hard"},
-	{"id": "sand", "name": "Sand", "tiles": [5, 5, 5], "hard": 0.5, "sound": "soft"},
+	{"id": "air", "name": "Air", "tiles": [0, 0, 0], "hard": 0.0, "sound": "grass"},
+	{"id": "turf", "name": "Turf", "tiles": [0, 1, 2], "hard": 0.6, "sound": "grass"},
+	{"id": "loam", "name": "Loam", "tiles": [2, 2, 2], "hard": 0.5, "sound": "grass"},
+	{"id": "slate", "name": "Slate", "tiles": [3, 3, 3], "hard": 1.5, "sound": "stone"},
+	{"id": "fieldstone", "name": "Fieldstone", "tiles": [4, 4, 4], "hard": 1.7, "sound": "stone"},
+	{"id": "sand", "name": "Sand", "tiles": [5, 5, 5], "hard": 0.5, "sound": "sand"},
 	{"id": "log", "name": "Log", "tiles": [7, 6, 7], "hard": 1.0, "sound": "wood"},
-	{"id": "canopy", "name": "Canopy", "tiles": [8, 8, 8], "hard": 0.25, "sound": "soft"},
+	{"id": "canopy", "name": "Canopy", "tiles": [8, 8, 8], "hard": 0.25, "sound": "leaves"},
 	{"id": "boards", "name": "Boards", "tiles": [9, 9, 9], "hard": 1.0, "sound": "wood"},
-	{"id": "brick", "name": "Brick", "tiles": [10, 10, 10], "hard": 1.7, "sound": "hard"},
-	{"id": "snow", "name": "Snow", "tiles": [11, 11, 11], "hard": 0.4, "sound": "soft"},
-	{"id": "ember_ore", "name": "Ember ore", "tiles": [12, 12, 12], "hard": 2.2, "sound": "hard"},
-	{"id": "skyshard", "name": "Skyshard", "tiles": [13, 13, 13], "hard": 2.6, "sound": "hard"},
-	{"id": "lamp", "name": "Lamp", "tiles": [14, 14, 14], "hard": 0.6, "sound": "hard", "glow": true},
-	{"id": "felt_red", "name": "Red felt", "tiles": [15, 15, 15], "hard": 0.4, "sound": "soft"},
-	{"id": "felt_blue", "name": "Blue felt", "tiles": [16, 16, 16], "hard": 0.4, "sound": "soft"},
-	{"id": "felt_yellow", "name": "Yellow felt", "tiles": [17, 17, 17], "hard": 0.4, "sound": "soft"},
-	{"id": "felt_green", "name": "Green felt", "tiles": [18, 18, 18], "hard": 0.4, "sound": "soft"},
-	{"id": "felt_white", "name": "White felt", "tiles": [19, 19, 19], "hard": 0.4, "sound": "soft"},
-	{"id": "felt_black", "name": "Black felt", "tiles": [20, 20, 20], "hard": 0.4, "sound": "soft"},
-	{"id": "rushes", "name": "Rushes", "tiles": [22, 22, 22], "hard": 0.3, "sound": "soft"},
-	{"id": "deepstone", "name": "Deepstone", "tiles": [21, 21, 21], "hard": -1.0, "sound": "hard"},
+	{"id": "brick", "name": "Brick", "tiles": [10, 10, 10], "hard": 1.7, "sound": "stone"},
+	{"id": "snow", "name": "Snow", "tiles": [11, 11, 11], "hard": 0.4, "sound": "snow"},
+	{"id": "ember_ore", "name": "Ember ore", "tiles": [12, 12, 12], "hard": 2.2, "sound": "stone"},
+	{"id": "skyshard", "name": "Skyshard", "tiles": [13, 13, 13], "hard": 2.6, "sound": "stone"},
+	{"id": "lamp", "name": "Lamp", "tiles": [14, 14, 14], "hard": 0.6, "sound": "stone", "glow": true},
+	{"id": "felt_red", "name": "Red felt", "tiles": [15, 15, 15], "hard": 0.4, "sound": "cloth"},
+	{"id": "felt_blue", "name": "Blue felt", "tiles": [16, 16, 16], "hard": 0.4, "sound": "cloth"},
+	{"id": "felt_yellow", "name": "Yellow felt", "tiles": [17, 17, 17], "hard": 0.4, "sound": "cloth"},
+	{"id": "felt_green", "name": "Green felt", "tiles": [18, 18, 18], "hard": 0.4, "sound": "cloth"},
+	{"id": "felt_white", "name": "White felt", "tiles": [19, 19, 19], "hard": 0.4, "sound": "cloth"},
+	{"id": "felt_black", "name": "Black felt", "tiles": [20, 20, 20], "hard": 0.4, "sound": "cloth"},
+	{"id": "rushes", "name": "Rushes", "tiles": [22, 22, 22], "hard": 0.3, "sound": "cloth"},
+	{"id": "deepstone", "name": "Deepstone", "tiles": [21, 21, 21], "hard": -1.0, "sound": "stone"},
 ]
 const TILE_COLS := 8
 const TILE_ROWS := 3
@@ -193,6 +201,7 @@ var _feet := 0.0                # land space
 var _vy := 0.0
 var _on_ground := false
 var _last_xz := Vector2.INF
+var _stride := 0.0              # metres walked since the last footstep
 var _trigger := false
 var _dig_cell = null            # Vector3i being dug, or null
 var _dig_t := 0.0
@@ -206,6 +215,7 @@ var _hand_block: MeshInstance3D
 var _wrist: Label3D
 var _hidden_boxes: Array = []
 var _sounds := {}
+var last_sound := ""            # the last one played, for tests and the agent
 var _sounds_task := -1
 var _players: Array = []        # without audio.gd
 var _next_player := 0
@@ -358,6 +368,9 @@ func on_action(action: String, down: bool) -> bool:
 			if down and _on_ground and _ready_now:
 				_vy = JUMP_SPEED
 				_on_ground = false
+				var xz := _last_xz if _last_xz != Vector2.INF else Vector2.ZERO
+				_sound("step_" + _surface(xz), Vector3(xz.x, _feet, xz.y), 0.6)
+				_sound("jump", null, 0.35)
 			return true
 		"right_b":
 			if down:
@@ -1727,7 +1740,13 @@ func _body(delta: float) -> void:
 		var shift := fix - xz
 		origin.global_position += Vector3(shift.x, 0.0, shift.y)
 		xz = fix
+	var moved := xz.distance_to(_last_xz)
 	_last_xz = xz
+	if _on_ground and moved < 1.0:  # a jump of more than a metre is a teleport, not a step
+		_stride += moved
+		if _stride >= STRIDE:
+			_stride = 0.0
+			_sound("step_" + _surface(xz), Vector3(xz.x, _feet, xz.y), 0.55)
 	var ground := _ground_under(xz, _feet + STEP_UP)
 	if _vy > 0.0 or ground < _feet - 0.01:
 		_vy -= GRAVITY * delta
@@ -1741,6 +1760,9 @@ func _body(delta: float) -> void:
 						next = _feet
 		if next <= ground:
 			next = ground
+			if _vy < -LAND_HARD:
+				_sound("step_" + _surface(xz, ground), Vector3(xz.x, ground, xz.y), clampf(-_vy / 10.0, 0.5, 1.0), 0.75)
+				_stride = 0.0
 			_vy = 0.0
 			_on_ground = true
 		else:
@@ -1754,6 +1776,17 @@ func _body(delta: float) -> void:
 		_place_land(_spawn)  # fell out of the world: back to the start
 		return
 	origin.global_position.y = _land.global_position.y + _feet
+
+
+# What you stand on, for the footsteps: the block under your feet (or
+# under the edge of you that's on something).
+func _surface(xz: Vector2, feet := NAN) -> String:
+	var y := floori((_feet if is_nan(feet) else feet) - 0.05)
+	for o in [Vector2.ZERO, Vector2(BODY_R, 0), Vector2(-BODY_R, 0), Vector2(0, BODY_R), Vector2(0, -BODY_R)]:
+		var b := block_at(floori(xz.x + o.x), y, floori(xz.y + o.y))
+		if b != AIR:
+			return BLOCKS[b]["sound"]
+	return "grass"
 
 
 # --- Your hands: pointing, digging, placing ---------------------------------------
@@ -1825,7 +1858,7 @@ func _hands(delta: float) -> void:
 		elif hard >= 0.0:
 			var need := maxf(0.15, hard * GATHER_DIG)
 			if int(_dig_t * 4.0) != int((_dig_t - delta) * 4.0):
-				_sound(BLOCKS[block_at(cell.x, cell.y, cell.z)]["sound"], Vector3(cell) + Vector3.ONE * 0.5, 0.5)
+				_sound("dig_" + BLOCKS[block_at(cell.x, cell.y, cell.z)]["sound"], Vector3(cell) + Vector3.ONE * 0.5, 0.7)
 				if _controls:
 					_controls.call("pulse", "right", 0.15, 0.03)
 			if _dig_t >= need:
@@ -1859,7 +1892,7 @@ func _dig_now() -> void:
 		counts[BLOCKS[b]["id"]] = int(counts.get(BLOCKS[b]["id"], 0)) + 1
 		if int(counts[BLOCKS[b]["id"]]) == 1 and int(counts.get(BLOCKS[selected]["id"], 0)) == 0:
 			_choose(b)  # the first block you gather goes in your hand
-	_sound("break", Vector3(cell) + Vector3.ONE * 0.5, 0.8)
+	_sound("break_" + BLOCKS[b]["sound"], Vector3(cell) + Vector3.ONE * 0.5, 0.9)
 	if _controls:
 		_controls.call("pulse", "right", 0.35, 0.05)
 	_dig_cell = null
@@ -1887,7 +1920,7 @@ func _place_now() -> void:
 		if int(counts[key]) == 0:
 			counts.erase(key)
 	set_block(cell, selected)
-	_sound("place", Vector3(cell) + Vector3.ONE * 0.5, 0.8)
+	_sound("place_" + BLOCKS[selected]["sound"], Vector3(cell) + Vector3.ONE * 0.5, 0.9)
 	if _controls:
 		_controls.call("pulse", "right", 0.25, 0.04)
 	_update_hud()
@@ -2147,14 +2180,33 @@ func _want_sounds() -> void:
 		_sounds_task = WorkerThreadPool.add_task(_make_sounds, false, "stackwild sounds")
 
 
+# Each surface has its own steps, digging, breaking and placing: short
+# bursts of filtered noise (grainy for sand, crunchy for snow), with a low
+# knock for wood and a click for stone. Made once, on a worker, the first
+# time you go into the world.
+const MATERIALS := {
+	# low: noise filter (Hz); decay: how fast it dies; tone: knock pitch (0: none);
+	# grain: how crackly (0 smooth to 1 all crackle); len: seconds of a step
+	"grass": {"low": 1700.0, "decay": 34.0, "tone": 0.0, "grain": 0.55, "len": 0.15},
+	"sand": {"low": 5200.0, "decay": 26.0, "tone": 0.0, "grain": 0.85, "len": 0.17},
+	"stone": {"low": 3600.0, "decay": 55.0, "tone": 230.0, "grain": 0.2, "len": 0.1},
+	"wood": {"low": 1300.0, "decay": 38.0, "tone": 150.0, "grain": 0.1, "len": 0.13},
+	"snow": {"low": 2600.0, "decay": 22.0, "tone": 0.0, "grain": 0.92, "len": 0.18},
+	"leaves": {"low": 3000.0, "decay": 20.0, "tone": 0.0, "grain": 0.7, "len": 0.2},
+	"cloth": {"low": 800.0, "decay": 30.0, "tone": 0.0, "grain": 0.3, "len": 0.13},
+}
+
+
 func _make_sounds() -> void:
 	var made := {}
-	made["soft"] = _thud(0.12, 900.0, 0.0, 30.0)
-	made["hard"] = _thud(0.1, 3200.0, 0.0, 45.0)
-	made["wood"] = _thud(0.13, 1600.0, 300.0, 32.0)
-	made["break"] = _thud(0.28, 2200.0, 0.0, 12.0, true)
-	made["place"] = _thud(0.09, 2600.0, 190.0, 50.0)
-	made["deny"] = _thud(0.12, 1200.0, 140.0, 25.0)
+	for m in MATERIALS:
+		var p: Dictionary = MATERIALS[m]
+		made["step_" + m] = _thud(p["len"], p["low"], p["tone"] * 0.8, p["decay"], p["grain"], 1)
+		made["dig_" + m] = _thud(p["len"] * 0.8, p["low"] * 1.2, p["tone"], p["decay"] * 1.3, p["grain"], 2)
+		made["break_" + m] = _thud(p["len"] * 2.2, p["low"] * 1.1, p["tone"] * 0.9, p["decay"] * 0.45, maxf(p["grain"], 0.6), 3)
+		made["place_" + m] = _thud(p["len"] * 0.9, p["low"] * 0.8, maxf(p["tone"], 120.0), p["decay"] * 1.1, p["grain"] * 0.6, 4)
+	made["jump"] = _thud(0.12, 900.0, 0.0, 30.0, 0.3, 5)
+	made["deny"] = _thud(0.12, 1200.0, 140.0, 25.0, 0.0, 6)
 	_sounds_made.call_deferred(made)
 
 
@@ -2165,25 +2217,30 @@ func _sounds_made(made: Dictionary) -> void:
 	_sounds = made
 
 
-# A short knock: filtered noise (crumbly for a break) and maybe a low tone.
-func _thud(seconds: float, low_hz: float, tone_hz: float, decay: float, crumble := false) -> AudioStreamWAV:
+# A short block sound: filtered noise, more or less crackly (grain), and
+# maybe a low knock that falls in pitch. 22 kHz, 16-bit mono.
+func _thud(seconds: float, low_hz: float, tone_hz: float, decay: float, grain: float, salt: int) -> AudioStreamWAV:
 	var rate := 22050
 	var count := int(rate * seconds)
 	var data := PackedByteArray()
 	data.resize(count * 2)
 	var rng := RandomNumberGenerator.new()
-	rng.seed = int(low_hz + tone_hz * 7.0 + decay * 13.0)
-	var k := 1.0 - exp(-TAU * low_hz / rate)
+	rng.seed = int(low_hz * 3.0 + tone_hz * 7.0 + decay * 13.0) + salt * 7919
+	var k := 1.0 - exp(-TAU * minf(low_hz, 9000.0) / rate)
 	var low := 0.0
+	var phase := 0.0
 	for i in count:
 		var t := float(i) / rate
 		var n := rng.randf_range(-1.0, 1.0)
-		if crumble and rng.randf() < 0.75:
-			n *= 0.2
-		var v := n * exp(-decay * t) + sin(TAU * tone_hz * t) * 0.6 * exp(-decay * 1.3 * t)
-		v *= minf(1.0, (seconds - t) / 0.02)
+		if rng.randf() < grain * 0.8:
+			n *= 0.15  # gaps between the grains: a crunch instead of a hiss
+		var v := n * exp(-decay * t) * minf(1.0, t / 0.002)
+		if tone_hz > 0.0:
+			phase += tone_hz * (1.0 - 0.35 * t / seconds) / rate
+			v += sin(TAU * phase) * 0.7 * exp(-decay * 1.2 * t)
+		v *= minf(1.0, (seconds - t) / 0.015)
 		low += (v - low) * k
-		data.encode_s16(i * 2, clampi(int(tanh(low * 1.5) * 28000.0), -32768, 32767))
+		data.encode_s16(i * 2, clampi(int(tanh(low * 1.6) * 28000.0), -32768, 32767))
 	var wav := AudioStreamWAV.new()
 	wav.format = AudioStreamWAV.FORMAT_16_BITS
 	wav.mix_rate = rate
@@ -2192,11 +2249,12 @@ func _thud(seconds: float, low_hz: float, tone_hz: float, decay: float, crumble 
 	return wav
 
 
-func _sound(kind: String, at, volume: float) -> void:
+func _sound(kind: String, at, volume: float, pitch_scale := 1.0) -> void:
 	if not settings["sounds"] or not _sounds.has(kind):
 		return
 	var stream: AudioStream = _sounds[kind]
-	var pitch := randf_range(0.9, 1.1)
+	last_sound = kind
+	var pitch := randf_range(0.88, 1.12) * pitch_scale  # no two steps quite the same
 	if _audio and is_instance_valid(_audio):
 		if at is Vector3 and _land != null:
 			_audio.call("play_at", stream, _land.to_global(at), {"bus": "effects", "volume": volume, "pitch": pitch})

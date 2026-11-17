@@ -206,6 +206,7 @@ func _go() -> void:
 			var t: int = _g._top_at(x, z)
 			kinds[_g.block_at(x, t - 1, z)] = true
 	_check("turf and trees on top", kinds.has(1) and kinds.has(7), kinds.keys())
+	_check("sounds made on the way in: steps, digging, breaking, placing for each surface", _g._sounds.size() == 30 and _g._sounds.has("step_wood") and _g._sounds.has("break_sand"), _g._sounds.size())
 	var window := _run({"cmd": "ui_get", "id_panel": "stackwild"})
 	_check("the window opens with the world", window.get("ok", false) and window["panel"].get("visible", false))
 	await _shot_panel("lobby", "stackwild")
@@ -245,6 +246,7 @@ func _go() -> void:
 	await _frames(2)
 	var meshed_before: int = _g._meshed
 	await _press("right", "trigger_click")
+	_check("breaking boards sounds like wood", _g.last_sound == "break_wood", _g.last_sound)
 	_check("trigger digs the block you point at", _g.block_at(target.x, target.y, target.z) == 0, _g.block_at(target.x, target.y, target.z))
 	await _wait_built()
 	_check("its section is made again", _g._meshed > meshed_before)
@@ -296,12 +298,24 @@ func _go() -> void:
 	_stand(cx + 1.5, cz - 1.5)
 	await _wait(0.6)
 	_check("off the edge you fall to the floor", absf(_g._feet - gy) < 0.05 and _g._on_ground, _g._feet)
-	# A: jump.
+	# Footsteps: walking on the boards sounds like wood.
+	_g.last_sound = ""
+	for i in 12:
+		origin.global_position += Vector3(0.1, 0, 0)
+		await _frames(1)
+	_check("walking on boards: wooden footsteps", _g.last_sound == "step_wood", _g.last_sound)
+	origin.global_position += Vector3(-1.2, 0, 0)
+	_g._last_xz = Vector2.INF
+	await _frames(2)
+	# A: jump, and a thud when you land.
+	_g.last_sound = ""
 	await _press("right", "ax_button")
+	_check("a jump is heard", _g.last_sound == "jump", _g.last_sound)
 	await _wait(0.15)
 	var up: float = _g._feet - gy
 	await _wait(0.9)
 	_check("A jumps up and you come down", up > 0.4 and absf(_g._feet - gy) < 0.05, [up, _g._feet])
+	_check("landing thuds on the boards", _g.last_sound == "step_wood", _g.last_sound)
 
 	# Gather: digging takes a while and fills your pack.
 	_run({"cmd": "stackwild_set", "mode": "gather"})
