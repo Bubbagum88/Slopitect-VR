@@ -160,6 +160,9 @@ Connecting to the headset over Wi-Fi, syncing modules and reading the log:
   GitHub (step 5), resource packs for upgrades while playing (step 9).
 - **VR UI revamp** ([VR-UI.md](VR-UI.md)): PC-tested; needs the headset
   test (text sizes, hover, haptics, follow panels).
+- **Stackwild** (`stackwild.gd`, the block game, 2026-11-17): PC-tested only
+  (zz_stackwild 60/60). Needs the headset test: frame rate on a medium world,
+  how 1 m blocks feel, walking up steps and falling, the reach of the beam.
 - **Not started:** more shapes (lathe, extrude),
   an asset library, a safe browser, the game-asset extraction catalogue
   (drafted, never committed).
