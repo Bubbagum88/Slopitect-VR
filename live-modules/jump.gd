@@ -9,7 +9,6 @@ const GRAVITY := 9.8
 const JUMP_SPEED := 4.8  # m/s up: about 1.2 m, enough for a 1 m box
 const FLY_SPEED := 3.0  # m/s up or down while flying
 const STEP := 0.6  # a step up or down this high is walked, taller falls
-const SCAN_EVERY := 0.25  # seconds between looks at the world's things
 const NONE := -1000.0
 
 var _origin: Node3D = null
@@ -20,14 +19,30 @@ var _can_fly := false  # a second A press in the air starts flying
 var _flying := false
 var _a_down := false  # right A held
 var _b_down := false  # right B held
-var _boxes: Array = []  # world-space boxes of the things in the world
-var _scan_left := 0.0
+var _boxes: Array = []  # world-space boxes of the things in the world, made when _top_under asks
+var _lib: SlopitectModule
+var _landscape: SlopitectModule  # through lib, rather than looking it up every frame
 var _last_a := -10000  # ticks of the last A press while flying
 
 
 func setup() -> String:
 	set_process_priority(100)
 	return ""
+
+
+func lib_ready(lib) -> void:
+	_lib = lib
+	_landscape = null
+	if lib != null:
+		lib.watch(self, "landscape", _landscape_here, _landscape_gone)
+
+
+func _landscape_here(landscape: SlopitectModule) -> void:
+	_landscape = landscape
+
+
+func _landscape_gone(_old: SlopitectModule) -> void:
+	_landscape = null
 
 
 func on_action(action: String, down: bool) -> bool:
@@ -88,10 +103,6 @@ func _process(delta: float) -> void:
 	# Moved by something else (a teleport): take the new height.
 	if not _air and not _flying and absf(_origin.global_position.y - _feet) > 0.3:
 		_feet = _origin.global_position.y
-	_scan_left -= delta
-	if _scan_left <= 0.0:
-		_scan_left = SCAN_EVERY
-		_scan()
 	var head := camera.global_position
 	var target := _ground(head.x, head.z)
 	if _flying:
@@ -127,14 +138,17 @@ func _fly(delta: float, target: float) -> void:
 
 
 func _ground(x: float, z: float) -> float:
-	var landscape: SlopitectModule = ctx["modules"].module("landscape")
-	if landscape and landscape.call("inside", x, z):
+	var landscape: SlopitectModule = _landscape if _lib else ctx["modules"].module("landscape")
+	if landscape and is_instance_valid(landscape) and landscape.call("inside", x, z):
 		return float(landscape.call("height_at", x, z))
 	return 0.0
 
 
 # The highest top of a thing under (x, z) that is not above limit, or NONE.
+# Nothing calls it yet (standing on things isn't joined up to _process), so
+# the world's boxes are measured when it's asked, not four times a second.
 func _top_under(x: float, z: float, limit: float) -> float:
+	_scan()
 	var best := NONE
 	for b in _boxes:
 		var box: AABB = b

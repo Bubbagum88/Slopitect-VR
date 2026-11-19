@@ -76,6 +76,21 @@ func _go() -> void:
 	await _frames(30)
 	_check("controls back: moving", hands.is_processing())
 	_check("grip curls the fingers", _curl(left) > before + 0.5, [before, _curl(left)])
+	# Settled fingers aren't set again every frame; a new press moves them again.
+	await get_tree().create_timer(1.0).timeout
+	var h: Dictionary = hands.get("_hands")[0]
+	_check("fingers at rest count as settled", h.get("settled", false))
+	var bone: Node3D = h["fingers"][1][0]
+	var curled := bone.rotation.x
+	bone.rotation.x = 0.123
+	await _frames(3)
+	_check("a settled hand's joints aren't set again", is_equal_approx(bone.rotation.x, 0.123), bone.rotation.x)
+	bone.rotation.x = curled
+	(h["curl"] as Array)[2] = 0.0  # as if the grip had just been squeezed
+	await _frames(1)
+	_check("a change moves them again", not h.get("settled", true))
+	await get_tree().create_timer(1.0).timeout
+	_check("and they settle again where they belong", h.get("settled", false) and is_equal_approx(bone.rotation.x, curled), [bone.rotation.x, curled])
 	ctx["modules"].unload("controls")
 
 	# Colours kept through lib.

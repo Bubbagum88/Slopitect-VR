@@ -2339,9 +2339,13 @@ func _fit_scroll(id_panel: String, id_element: String) -> void:
 # (up goes back to older lines): the text with "scroll" under the pointer,
 # or the window's only one. Its left and right still turn you.
 func _stick_scroll(hit: StaticBody3D) -> void:
-	var controls: SlopitectModule = ctx["modules"].module("controls")
-	var target := _scroll_target(hit) if controls and controls.has_method("stick") else ""
-	var y: float = controls.call("stick", "turn").y if not target.is_empty() else 0.0
+	# Only while pointing at a scrolling text: the controls module isn't looked
+	# for every physics tick (lib keeps it to hand when it's loaded).
+	var target := _scroll_target(hit)
+	var controls: SlopitectModule = null
+	if not target.is_empty():
+		controls = _lib.module("controls") if _lib else ctx["modules"].module("controls")
+	var y: float = controls.call("stick", "turn").y if controls and controls.has_method("stick") else 0.0
 	if absf(y) < STICK_DEAD:
 		_stick_lines = 0.0
 		return

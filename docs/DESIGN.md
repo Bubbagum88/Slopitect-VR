@@ -90,8 +90,8 @@ Rules that come out of this:
   the PC.
 - Redraw only on change, keep pages small (the Library draws 12 small
   pictures at a time), and keep the frame rate at 72 Hz.
-- Planned next: `perf.gd` (foveation, 72 physics ticks a second),
-  `charts.gd`, `matrix.gd`, `shaders.gd`, then a first game.
+- `perf.gd` sets foveation and 72 physics ticks a second (2026-11-16, PC-tested).
+  Planned next: `charts.gd`, `matrix.gd`, `shaders.gd`, then a first game.
 
 ## 5. How work is done
 

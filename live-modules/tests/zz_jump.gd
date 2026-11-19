@@ -1,5 +1,5 @@
 extends SlopitectModule
-# Headless checks for jump.gd. Run: tests/run.sh controls jump lib zz_jump
+# Headless checks for jump.gd. Run: tests/run.sh controls jump lib landscape zz_jump
 var _fails := 0
 
 
@@ -38,4 +38,16 @@ func _go() -> void:
 	await get_tree().create_timer(1.5).timeout
 	_check("lands again", absf(origin.global_position.y - start) < 0.05, origin.global_position.y)
 	_check("B on the ground isn't taken", not m.on_action("right_b", true))
+	# The landscape is found through lib (not looked up every frame), and the
+	# world's boxes are only measured when asked.
+	var landscape = ctx["modules"].module("landscape")
+	_check("landscape found through lib", landscape != null and m.get("_landscape") == landscape)
+	_check("no box scan four times a second", (m.get("_boxes") as Array).is_empty())
+	ctx["server"].run({"cmd": "spawn", "shape": "box", "name": "zz_step", "position": [5, 0.5, 5]})
+	_check("boxes measured when asked", m.call("_top_under", 5.0, 5.0, 10.0) > 0.5, m.call("_top_under", 5.0, 5.0, 10.0))
+	ctx["modules"].unload("landscape")
+	await get_tree().process_frame
+	_check("landscape gone: let go", m.get("_landscape") == null)
+	await get_tree().create_timer(0.2).timeout
+	_check("still on the floor without it", absf(origin.global_position.y - start) < 0.05, origin.global_position.y)
 	_finish()

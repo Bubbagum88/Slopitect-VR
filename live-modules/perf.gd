@@ -17,10 +17,34 @@ extends SlopitectModule
 # the GPU's work aren't counted; OVR Metrics Tool shows the GPU.
 # Watching costs a little itself (two tiny calls per module per frame), so
 # it is off until perf_watch turns it on, and off again after a restart.
+#
+# It also sets how the headset draws and how fast it runs (perf_config, from
+# the PC only; kept in user://perf.json):
+#   foveation          off, low, medium or high: the edges of each eye's view,
+#                      which the lenses blur anyway, are drawn at a lower
+#                      resolution, so the graphics chip has less to do
+#   foveation_dynamic  true: the headset only lowers the edges as far as
+#                      foveation allows when the graphics chip is busy
+#   cpu_level,         power_savings, sustained_low, sustained_high or boost:
+#   gpu_level          the clock speed asked of the headset (OpenXR
+#                      performance settings); sustained_high is the fastest
+#                      the Quest can keep up without overheating
+#   physics_match_display  true: physics ticks as often as the headset shows
+#                      frames (72 a second on the Quest 1, not Godot's 60),
+#                      so things moved by physics don't judder every fifth frame
+# The APK leaves foveation off and the clocks to the headset; these are put
+# in place when the module loads and again when the VR session starts.
+# Unloading puts foveation back; clock levels can't be read back, so they
+# stay as last asked (perf_config sets them).
 
 const HISTORY := 10.0  # seconds of frame times perf_status looks back over
 const CHECK_EVERY := 1.0  # seconds between checks that the markers still fit the modules
 const EMPTY := "(markers)"  # the empty pair's name
+const SETTINGS_PATH := "user://perf.json"
+const FOVEATION := {"off": 0, "low": 1, "medium": 2, "high": 3}
+const LEVELS := {"power_savings": 0, "sustained_low": 1, "sustained_high": 2, "boost": 3}
+const DEFAULTS := {"foveation": "high", "foveation_dynamic": true, "cpu_level": "sustained_high", "gpu_level": "sustained_high",
+	"physics_match_display": true}
 
 
 # Notes when this frame reached it.
@@ -66,8 +90,16 @@ class After extends Node:
 		physics_worst = 0
 
 
-var _frame_ms := PackedFloat32Array()  # the last HISTORY seconds of frame times
+var _frame_ms := PackedFloat32Array()  # frame times; the last HISTORY seconds start at _first
 var _frame_at := PackedFloat64Array()  # when each was, in seconds
+var _first := 0  # the oldest frame still kept; older ones are cut off in one go now and then, not every frame
+var settings := DEFAULTS.duplicate()
+var _lib: SlopitectModule
+var _xr: XRInterface
+var _was_foveation := -1  # foveation as it was before this module set it, put back when it unloads
+var _was_dynamic := false
+var _was_physics_hz := 0  # physics ticks a second before this module changed them
+var _level_changes := []  # what the headset said about its clocks (it slows them when it gets hot)
 var _watching := false
 var _watch_since := 0.0
 var _pairs := {}  # module name -> [Before, After]
@@ -80,23 +112,52 @@ func setup() -> String:
 	register("perf_watch", _watch, "time each module's _process and _physics_process: on true starts (clearing what was timed), on false stops")
 	register("perf_modules", _modules, "what each module costs per frame since perf_watch started, costliest first; reset true starts the count again")
 	register("perf_load", _load_times, "how long each live module's file takes to compile (the app stalls while it runs): optional name for just one")
+	register("perf_config", _config, "from the PC only: any of foveation (off, low, medium, high: the edges of the view drawn at lower resolution), foveation_dynamic (true: only when the graphics chip is busy), cpu_level and gpu_level (power_savings, sustained_low, sustained_high, boost), physics_match_display (true: physics ticks at the headset's frame rate), or reset true")
+	_was_physics_hz = Engine.physics_ticks_per_second
+	_xr = XRServer.find_interface("OpenXR")
+	if _xr != null:
+		_was_foveation = int(_xr.get("foveation_level"))
+		_was_dynamic = bool(_xr.get("foveation_dynamic"))
+		_xr.connect("session_begun", _apply)
+		_xr.connect("refresh_rate_changed", _refresh_changed)
+		_xr.connect("cpu_level_changed", _cpu_level_changed)
+		_xr.connect("gpu_level_changed", _gpu_level_changed)
+	_apply()
 	return ""
+
+
+func lib_ready(lib) -> void:
+	_lib = lib
+	if lib != null:
+		_load()
+		_apply()
 
 
 func _exit_tree() -> void:
 	_remove_markers()
+	if _xr != null and is_instance_valid(_xr):
+		for pair in [["session_begun", _apply], ["refresh_rate_changed", _refresh_changed], ["cpu_level_changed", _cpu_level_changed], ["gpu_level_changed", _gpu_level_changed]]:
+			if _xr.is_connected(pair[0], pair[1]):
+				_xr.disconnect(pair[0], pair[1])
+		if _xr.is_initialized() and _was_foveation >= 0:
+			_xr.set("foveation_level", _was_foveation)
+			_xr.set("foveation_dynamic", _was_dynamic)
+	if _was_physics_hz > 0:
+		Engine.physics_ticks_per_second = _was_physics_hz
 
 
 func _process(delta: float) -> void:
 	var now := Time.get_ticks_msec() / 1000.0
 	_frame_ms.append(delta * 1000.0)
 	_frame_at.append(now)
-	var old := 0
-	while old < _frame_at.size() and _frame_at[old] < now - HISTORY:
-		old += 1
-	if old > 0:
-		_frame_ms = _frame_ms.slice(old)
-		_frame_at = _frame_at.slice(old)
+	while _first < _frame_at.size() and _frame_at[_first] < now - HISTORY:
+		_first += 1
+	# Copying the kept frames down every frame made new arrays 72 times a
+	# second; once the old ones are as many as the kept ones is enough.
+	if _first > 0 and _first * 2 >= _frame_at.size():
+		_frame_ms = _frame_ms.slice(_first)
+		_frame_at = _frame_at.slice(_first)
+		_first = 0
 	if _watching:
 		_check_in -= delta
 		if _check_in <= 0.0:
@@ -158,6 +219,111 @@ func _remove_markers() -> void:
 	_layout = ""
 
 
+# --- How the headset draws and how fast it runs ------------------------------------
+
+func _apply() -> void:
+	if _xr == null or not is_instance_valid(_xr) or not _xr.is_initialized():
+		return  # no headset (a PC test): nothing to set
+	_xr.set("foveation_level", FOVEATION[settings["foveation"]])
+	_xr.set("foveation_dynamic", settings["foveation_dynamic"])
+	_xr.call("set_cpu_level", LEVELS[settings["cpu_level"]])
+	_xr.call("set_gpu_level", LEVELS[settings["gpu_level"]])
+	var refresh := roundi(float(_xr.call("get_display_refresh_rate")))
+	if settings["physics_match_display"] and refresh >= 30 and refresh <= 144:
+		Engine.physics_ticks_per_second = refresh
+	elif _was_physics_hz > 0:
+		Engine.physics_ticks_per_second = _was_physics_hz
+	print("Slopitect perf: foveation %s%s (supported: %s), CPU %s, GPU %s, physics %d a second" % [settings["foveation"],
+		" when busy" if settings["foveation_dynamic"] else "", _xr.call("is_foveation_supported"), settings["cpu_level"], settings["gpu_level"],
+		Engine.physics_ticks_per_second])
+
+
+func _refresh_changed(_rate: float) -> void:
+	_apply()
+
+
+func _headset() -> Dictionary:
+	var out := {"foveation": settings["foveation"], "foveation_dynamic": settings["foveation_dynamic"],
+		"cpu_level": settings["cpu_level"], "gpu_level": settings["gpu_level"], "physics_match_display": settings["physics_match_display"],
+		"level_changes": _level_changes}
+	if _xr != null and is_instance_valid(_xr) and _xr.is_initialized():
+		out["foveation_supported"] = _xr.call("is_foveation_supported")
+		out["foveation_now"] = FOVEATION.find_key(int(_xr.get("foveation_level")))
+	else:
+		out["foveation_now"] = "no headset"
+	return out
+
+
+func _cpu_level_changed(sub_domain: int, from_level: int, to_level: int) -> void:
+	_level_changed("CPU", sub_domain, from_level, to_level)
+
+
+func _gpu_level_changed(sub_domain: int, from_level: int, to_level: int) -> void:
+	_level_changed("GPU", sub_domain, from_level, to_level)
+
+
+# The headset says when it's near its limits (or too hot): kept for perf_status and logged.
+func _level_changed(chip: String, sub_domain: int, from_level: int, to_level: int) -> void:
+	var names := ["normal", "warning", "impaired"]
+	var domains := ["compositing", "rendering", "thermal"]
+	var note := "%s %s: %s to %s" % [chip, domains[sub_domain] if sub_domain < domains.size() else str(sub_domain),
+		names[from_level] if from_level < names.size() else str(from_level), names[to_level] if to_level < names.size() else str(to_level)]
+	print("Slopitect perf: the headset says " + note)
+	_level_changes.append({"at": Time.get_datetime_string_from_system(), "what": note})
+	if _level_changes.size() > 20:
+		_level_changes.pop_front()
+
+
+func _config(request: Dictionary) -> Dictionary:
+	if request.get("reset", false) == true:
+		settings = DEFAULTS.duplicate()
+	else:
+		var changed := settings.duplicate()
+		for key in request:
+			if key in ["cmd", "id"]:
+				continue
+			var value = request[key]
+			match key:
+				"foveation":
+					if not value in FOVEATION:
+						return {"ok": false, "error": "\"foveation\" must be one of: " + ", ".join(FOVEATION.keys())}
+				"foveation_dynamic", "physics_match_display":
+					if typeof(value) == TYPE_STRING and value in ["true", "false"]:
+						value = value == "true"
+					if typeof(value) != TYPE_BOOL:
+						return {"ok": false, "error": "\"%s\" must be true or false" % key}
+				"cpu_level", "gpu_level":
+					if not value in LEVELS:
+						return {"ok": false, "error": "\"%s\" must be one of: %s" % [key, ", ".join(LEVELS.keys())]}
+				_:
+					return {"ok": false, "error": "perf_config takes foveation, foveation_dynamic, cpu_level, gpu_level, physics_match_display or reset"}
+			changed[key] = value
+		settings = changed
+	_apply()
+	var problem: String = _lib.write_json(SETTINGS_PATH, settings, "\t") if _lib else "the lib module isn't loaded, so it isn't kept after a restart"
+	var reply := {"ok": true, "headset": _headset()}
+	if not problem.is_empty():
+		reply["note"] = problem
+	return reply
+
+
+func _load() -> void:
+	if not FileAccess.file_exists(SETTINGS_PATH):
+		return
+	var saved = _lib.read_json(SETTINGS_PATH)
+	if typeof(saved) != TYPE_DICTIONARY:
+		push_error("Slopitect perf: %s isn't readable; using the defaults" % SETTINGS_PATH)
+		return
+	if saved.get("foveation") in FOVEATION:
+		settings["foveation"] = saved["foveation"]
+	for key in ["foveation_dynamic", "physics_match_display"]:
+		if typeof(saved.get(key)) == TYPE_BOOL:
+			settings[key] = saved[key]
+	for key in ["cpu_level", "gpu_level"]:
+		if saved.get(key) in LEVELS:
+			settings[key] = saved[key]
+
+
 # --- Commands ----------------------------------------------------------------------
 
 func _status(_request: Dictionary) -> Dictionary:
@@ -168,7 +334,7 @@ func _status(_request: Dictionary) -> Dictionary:
 	if refresh <= 0.0:
 		refresh = maxf(DisplayServer.screen_get_refresh_rate(), 0.0)  # -1 when it can't tell
 	var budget := 1000.0 / refresh if refresh > 0.0 else 0.0
-	var sorted := _frame_ms.duplicate()
+	var sorted := _frame_ms.slice(_first)
 	sorted.sort()
 	var count := sorted.size()
 	var total := 0.0
@@ -206,6 +372,7 @@ func _status(_request: Dictionary) -> Dictionary:
 			"device_free": mb.call(memory.get("available", memory.get("free", 0))),
 			"device_total": mb.call(memory.get("physical", 0))},
 		"modules": _loaded_modules().size(),
+		"headset": _headset(),
 		"watching": _watching}
 
 
